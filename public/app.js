@@ -598,8 +598,10 @@ function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
   const parentBusy = parent.state === 'working' || parent.children.some((c) => c.phase === 'running');
   const row = ({ c, i, child }, single) => {
     const model = child?.model ?? null;
-    const res = answerFor(parent, c);
-    const flag = answerFlag(c, res, parentBusy);
+    const answer = answerFor(parent, c);
+    // Cancelled before answering: show what it had started to write, flagged as cancelled.
+    const res = answer ?? (c.outcome === 'cancelled' ? child?.partial ?? null : null);
+    const flag = !answer && res ? ['cancelled', 'muted'] : answerFlag(c, res, parentBusy);
     const task = c.task ?? child?.firstPrompt ?? '';
     const elapsed = c.phase === 'running' && c.startedAt ? fmtDur(Date.now() - c.startedAt) : child?.usage.wallMs ? fmtDur(child.usage.wallMs) : '';
     const open = !compact && expandedAgents.has(c.id);
@@ -627,7 +629,45 @@ function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
 
 const convoShown = new Set();
 
+// ---------- files the session touched ----------
+const expandedFiles = new Set(), readsShown = new Set(), fileCache = new Map();
+const FILE_LABEL = { write: 'wrote', edit: 'edited', mention: 'mentioned', read: 'read' };
+function fileRow(f) {
+  const open = expandedFiles.has(f.path);
+  const subs = f.by.filter((b) => b > 0).map((b) => '#' + b).join(' ');
+  const c = fileCache.get(f.path);
+  const preview = !open ? '' : !c ? '<div class="file-note">loading…</div>'
+    : c.text !== undefined ? `<pre class="file-preview">${esc(c.text)}</pre>`
+    : `<div class="file-note">${c.binary ? 'binary file' : c.tooLarge ? `too large to preview (${Math.round(c.size / 1024)} KB)` : esc(c.error ?? 'not available')}</div>`;
+  return `<div class="file ${open ? 'open' : ''} ${f.exists ? '' : 'missing'}" ${f.exists ? `data-file="${esc(f.path)}"` : ''}>
+    <div class="file-head"><span class="file-act ${f.action}">${FILE_LABEL[f.action]}</span><span class="file-path" title="${esc(f.path)}">${esc(f.rel)}</span>${subs ? `<span class="file-by" title="written by subagent ${subs}">${subs}</span>` : ''}${f.exists ? `<a href="#" class="file-open" data-open-file="${esc(f.path)}" title="Open with the default app">↗</a>` : '<span class="file-by">deleted</span>'}</div>
+    ${preview}</div>`;
+}
+function filesSection(id, files) {
+  if (!files?.length) return '';
+  const main = files.filter((f) => f.action !== 'read'), reads = files.filter((f) => f.action === 'read');
+  const showReads = readsShown.has(id) || !main.length;
+  return `<div class="section-title">files</div><div class="files">${main.map(fileRow).join('')}
+    ${reads.length ? (showReads ? reads.map(fileRow).join('') + (main.length ? `<a href="#" class="files-more" data-toggle-reads="${id}">hide read files</a>` : '') : `<a href="#" class="files-more" data-toggle-reads="${id}">${reads.length} read</a>`) : ''}</div>`;
+}
+async function toggleFile(path) {
+  const id = state.selected;
+  if (expandedFiles.has(path)) expandedFiles.delete(path);
+  else {
+    expandedFiles.add(path);
+    fileCache.delete(path); // re-read: the agent may have changed it
+    fetch(`/api/sessions/${id}/file?path=${encodeURIComponent(path)}`).then((r) => r.json()).then((j) => { fileCache.set(path, j); lastTranscriptKey = ''; loadTranscript(id, true); });
+  }
+  lastTranscriptKey = ''; loadTranscript(id, true);
+}
+
 $('#transcript').addEventListener('click', (e) => {
+  const opener = e.target.closest('[data-open-file]');
+  if (opener) { e.preventDefault(); return post(`/api/sessions/${state.selected}/open-file`, { path: opener.dataset.openFile }); }
+  const reads = e.target.closest('[data-toggle-reads]');
+  if (reads) { e.preventDefault(); const id = reads.dataset.toggleReads; readsShown.has(id) ? readsShown.delete(id) : readsShown.add(id); lastTranscriptKey = ''; return loadTranscript(id, true); }
+  const file = e.target.closest('[data-file]');
+  if (file && !e.target.closest('.file-preview')) { toggleFile(file.dataset.file); return; }
   const toggle = e.target.closest('a[data-show-convo], a[data-hide-convo]');
   if (toggle) {
     e.preventDefault();
@@ -733,7 +773,7 @@ async function loadTranscript(id, quiet = false) {
   const parent = s.parentId ? sessionById(s.parentId) : s;
   const isChild = Boolean(s.parentId);
   if (parent?.children?.length && (cachedResults.key !== resultsKey(parent) || parent.children.some((c) => c.phase === 'running'))) await refreshResults(parent);
-  const events = await (await fetch(`/api/sessions/${id}/events`)).json();
+  const [events, files] = await Promise.all([fetch(`/api/sessions/${id}/events`).then((r) => r.json()), fetch(`/api/sessions/${id}/files`).then((r) => r.json()).catch(() => [])]);
   if (state.selected !== id) return; // selection changed while we were fetching: drop this render
   const termOpenKey = Boolean(s.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
   const key = id + ':' + events.length + ':' + (s.updatedAt ?? 0) + ':' + (parent?.children ?? []).map((c) => c.phase).join(',') + ':' + termOpenKey + ':' + Math.floor(Date.now() / 5000);
@@ -760,12 +800,15 @@ async function loadTranscript(id, quiet = false) {
       ${rounds.length ? rounds.map((r, i) => `<div class="round"><div class="round-q">${rounds.length > 1 ? `round ${i + 1} · ` : ''}${esc(r.message.slice(0, 200))}${r.message.length > 200 ? '…' : ''}</div><div class="answer-text">${esc(r.text)}</div></div>`).join('')
         : res ? `<div class="answer-text">${esc(res)}</div>`
         : c?.phase === 'running' ? '<div class="muted">still working</div>'
+        : c?.outcome === 'cancelled' ? `<div class="muted">cancelled before answering${s.partial ? ', it had started to write:' : ''}</div>${s.partial ? `<div class="answer-text muted">${esc(s.partial)}</div>` : ''}`
         : parent.state === 'working' ? '<div class="muted">available when the parent finishes its turn</div>'
         : '<div class="muted">no answer recorded</div>'}
     </section>
-    <div class="section-title">its conversation</div>`);
-  } else if (parent.children?.length) {
-    html.push(agentsBoard(parent));
+    `);
+    html.push(filesSection(id, files), '<div class="section-title">its conversation</div>');
+  } else {
+    if (parent.children?.length) html.push(agentsBoard(parent));
+    html.push(filesSection(id, files));
   }
   // With the terminal open you are already reading the conversation there: keep this column to what the
   // terminal does not show (subagents, tokens) unless you ask for it.
@@ -780,6 +823,7 @@ async function loadTranscript(id, quiet = false) {
     if (!isChild && ev.kind === 'tool_call' && ev.name === 'subagent' && parent.children?.length) continue; // already in the board
     const match = globalMessage?.id === id && globalMessage.index === messageIndex;
     if (ev.kind === 'user') html.push(`<div class="msg user${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? 'task from parent' : 'you'}</div><div class="text">${esc(ev.text)}</div></div>`);
+    else if (ev.kind === 'assistant' && !ev.text?.trim()) continue; // a turn step with only tool calls
     else if (ev.kind === 'assistant') html.push(`<div class="msg assistant${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? (s.subagent?.name ? ICON.threads + ' ' + esc(s.subagent.name) : 'subagent') : 'fx'}</div><div class="text">${esc(ev.text)}</div></div>`);
     else if (ev.kind === 'tool_call') {
       const st = ev.result?.status ?? 'pending';
@@ -790,7 +834,7 @@ async function loadTranscript(id, quiet = false) {
         ${ev.result ? `<pre class="label">result · ${st} · ${ev.result.bytes} bytes</pre><pre>${esc(ev.result.preview)}</pre>` : ''}
       </details>`);
     } else if (ev.kind === 'turn_completed') html.push('<hr class="turn-sep" />');
-    else if (ev.kind === 'interrupted') html.push('<div class="interrupted">■ cancelled</div>');
+    else if (ev.kind === 'interrupted') html.push(`<div class="interrupted">■ cancelled</div>${ev.partial ? `<div class="msg assistant"><div class="text muted">${esc(ev.partial)}</div></div>` : ''}`);
     else if (ev.kind === 'raw') html.push(`<div class="msg"><div class="who">event</div><div class="text muted">${esc(ev.text)}</div></div>`);
   }
   const body = $('#transcript-body');

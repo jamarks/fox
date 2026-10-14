@@ -76,15 +76,23 @@ async function listSessions() {
       outcome: c.last_outcome ?? null,
       failure: c.last_failure ?? null,
     }));
-    let lastKind = null;
+    let lastKind = null, partial = null;
     try {
       const raw = await readFile(join(dir, 'events.jsonl'), 'utf8');
       const lines = raw.trim().split('\n');
-      for (let i = lines.length - 1; i >= 0 && !lastKind; i--) { try { lastKind = Object.keys(JSON.parse(lines[i]).event)[0]; } catch {} }
+      for (let i = lines.length - 1; i >= 0 && !lastKind; i--) {
+        try {
+          const ev = JSON.parse(lines[i]).event;
+          lastKind = Object.keys(ev)[0];
+          // A cancelled turn keeps what the model had started to write (a subagent's unfinished answer).
+          if (lastKind === 'interrupted') partial = ev.interrupted?.partial_text || null;
+        } catch {}
+      }
     } catch {}
     sessions.push({
       id,
       lastKind,
+      partial,
       parentId: owner?.parent_id ?? null,
       children,
       title: meta.title ?? '(untitled)',
@@ -121,6 +129,42 @@ async function ownerAlive(dir) {
 
 function safeSessionId(id) {
   return /^[A-Za-z0-9_-]{4,64}$/.test(id) ? id : null;
+}
+
+// Files a session touched: what fx wrote, edited or read (its own tool calls and its subagents'), plus
+// paths it names in its answers that exist on disk (a file made by a shell command shows up that way).
+const FILE_RANK = { write: 3, edit: 2, mention: 1, read: 0 };
+async function sessionFiles(id) {
+  const meta = await readJson(join(SESSIONS_DIR, id, 'session.json'));
+  const root = meta?.workspace_root ?? meta?.origin_workspace_root;
+  if (!root) return [];
+  const kids = (await readJson(join(SESSIONS_DIR, id, 'subagent', 'children.json')))?.children ?? [];
+  const files = new Map();
+  const add = (ws, path, action, by) => {
+    if (!path || typeof path !== 'string' || path.length > 400) return;
+    const abs = resolve(ws, path.replace(/^~(?=\/)/, homedir()));
+    const f = files.get(abs) ?? { path: abs, action, by: new Set() };
+    if (FILE_RANK[action] > FILE_RANK[f.action]) f.action = action;
+    f.by.add(by);
+    files.set(abs, f);
+  };
+  const scan = async (sid, by) => {
+    const ws = (await readJson(join(SESSIONS_DIR, sid, 'session.json')))?.workspace_root ?? root;
+    for (const ev of await readEvents(sid)) {
+      if (ev.kind === 'tool_call' && /^(write|edit|read)_file$/.test(ev.name) && !/error|fail/i.test(ev.result?.status ?? '')) add(ws, ev.args?.path, ev.name.split('_')[0], by);
+      if (ev.kind === 'assistant' && ev.text) for (const m of ev.text.matchAll(/`([^`\s]+\.[A-Za-z0-9]{1,10})`|\]\(([^)\s]+\.[A-Za-z0-9]{1,10})\)/g)) add(ws, m[1] ?? m[2], 'mention', by);
+    }
+  };
+  await scan(id, 0);
+  for (const [i, c] of kids.entries()) if (safeSessionId(c.id)) await scan(c.id, i + 1);
+  const out = [];
+  for (const f of files.values()) {
+    let st = null;
+    try { st = await stat(f.path); } catch {}
+    if (f.action === 'mention' && !st?.isFile()) continue; // only real files count as mentions
+    out.push({ path: f.path, rel: f.path.startsWith(root + '/') ? f.path.slice(root.length + 1) : f.path.replace(homedir(), '~'), action: f.action, by: [...f.by].sort((a, b) => a - b), exists: Boolean(st?.isFile()), size: st?.size ?? 0 });
+  }
+  return out.sort((a, b) => FILE_RANK[b.action] - FILE_RANK[a.action] || a.rel.localeCompare(b.rel));
 }
 
 async function readEvents(id) {
@@ -162,7 +206,7 @@ async function readEvents(id) {
         out.push({ kind, ts });
         break;
       case 'interrupted':
-        out.push({ kind, ts, reason: body.reason ?? 'cancelled' });
+        out.push({ kind, ts, reason: body.reason ?? 'cancelled', partial: body.partial_text || null });
         break;
       default:
         out.push({ kind: 'raw', ts, text: JSON.stringify(ev).slice(0, 2000) });
@@ -300,6 +344,27 @@ const server = http.createServer(async (req, res) => {
       const id = safeSessionId(m[1]);
       if (!id) return send(res, 400, { error: 'bad id' });
       return send(res, 200, await readEvents(id));
+    }
+    // Files the session touched; content and "open" only for paths in that list.
+    if ((m = p.match(/^\/api\/sessions\/([^/]+)\/(files|file|open-file)$/))) {
+      const id = safeSessionId(m[1]);
+      if (!id) return send(res, 400, { error: 'bad id' });
+      const files = await sessionFiles(id);
+      if (m[2] === 'files') return send(res, 200, files);
+      const path = m[2] === 'file' ? url.searchParams.get('path') : JSON.parse(await readBody(req) || '{}').path;
+      const f = files.find((x) => x.path === path && x.exists);
+      if (!f) return send(res, 404, { error: 'not a file of this session' });
+      if (m[2] === 'open-file') {
+        if (req.method !== 'POST') return send(res, 405, { error: 'POST' });
+        if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: 'cross-origin' });
+        if (process.platform !== 'darwin') return send(res, 501, { error: 'only on macOS' });
+        await execFileP('open', [f.path]);
+        return send(res, 200, { ok: true });
+      }
+      if (f.size > 512 * 1024) return send(res, 200, { tooLarge: true, size: f.size });
+      const buf = await readFile(f.path);
+      if (buf.includes(0)) return send(res, 200, { binary: true, size: f.size });
+      return send(res, 200, { text: buf.toString('utf8'), size: f.size });
     }
     if ((m = p.match(/^\/api\/sessions\/([^/]+)\/artifact\/([^/]+)$/))) {
       const id = safeSessionId(m[1]);
