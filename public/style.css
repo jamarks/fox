@@ -157,3 +157,7 @@ button.icon.on { opacity: 1; color: var(--accent); }
 .group h3 .gcount { flex: none; font-weight: 400; text-transform: none; letter-spacing: 0; }
 .group.collapsed { padding-bottom: 2px; }
 button.icon svg { display: block; }
+.hidden { display: none !important; }
+button.wide { flex: 1; border: 1px solid var(--border); padding: 6px 10px; color: var(--text); background: var(--bg); }
+button.wide:hover { border-color: var(--accent); }
+button.wide:disabled { opacity: .6; cursor: wait; }

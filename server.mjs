@@ -259,6 +259,17 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'DELETE' && (m = p.match(/^\/api\/terminals\/([^/]+)$/))) {
       return send(res, 200, { ok: await killTerminal(decodeURIComponent(m[1])) });
     }
+    // Native folder picker (macOS Finder via AppleScript). Returns { path } or { cancelled: true }.
+    if (p === '/api/pick-folder' && req.method === 'POST') {
+      if (process.platform !== 'darwin') return send(res, 501, { error: 'native picker only on macOS; type a path instead' });
+      try {
+        const { stdout } = await execFileP('osascript', ['-e', 'tell application "System Events" to activate', '-e', 'POSIX path of (choose folder with prompt "Open fx in…")'], { timeout: 120000 });
+        return send(res, 200, { path: stdout.trim().replace(/\/$/, '') });
+      } catch (err) {
+        if (/canceled|cancelled|-128/i.test(String(err.stderr || err.message))) return send(res, 200, { cancelled: true });
+        return send(res, 500, { error: String(err.stderr || err.message) });
+      }
+    }
     if (p === '/api/check-dir') {
       const dir = url.searchParams.get('path') ?? '';
       const abs = resolve(dir.replace(/^~/, homedir()));

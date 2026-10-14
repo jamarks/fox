@@ -233,6 +233,16 @@ $('#new-session').addEventListener('submit', async (e) => {
   if (r.ok) openTerminal({ cwd: r.path });
 });
 $('#refresh').addEventListener('click', refresh);
+$('#type-path').addEventListener('click', () => { $('#path-row').classList.toggle('hidden'); $('#new-cwd').focus(); });
+$('#pick-folder').addEventListener('click', async () => {
+  const btn = $('#pick-folder');
+  btn.disabled = true; btn.textContent = 'Choose a folder in the Finder dialog…';
+  try {
+    const r = await post('/api/pick-folder');
+    if (r.path) await openTerminal({ cwd: r.path });
+    else if (r.error) { $('#path-row').classList.remove('hidden'); $('#new-cwd-hint').textContent = r.error; $('#new-cwd-hint').className = 'hint err'; }
+  } finally { btn.disabled = false; btn.textContent = 'Open folder…'; }
+});
 
 // ---------- terminals (tmux attach over WebSocket) ----------
 async function openTerminal({ cwd, resume }) {
