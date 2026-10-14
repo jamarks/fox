@@ -33,6 +33,9 @@ const sessionById = (id) => state.sessions.find((s) => s.id === id);
 const displayTitle = (s) => s.customName || (s.subagent ? (s.subagent.name ? `🧵 ${s.subagent.name}` : (s.subagent.task ?? s.firstPrompt ?? '').slice(0, 60) || s.title) : s.title);
 const post = (path, body, method = 'POST') => fetch(path, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json());
 const showArchived = { value: false };
+let groupOrder = [];
+try { groupOrder = JSON.parse(localStorage.getItem('fox.groupOrder') ?? '[]'); } catch {}
+const saveGroupOrder = () => { try { localStorage.setItem('fox.groupOrder', JSON.stringify(groupOrder)); } catch {} };
 const collapsed = new Set();
 try { for (const g of JSON.parse(localStorage.getItem('fox.collapsed') ?? '[]')) collapsed.add(g); } catch {}
 const saveCollapsed = () => { try { localStorage.setItem('fox.collapsed', JSON.stringify([...collapsed])); } catch {} };
@@ -112,18 +115,20 @@ function renderSessions() {
   }
   const root = $('#session-groups');
   root.innerHTML = '';
-  // groups with running agents first
-  const ordered = [...groups.entries()].sort((a, b) => Math.min(...a[1].map((s) => STATE_ORDER[s.state])) - Math.min(...b[1].map((s) => STATE_ORDER[s.state])));
+  // Manual order (drag the project header) wins; groups you never dragged go after, busiest first.
+  const rank = (ws) => { const i = groupOrder.indexOf(ws); return i < 0 ? Infinity : i; };
+  const ordered = [...groups.entries()].sort((a, b) => (rank(a[0]) - rank(b[0])) || (Math.min(...a[1].map((s) => STATE_ORDER[s.state])) - Math.min(...b[1].map((s) => STATE_ORDER[s.state]))));
   for (const [ws, list] of ordered) {
     list.sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
     const g = document.createElement('div');
     const isCollapsed = collapsed.has(ws);
     g.className = 'group' + (isCollapsed ? ' collapsed' : '');
+    g.dataset.ws = ws;
     const busy = list.filter((s) => s.state === 'working' || s.state === 'needs_input').length;
     const repo = state.repos?.[ws];
     // GitHub remote: owner/repo as a link. Plain git: just the branch (and the repo root if the workspace is a subfolder).
     const gitLine = repo ? `<div class="git" title="${esc(repo.remote || 'git repo without a remote: add one (git remote add origin …) and this becomes a link')}">${repo.url ? `<a href="${esc(repo.url)}" target="_blank" rel="noopener" title="Open ${esc(repo.repo)} on GitHub">${ICON.github}${esc(repo.repo)}</a>` : `<span>${ICON.git}${repo.root !== ws ? esc(shortPath(repo.root)) : 'no remote'}</span>`}${repo.branch ? `<span class="branch">${esc(repo.branch)}</span>` : ''}${repo.changed ? `<span class="changed" title="${repo.changed} changed file${repo.changed === 1 ? '' : 's'}">±${repo.changed}</span>` : ''}</div>` : '';
-    g.innerHTML = `<h3><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(ws)}">${esc(shortPath(ws))}</span><span class="gcount">${list.length}${busy ? ` <b class="st working">· ${busy} active</b>` : ''}</span><button class="icon" data-new="${esc(ws)}" title="New session in this folder">+</button></h3>${isCollapsed ? '' : gitLine}`;
+    g.innerHTML = `<h3 draggable="true" title="Drag to reorder projects"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(ws)}">${esc(shortPath(ws))}</span><span class="gcount">${list.length}${busy ? ` <b class="st working">· ${busy} active</b>` : ''}</span><button class="icon" data-new="${esc(ws)}" title="New session in this folder">+</button></h3>${isCollapsed ? '' : gitLine}`;
     if (!isCollapsed) list.forEach((s, i) => g.appendChild(sessionCard(s, i + 1)));
     root.appendChild(g);
   }
@@ -172,6 +177,33 @@ function childrenHtml(parent) {
   if (waiting) parts.push(`<span class="st ready"><i></i>${waiting} waiting</span>`);
   return `<div class="children-count" data-child="${kids[0].id}" title="open the subagent board">🧵 ${parts.join(' · ')}</div>`;
 }
+
+// Drag a project header to reorder groups.
+let dragWs = null;
+$('#session-groups').addEventListener('dragstart', (e) => {
+  const g = e.target.closest('.group'); if (!g || !e.target.closest('h3')) return;
+  dragWs = g.dataset.ws; g.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move';
+});
+$('#session-groups').addEventListener('dragover', (e) => {
+  const g = e.target.closest('.group'); if (!g || !dragWs || g.dataset.ws === dragWs) return;
+  e.preventDefault();
+  const r = g.getBoundingClientRect();
+  g.classList.toggle('drop-before', e.clientY < r.top + r.height / 2);
+  g.classList.toggle('drop-after', e.clientY >= r.top + r.height / 2);
+});
+$('#session-groups').addEventListener('dragleave', (e) => { const g = e.target.closest('.group'); if (g) g.classList.remove('drop-before', 'drop-after'); });
+$('#session-groups').addEventListener('drop', (e) => {
+  const g = e.target.closest('.group'); if (!g || !dragWs) return;
+  e.preventDefault();
+  const before = g.classList.contains('drop-before');
+  const current = [...document.querySelectorAll('#session-groups .group:not(.archived)')].map((x) => x.dataset.ws).filter(Boolean);
+  const order = current.filter((w) => w !== dragWs);
+  const at = order.indexOf(g.dataset.ws) + (before ? 0 : 1);
+  order.splice(at, 0, dragWs);
+  groupOrder = order; saveGroupOrder();
+  dragWs = null; renderSessions();
+});
+$('#session-groups').addEventListener('dragend', () => { dragWs = null; document.querySelectorAll('.group').forEach((x) => x.classList.remove('dragging', 'drop-before', 'drop-after')); });
 
 $('#session-groups').addEventListener('click', async (e) => {
   const btn = e.target.closest('button');

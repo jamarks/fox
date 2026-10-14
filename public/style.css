@@ -225,3 +225,7 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 .children-count { margin: 6px 0 0 0; font-size: 11px; color: var(--muted); cursor: pointer; display: flex; gap: 6px; align-items: center; }
 .children-count:hover { color: var(--text); }
 .children-count .st { gap: 4px; }
+.group h3[draggable] { cursor: grab; }
+.group.dragging { opacity: .4; }
+.group.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.group.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
