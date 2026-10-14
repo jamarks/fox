@@ -164,20 +164,15 @@ function sessionCard(s) {
 }
 
 function childrenHtml(parent) {
-  // Failed or never-started children stay out of the sidebar; the board on the right lists them with the reason.
-  const shown = (parent.children ?? []).filter((c) => !c.failure && (c.name || c.task || sessionById(c.id)?.firstPrompt));
-  if (!shown.length) return '';
-  const rows = shown.map((c) => {
-    const child = sessionById(c.id);
-    const st = child?.state ?? (c.phase === 'running' ? 'working' : c.phase === 'idle' ? 'ready' : 'done');
-    const label = `${child?.model && child.model !== parent.model ? modelBadge(child.model) + esc(modelShort(child.model)) + ' · ' : ''}${c.name ? `<b>${esc(c.name)}</b>` : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 70))}`;
-    const tokN = child ? child.usage.input + child.usage.output : 0;
-    const tok = tokN ? fmtTokens(tokN) + ' tok' : '';
-    return `<div class="child ${c.id === state.selected ? 'active' : ''}" data-child="${c.id}" title="${esc(c.task ?? '')}">
-      <span class="st ${st}"><i></i></span><span class="clabel">${label}</span><span class="cmeta">${c.failure ? '<span class="err">failed</span>' : ''}${tok}</span>
-    </div>`;
-  });
-  return `<div class="children">${rows.join('')}</div>`;
+  // The sidebar only counts subagents; the list with answers lives in the right column.
+  const kids = (parent.children ?? []).filter((c) => !c.failure && (c.name || c.task || sessionById(c.id)?.firstPrompt));
+  if (!kids.length) return '';
+  const working = kids.filter((c) => c.phase === 'running').length;
+  const waiting = kids.filter((c) => c.phase === 'idle').length;
+  const parts = [`${kids.length} subagent${kids.length === 1 ? '' : 's'}`];
+  if (working) parts.push(`<span class="st working"><i></i>${working} working</span>`);
+  if (waiting) parts.push(`<span class="st ready"><i></i>${waiting} waiting</span>`);
+  return `<div class="children-count" data-child="${kids[0].id}" title="open the subagent board">🧵 ${parts.join(' · ')}</div>`;
 }
 
 $('#session-groups').addEventListener('click', async (e) => {
@@ -201,8 +196,8 @@ $('#session-groups').addEventListener('click', async (e) => {
   if (e.target.closest('[data-toggle-archived]')) { showArchived.value = !showArchived.value; return renderSessions(); }
   const grp = e.target.closest('[data-toggle-group]');
   if (grp) { const ws = grp.dataset.toggleGroup; collapsed.has(ws) ? collapsed.delete(ws) : collapsed.add(ws); saveCollapsed(); return renderSessions(); }
-  const child = e.target.closest('[data-child]');
-  if (child) { e.stopPropagation(); setTranscript(true); return selectSession(child.dataset.child); }
+  const count = e.target.closest('.children-count');
+  if (count) { e.stopPropagation(); setTranscript(true); return selectSession(count.closest('.session').dataset.id); }
   const card = e.target.closest('.session');
   if (card) openSession(card.dataset.id);
 });
