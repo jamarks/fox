@@ -46,6 +46,21 @@ const ICON = {
   pin: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2l4.5 4.5-2.3.6-2.6 2.6.3 2.9-1.7 1.7L4.6 11 2 13.6M4.6 11l-1.9-1.9 1.7-1.7 2.9.3 2.6-2.6.6-2.3"/></svg>',
   rename: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2.5l2.5 2.5L6 12.5H3.5V10z"/></svg>',
 };
+// Vendor badge for a model id: two letters on the vendor's color. Works for "vendor/model" ids and bare names.
+const VENDORS = [
+  [/^openai\/|^gpt-|^o[1-9]/, 'OA', '#10a37f', 'OpenAI'], [/^google\/|gemini|gemma/, 'G', '#4285f4', 'Google'], [/^anthropic\/|claude/, 'A', '#d97757', 'Anthropic'],
+  [/^deepseek/, 'DS', '#4d6bfe', 'DeepSeek'], [/^meta\/|llama/, 'M', '#0668e1', 'Meta'], [/^(x|space)ai\/|grok/, 'X', '#444a57', 'xAI'],
+  [/^mistral/, 'Mi', '#ff7000', 'Mistral'], [/^amazon\/|nova/, 'Am', '#ff9900', 'Amazon'], [/^alibaba\/|qwen/, 'Q', '#6b4cff', 'Alibaba'],
+  [/^moonshot|kimi/, 'K', '#3b3b3b', 'Moonshot'], [/^xiaomi\/|mimo/, 'Xm', '#ff6900', 'Xiaomi'], [/^perplexity/, 'P', '#20808d', 'Perplexity'],
+  [/^cohere/, 'Co', '#39594d', 'Cohere'], [/^zai\/|^z-ai|glm/, 'Z', '#2d5bff', 'Z.ai'], [/^minimax/, 'Mm', '#e0372f', 'MiniMax'],
+];
+function vendorOf(model) { const m = String(model ?? '').toLowerCase(); return VENDORS.find(([re]) => re.test(m)); }
+function modelBadge(model) {
+  if (!model) return '';
+  const v = vendorOf(model);
+  const [, abbr, color, name] = v ?? [null, '?', '#555', 'unknown vendor'];
+  return `<span class="vendor" style="background:${color}" title="${esc(name)}">${abbr}</span>`;
+}
 const STATE_LABEL = { working: 'working', ready: 'waiting', needs_input: 'needs input', external: 'other terminal', done: 'done', idle: '' };
 const STATE_ORDER = { needs_input: 0, working: 1, ready: 2, external: 3, done: 4, idle: 5 };
 
@@ -136,7 +151,7 @@ function sessionCard(s) {
     ${s.firstPrompt ? `<div class="prompt">${esc(s.firstPrompt)}</div>` : ''}
     <div class="sub">
       ${stateHtml}
-      <span>${esc(s.model ?? '')}</span>
+      <span class="model">${modelBadge(s.model)}${esc(s.model ?? '')}</span>
       <span>${s.turns} turn${s.turns === 1 ? '' : 's'}</span>
       <span>${fmtTokens(s.usage.input + s.usage.output)} tok</span>
       ${s.usage.cost ? `<span>$${s.usage.cost.toFixed(4)}</span>` : ''}
@@ -153,7 +168,7 @@ function childrenHtml(parent) {
   const rows = shown.map((c) => {
     const child = sessionById(c.id);
     const st = child?.state ?? (c.phase === 'running' ? 'working' : c.phase === 'idle' ? 'ready' : 'done');
-    const label = c.name ? `<b>${esc(c.name)}</b>` : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 70));
+    const label = `${child?.model && child.model !== parent.model ? modelBadge(child.model) : ''}${c.name ? `<b>${esc(c.name)}</b>` : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 70))}`;
     const tokN = child ? child.usage.input + child.usage.output : 0;
     const tok = tokN ? fmtTokens(tokN) + ' tok' : '';
     return `<div class="child ${c.id === state.selected ? 'active' : ''}" data-child="${c.id}" title="${esc(c.task ?? '')}">
@@ -464,7 +479,7 @@ function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
     const res = answerFor(parent, c, child);
     const sel = c.id === selectedId;
     return `<a class="agent ${st} ${sel ? 'selected' : ''} ${compact ? 'compact' : ''}" href="#" data-child="${c.id}">
-      <div class="agent-head"><span class="st ${c.failure ? 'needs_input' : st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? (c.failure ? 'failed to start' : c.id)).slice(0, 90))}</span>${child?.model && child.model !== parent.model ? `<span class="agent-model" title="runs on a different model than the parent">${esc(child.model)}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>
+      <div class="agent-head"><span class="st ${c.failure ? 'needs_input' : st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? (c.failure ? 'failed to start' : c.id)).slice(0, 90))}</span>${child?.model && child.model !== parent.model ? `<span class="agent-model" title="runs on a different model than the parent">${modelBadge(child.model)}${esc(child.model)}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>
       ${!compact ? (c.failure ? `<div class="agent-answer err">failed${child?.model ? ' · ' + esc(child.model) : ''} · ${esc(typeof c.failure === 'string' ? c.failure : (c.failure.message ?? c.failure.reason ?? JSON.stringify(c.failure))).slice(0, 140)}</div>` : res ? `<div class="agent-answer">${esc(res.slice(0, 160))}${res.length > 160 ? '…' : ''}</div>` : c.phase === 'running' ? '<div class="agent-answer muted">working, no answer yet</div>' : '') : ''}
     </a>`;
   });
@@ -566,7 +581,7 @@ async function loadTranscript(id, quiet = false) {
     ? `<a href="#" class="crumb" data-goto="${parent.id}">${esc(displayTitle(parent))}</a><span class="crumb-sep">›</span>${esc(displayTitle(s))}`
     : esc(displayTitle(s));
   $('#transcript-meta').innerHTML = `
-    <span>${esc(s.provider)} / ${esc(s.model)}</span>
+    <span>${modelBadge(s.model)}${esc(s.model)} <span class="muted">· ${esc(s.provider)}</span></span>
     ${s.usage.input + s.usage.output ? `<span>${fmtTokens(s.usage.input)} in · ${fmtTokens(s.usage.output)} out · ${fmtTokens(s.usage.cacheRead)} cache</span><span>${s.usage.cost ? '$' + s.usage.cost.toFixed(4) : 'subscription'}</span><span>${(s.usage.wallMs / 1000).toFixed(0)}s</span>` : '<span>tokens billed to parent</span>'}
     <span title="${esc(s.workspace)}">${esc(shortPath(s.workspace))}</span>`;
 
@@ -646,7 +661,7 @@ setTranscript(initialTranscript);
 
 // ---------- resizable columns ----------
 (() => {
-  const root = document.documentElement;
+  const root = document.body; // --left/--right are declared on body; setting them on :root would be overridden
   const load = (k, d) => { try { return Number(localStorage.getItem(k)) || d; } catch { return d; } };
   const apply = () => { root.style.setProperty('--left', load('fox.left', 300) + 'px'); root.style.setProperty('--right', load('fox.right', 380) + 'px'); };
   apply();
@@ -806,6 +821,7 @@ async function loadModels(force = false) {
     sel.appendChild(g);
   }
   try { const last = localStorage.getItem('fox.lastModel'); if (last && [...sel.options].some((o) => o.value === last)) sel.value = last; } catch {}
+  updateNsBadge();
   return modelsCatalog;
 }
 function newSessionSheet(cwd) {
@@ -814,6 +830,8 @@ function newSessionSheet(cwd) {
   $('#newsheet').classList.remove('hidden');
   loadModels().then(() => $('#ns-model').focus());
 }
+function updateNsBadge() { const v = $('#ns-model').value; $('#ns-badge').innerHTML = modelBadge(v ? v.split('|')[1] : modelsCatalog?.default?.model); }
+$('#ns-model').addEventListener('change', updateNsBadge);
 $('#ns-cancel').addEventListener('click', () => $('#newsheet').classList.add('hidden'));
 $('#newsheet').addEventListener('click', (e) => { if (e.target.id === 'newsheet') $('#newsheet').classList.add('hidden'); });
 $('#newform').addEventListener('submit', async (e) => {

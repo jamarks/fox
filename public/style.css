@@ -215,3 +215,5 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 .ns-actions { justify-content: flex-end; margin-top: 4px; } .ns-actions button { border: 1px solid var(--border); padding: 5px 10px; color: var(--text); }
 .ns-actions button.primary { background: var(--accent); color: #0b0d12; border-color: var(--accent); font-weight: 600; }
 .ns-hint { font-size: 11px; margin-right: auto; }
+.vendor { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 4px; color: #fff; font: 700 9px/1 -apple-system, sans-serif; letter-spacing: -.02em; margin-right: 5px; vertical-align: -3px; flex: none; }
+.sub .model { display: inline-flex; align-items: center; }
