@@ -28,7 +28,7 @@ fox fixes that. It reads what fx already writes to `~/.fx`, runs every session i
 - **Archive and rename** without touching fx's files. Archiving a running session stops its process first, after asking.
 - **Open any folder** with the native macOS picker, or the `+` on a group for a new session in that project.
 - **Git at a glance.** Each workspace shows its GitHub repo (linked), current branch and the number of uncommitted files.
-- **Themes.** Dark, light, and *sundown*, a warm high-contrast palette. The default is *auto*: the colors drift through the day, dark at night, light at noon, sundown around dawn and dusk. Append `?day=demo` to watch a whole day in 30 seconds.
+- **Themes.** Dark, light, *mauve*, and *night sky*: the dark palette over a slowly drifting star field drawn from real star coordinates, Orion, the Big Dipper, Cassiopeia, Scorpius, Cygnus, Lyra, Leo and friends, with the panels translucent so the sky shows through. The default is *system*, which follows the macOS appearance and switches with it.
 - **Resizable columns.** Drag the dividers; widths are remembered.
 
 ## Run it

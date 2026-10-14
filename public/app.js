@@ -103,7 +103,7 @@ function renderSessions() {
     const busy = list.filter((s) => s.state === 'working' || s.state === 'needs_input').length;
     const repo = state.repos?.[ws];
     // GitHub remote: owner/repo as a link. Plain git: just the branch (and the repo root if the workspace is a subfolder).
-    const gitLine = repo ? `<div class="git" title="${esc(repo.remote || repo.root)}">${repo.url ? `<a href="${esc(repo.url)}" target="_blank" rel="noopener">${ICON.github}${esc(repo.repo)}</a>` : `<span>${ICON.git}${repo.root !== ws ? esc(shortPath(repo.root)) : 'git'}</span>`}${repo.branch ? `<span class="branch">${esc(repo.branch)}</span>` : ''}${repo.changed ? `<span class="changed" title="${repo.changed} changed file${repo.changed === 1 ? '' : 's'}">±${repo.changed}</span>` : ''}</div>` : '';
+    const gitLine = repo ? `<div class="git" title="${esc(repo.remote || 'git repo without a remote: add one (git remote add origin …) and this becomes a link')}">${repo.url ? `<a href="${esc(repo.url)}" target="_blank" rel="noopener" title="Open ${esc(repo.repo)} on GitHub">${ICON.github}${esc(repo.repo)}</a>` : `<span>${ICON.git}${repo.root !== ws ? esc(shortPath(repo.root)) : 'no remote'}</span>`}${repo.branch ? `<span class="branch">${esc(repo.branch)}</span>` : ''}${repo.changed ? `<span class="changed" title="${repo.changed} changed file${repo.changed === 1 ? '' : 's'}">±${repo.changed}</span>` : ''}</div>` : '';
     g.innerHTML = `<h3><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(ws)}">${esc(shortPath(ws))}</span><span class="gcount">${list.length}${busy ? ` <b class="st working">· ${busy} active</b>` : ''}</span><button class="icon" data-new="${esc(ws)}" title="New session in this folder">+</button></h3>${isCollapsed ? '' : gitLine}`;
     if (!isCollapsed) for (const s of list) g.appendChild(sessionCard(s));
     root.appendChild(g);
@@ -273,8 +273,8 @@ function attachTab(t, { user = false, activate = true } = {}) {
   wrap.className = 'term-wrap warming';
   $('#terminals').appendChild(wrap);
   const term = new Terminal({
-    cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', scrollback: 5000,
-    theme: state.palette ? { background: state.palette.bg, foreground: state.palette.text, cursor: state.palette.cursor, selectionBackground: state.palette.sel } : undefined,
+    cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', scrollback: 5000, allowTransparency: true,
+    theme: state.palette ? { background: state.palette.sky ? 'rgba(0,0,0,0)' : state.palette.bg, foreground: state.palette.text, cursor: state.palette.cursor, selectionBackground: state.palette.sel } : undefined,
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
@@ -650,49 +650,134 @@ setTranscript(initialTranscript);
 })();
 
 // ---------- themes ----------
-// Three palettes, plus "auto": the colors drift through the day, dark at night, light at noon,
-// sundown around dawn and dusk. Updated every minute.
+// Palettes. "system" follows the OS appearance; "night" adds the star field.
 const PALETTES = {
   dark:    { bg: '#0f1115', panel: '#161920', panel2: '#1d2129', border: '#262b36', text: '#e6e8ee', muted: '#8b93a7', accent: '#7aa2f7', ok: '#9ece6a', err: '#f7768e', warn: '#e0af68', cursor: '#7aa2f7', sel: '#2a3550' },
   light:   { bg: '#f6f6f3', panel: '#ffffff', panel2: '#efefeb', border: '#dedcd6', text: '#1d1f27', muted: '#6b7280', accent: '#2f6feb', ok: '#2e8b57', err: '#cf3a3f', warn: '#b7791f', cursor: '#2f6feb', sel: '#cfe0ff' },
-  sundown: { bg: '#2b2230', panel: '#352a3b', panel2: '#413449', border: '#5f4e6a', text: '#f8f0ff', muted: '#b8a7c7', accent: '#ffb86b', ok: '#a8e6a8', err: '#ff7b94', warn: '#ffd98a', cursor: '#ffb86b', sel: '#5a4a66' },
+  mauve:   { bg: '#2b2230', panel: '#352a3b', panel2: '#413449', border: '#5f4e6a', text: '#f8f0ff', muted: '#b8a7c7', accent: '#ffb86b', ok: '#a8e6a8', err: '#ff7b94', warn: '#ffd98a', cursor: '#ffb86b', sel: '#5a4a66' },
 };
+// Night sky: the dark palette with translucent panels over a slowly drifting star field (real constellations).
+const NIGHT = { bg: 'rgba(7,9,18,0)', panel: 'rgba(13,16,28,0.80)', panel2: 'rgba(22,26,42,0.86)', border: '#2a3147', text: '#e3e8f5', muted: '#8a93ad', accent: '#9ab4ff', ok: '#9ee0a0', err: '#ff7b94', warn: '#ffd27a', cursor: '#9ab4ff', sel: '#2b3b66', sky: true };
 const hex2rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 const rgb2hex = (c) => '#' + c.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
 const mixPal = (A, B, t) => Object.fromEntries(Object.keys(A).map((k) => [k, rgb2hex(hex2rgb(A[k]).map((v, i) => v + (hex2rgb(B[k])[i] - v) * t))]));
-// Keyframes by hour: night → dawn (sundown) → day → dusk (sundown) → night.
-function autoPalette(date = new Date()) {
-  const h = date.getHours() + date.getMinutes() / 60;
-  const seg = (a, b, P, Q) => mixPal(P, Q, (h - a) / (b - a));
-  const { dark, light, sundown } = PALETTES;
-  if (h < 5) return dark;
-  if (h < 6.5) return seg(5, 6.5, dark, sundown);
-  if (h < 8.5) return seg(6.5, 8.5, sundown, light);
-  if (h < 17.5) return light;
-  if (h < 19) return seg(17.5, 19, light, sundown);
-  if (h < 21) return seg(19, 21, sundown, dark);
-  return dark;
-}
+// "system" follows the OS appearance (light or dark) and updates when macOS switches.
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+const systemPalette = () => (systemDark.matches ? PALETTES.dark : PALETTES.light);
+
 function applyPalette(p) {
   const r = document.documentElement.style;
   r.setProperty('--bg', p.bg); r.setProperty('--panel', p.panel); r.setProperty('--panel-2', p.panel2); r.setProperty('--border', p.border);
   r.setProperty('--text', p.text); r.setProperty('--muted', p.muted); r.setProperty('--accent', p.accent);
   r.setProperty('--ok', p.ok); r.setProperty('--err', p.err); r.setProperty('--warn', p.warn);
-  for (const t of state.tabs.values()) t.term.options.theme = { background: p.bg, foreground: p.text, cursor: p.cursor, selectionBackground: p.sel };
+  const termBg = p.sky ? 'rgba(0,0,0,0)' : p.bg;
+  for (const t of state.tabs.values()) t.term.options.theme = { background: termBg, foreground: p.text, cursor: p.cursor, selectionBackground: p.sel };
   state.palette = p;
+  document.body.classList.toggle('night', Boolean(p.sky));
+  p.sky ? sky.start() : sky.stop();
 }
 function applyTheme() {
   const mode = $('#theme').value;
-  applyPalette(mode === 'auto' ? autoPalette() : PALETTES[mode] ?? PALETTES.dark);
+  applyPalette(mode === 'night' ? NIGHT : mode === 'system' ? systemPalette() : PALETTES[mode] ?? PALETTES.dark);
 }
+
+// ---------- star field ----------
+// Bright stars with real coordinates (RA in hours, Dec in degrees, visual magnitude) and the usual
+// constellation lines. Projected equirectangular; the whole sky drifts west like the real one, only faster.
+const STARS = {
+  // Orion
+  bet: [5.92, 7.41, 0.5], rig: [5.24, -8.20, 0.1], bel: [5.42, 6.35, 1.6], sai: [5.80, -9.67, 2.1], aln: [5.68, -1.94, 1.7], ani: [5.60, -1.20, 1.7], min: [5.53, -0.30, 2.2],
+  // Ursa Major
+  dub: [11.06, 61.75, 1.8], mer: [11.03, 56.38, 2.4], phe: [11.90, 53.69, 2.4], meg: [12.26, 57.03, 3.3], ali: [12.90, 55.96, 1.8], miz: [13.40, 54.93, 2.2], alk: [13.79, 49.31, 1.9],
+  // Cassiopeia
+  cap: [0.15, 59.15, 2.3], sch: [0.68, 56.54, 2.2], gca: [0.95, 60.72, 2.5], ruc: [1.43, 60.24, 2.7], seg: [1.91, 63.67, 3.4],
+  // Scorpius
+  ant: [16.49, -26.43, 1.0], sha: [17.56, -37.10, 1.6], sar: [17.62, -43.00, 1.9], dsc: [16.00, -22.62, 2.3], gra: [16.09, -19.80, 2.6], psc: [15.98, -26.11, 2.9], esc: [16.84, -34.29, 2.3], les: [17.51, -37.30, 2.7],
+  // Cygnus
+  den: [20.69, 45.28, 1.3], sad: [20.37, 40.26, 2.2], gie: [20.77, 33.97, 2.5], dcy: [19.75, 45.13, 2.9], alb: [19.51, 27.96, 3.1],
+  // Lyra
+  veg: [18.62, 38.78, 0.0], she: [18.83, 33.36, 3.5], sul: [18.98, 32.69, 3.2], dly: [18.90, 36.90, 4.3], zly: [18.75, 37.60, 4.3],
+  // Leo
+  reg: [10.14, 11.97, 1.4], dnb: [11.82, 14.57, 2.1], alg: [10.33, 19.84, 2.0], zos: [11.24, 20.52, 2.6], che: [11.24, 15.43, 3.3], adh: [10.28, 23.42, 3.4], ras: [9.88, 26.00, 3.9], eta: [10.12, 16.76, 3.5],
+  // Taurus
+  ald: [4.60, 16.51, 0.9], eln: [5.44, 28.61, 1.7], zta: [5.63, 21.14, 3.0], ple: [3.79, 24.10, 1.6],
+  // Canis Major
+  sir: [6.75, -16.72, -1.5], adr: [6.98, -28.97, 1.5], wez: [7.14, -26.39, 1.8], mir: [6.38, -17.96, 2.0], alu: [7.40, -29.30, 2.5],
+  // Gemini
+  cas: [7.58, 31.89, 1.6], pol: [7.76, 28.03, 1.1], alh: [6.63, 16.40, 1.9], tej: [6.38, 22.51, 2.9], meb: [6.73, 25.13, 3.0], was: [7.34, 21.98, 3.5],
+  // Crux and the south
+  acr: [12.44, -63.10, 0.8], mim: [12.80, -59.69, 1.3], gac: [12.52, -57.11, 1.6], dcr: [12.25, -58.75, 2.8], can: [6.40, -52.70, -0.7], ace: [14.66, -60.83, -0.3], had: [14.06, -60.37, 0.6], fom: [22.96, -29.62, 1.2],
+  // Loose bright ones
+  arc: [14.26, 19.18, 0.0], cpl: [5.28, 45.99, 0.1], alt: [19.85, 8.87, 0.8], spi: [13.42, -11.16, 1.0], pro: [7.66, 5.22, 0.4], mif: [3.41, 49.86, 1.8], alo: [3.14, 40.96, 2.1], pla: [2.53, 89.26, 2.0],
+};
+const LINES = [
+  ['bet','bel'],['bet','aln'],['bel','min'],['min','ani'],['ani','aln'],['aln','sai'],['min','rig'],['rig','sai'],
+  ['dub','mer'],['mer','phe'],['phe','meg'],['meg','dub'],['meg','ali'],['ali','miz'],['miz','alk'],
+  ['cap','sch'],['sch','gca'],['gca','ruc'],['ruc','seg'],
+  ['gra','dsc'],['dsc','psc'],['dsc','ant'],['ant','esc'],['esc','sar'],['sar','sha'],['sha','les'],
+  ['den','sad'],['sad','gie'],['sad','dcy'],['sad','alb'],
+  ['veg','zly'],['zly','she'],['she','sul'],['sul','dly'],['dly','zly'],
+  ['reg','eta'],['eta','alg'],['alg','adh'],['adh','ras'],['alg','zos'],['zos','dnb'],['dnb','che'],['che','reg'],
+  ['ald','eln'],['ald','zta'],
+  ['sir','mir'],['sir','wez'],['wez','adr'],['wez','alu'],
+  ['cas','meb'],['meb','tej'],['pol','was'],['was','alh'],
+  ['acr','gac'],['mim','dcr'],['ace','had'],
+];
+const sky = (() => {
+  const canvas = $('#sky');
+  let raf = null, faint = null, last = 0;
+  const rnd = (seed) => () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+  function ensureFaint() {
+    if (faint) return;
+    const r = rnd(42); faint = [];
+    for (let i = 0; i < 700; i++) faint.push([r() * 24, (r() * 2 - 1) * 90, 3.5 + r() * 2.5, r() * Math.PI * 2]);
+  }
+  function draw(now) {
+    if (now - last < 50) { raf = requestAnimationFrame(draw); return; } // ~20 fps is plenty for a drift
+    last = now;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const W = window.innerWidth, H = window.innerHeight;
+    if (canvas.width !== W * dpr || canvas.height !== H * dpr) { canvas.width = W * dpr; canvas.height = H * dpr; }
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#070912'; ctx.fillRect(0, 0, W, H);
+    // One full turn of the sky every 40 minutes; the map is 1.6 screens wide so you see a band of ~15 hours of RA.
+    const shift = (now / 1000 / 2400) * 24;
+    const span = 15; // hours of RA across the screen
+    const proj = ([ra, dec]) => {
+      let x = (((ra - shift) % 24) + 24) % 24; // 0..24
+      if (x > span + 2) x -= 24; // wrap so things leaving on the left re-enter on the right
+      return [W - (x / span) * W, ((90 - dec) / 180) * H * 1.25 - H * 0.12];
+    };
+    ensureFaint();
+    const t = now / 1000;
+    for (const [ra, dec, mag, ph] of faint) {
+      const [x, y] = proj([ra, dec]); if (x < -5 || x > W + 5 || y < -5 || y > H + 5) continue;
+      const a = 0.25 + 0.15 * Math.sin(t * 0.8 + ph);
+      ctx.fillStyle = `rgba(200,210,255,${a * (6.5 - mag) / 3})`; ctx.fillRect(x, y, 1, 1);
+    }
+    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(154,180,255,0.16)';
+    for (const [p, q] of LINES) {
+      const [x1, y1] = proj(STARS[p]), [x2, y2] = proj(STARS[q]);
+      if (Math.abs(x1 - x2) > W) continue; // wrapped pair
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+    for (const [key, [ra, dec, mag]] of Object.entries(STARS)) {
+      const [x, y] = proj([ra, dec]); if (x < -5 || x > W + 5 || y < -5 || y > H + 5) continue;
+      const r = Math.max(0.8, 2.6 - mag * 0.55);
+      const a = 0.55 + 0.25 * Math.sin(t * 1.3 + key.charCodeAt(0));
+      ctx.fillStyle = `rgba(226,232,255,${a})`;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      if (mag < 0.6) { ctx.fillStyle = 'rgba(154,180,255,0.12)'; ctx.beginPath(); ctx.arc(x, y, r * 3, 0, Math.PI * 2); ctx.fill(); }
+    }
+    raf = requestAnimationFrame(draw);
+  }
+  return { start() { if (!raf) raf = requestAnimationFrame(draw); }, stop() { if (raf) cancelAnimationFrame(raf); raf = null; } };
+})();
 $('#theme').addEventListener('change', () => { try { localStorage.setItem('fox.theme', $('#theme').value); } catch {} applyTheme(); });
-try { $('#theme').value = localStorage.getItem('fox.theme') || 'auto'; } catch {}
+try { const saved = localStorage.getItem('fox.theme'); $('#theme').value = saved && saved !== 'auto' && saved !== 'sundown' ? saved : 'system'; } catch {}
 applyTheme();
-setInterval(() => { if ($('#theme').value === 'auto') applyTheme(); }, 60000);
-// ?day=demo runs a whole day in 30 seconds, to see the auto mode drift.
-if (new URLSearchParams(location.search).get('day') === 'demo') {
-  let m = 0; setInterval(() => { m = (m + 10) % 1440; applyPalette(autoPalette(new Date(2026, 0, 1, Math.floor(m / 60), m % 60))); }, 200);
-}
+systemDark.addEventListener('change', () => { if ($('#theme').value === 'system') applyTheme(); });
 
 // ---------- boot ----------
 // Deep links: ?session=<id> selects a session and shows its transcript; ?open=<id> also opens its terminal tab.

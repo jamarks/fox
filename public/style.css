@@ -191,3 +191,11 @@ aside, section, .tab, .session, button, input, #summary, #transcript-meta { tran
 #theme:hover { color: var(--text); }
 #theme option { background: var(--panel); color: var(--text); }
 .agent-model { flex: none; font-family: var(--mono); font-size: 10px; color: var(--accent); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
+
+/* night sky */
+#sky { display: none; position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+body.night #sky { display: block; }
+body.night { background: #070912; }
+body.night aside, body.night section, body.night main, body.night .resizer { position: relative; z-index: 1; }
+body.night #center { background: transparent; }
+body.night .term-wrap .xterm, body.night .xterm-viewport { background: transparent !important; }
