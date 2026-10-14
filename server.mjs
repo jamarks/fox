@@ -257,7 +257,8 @@ async function serveStatic(res, root, rel) {
     const s = await stat(path);
     if (!s.isFile()) throw new Error('not file');
   } catch { return send(res, 404, 'not found', 'text/plain'); }
-  res.writeHead(200, { 'content-type': MIME[extname(path)] ?? 'application/octet-stream' });
+  // No browser caching: the panel changes often and a stale app.js is confusing.
+  res.writeHead(200, { 'content-type': MIME[extname(path)] ?? 'application/octet-stream', 'cache-control': 'no-store' });
   createReadStream(path).pipe(res);
 }
 
