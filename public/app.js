@@ -482,13 +482,17 @@ function toolOutput(ev) {
 }
 function renderSearch(s, events, q, terminalOpen) {
   const hits = [];
+  const includeTools = $('#search-tools').checked;
   events.forEach((ev, i) => {
-    const text = ev.kind === 'user' || ev.kind === 'assistant' ? ev.text : ev.kind === 'tool_call' ? `${briefArgs(ev.args)}\n${toolOutput(ev)}` : '';
+    // Messages always; for tool calls the command/args, and their output only when asked.
+    const text = ev.kind === 'user' || ev.kind === 'assistant' ? ev.text
+      : ev.kind === 'tool_call' ? (includeTools ? `${briefArgs(ev.args)}\n${toolOutput(ev)}` : briefArgs(ev.args)) : '';
     const at = text.toLowerCase().indexOf(q);
     if (at < 0) return;
     const start = Math.max(0, at - 60);
-    const snippet = (start > 0 ? '…' : '') + text.slice(start, at) + '<mark>' + esc(text.slice(at, at + q.length)) + '</mark>' + esc(text.slice(at + q.length, at + q.length + 90)) + (text.length > at + q.length + 90 ? '…' : '');
-    hits.push({ i, ev, snippet: esc(text.slice(start, at)) + snippet.slice(esc(text.slice(start, at)).length) });
+    const end = Math.min(text.length, at + q.length + 90);
+    const snippet = (start > 0 ? '…' : '') + esc(text.slice(start, at)) + '<mark>' + esc(text.slice(at, at + q.length)) + '</mark>' + esc(text.slice(at + q.length, end)) + (end < text.length ? '…' : '');
+    hits.push({ i, ev, snippet });
   });
   const who = (ev) => ev.kind === 'user' ? 'you' : ev.kind === 'assistant' ? 'fx' : ev.name;
   const body = $('#transcript-body');
@@ -504,6 +508,7 @@ async function jumpInTerminal(s, query, again = false) {
   return r;
 }
 $('#search').addEventListener('input', debounce(() => { lastTranscriptKey = ''; if (state.selected) loadTranscript(state.selected); }, 150));
+$('#search-tools').addEventListener('change', () => { lastTranscriptKey = ''; if (state.selected) loadTranscript(state.selected); });
 $('#search').addEventListener('keydown', (e) => { if (e.key === 'Enter') jumpInTerminal(sessionById(state.selected), $('#search').value.trim()); if (e.key === 'Escape') { $('#search').value = ''; lastTranscriptKey = ''; loadTranscript(state.selected); } });
 $('#search-prev').addEventListener('click', () => jumpInTerminal(sessionById(state.selected), $('#search').value.trim(), true));
 $('#search-done').addEventListener('click', async () => { const s = sessionById(state.selected); if (s?.terminal) await post(`/api/terminals/${encodeURIComponent(s.terminal)}/search-cancel`); $('#search-done').classList.add('hidden'); });
