@@ -1079,7 +1079,8 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#shortc
   const restore = state.terminals.find((t) => t.name === lastActive && state.pinned.has(t.name)) ?? state.terminals.find((t) => state.pinned.has(t.name));
   if (restore && !openId) activateTab(restore.name);
   if (openId && sessionById(openId)) await openSession(openId);
-  if (selId && sessionById(selId)) { setTranscript(true); selectSession(selId); }
+  // Respect the saved column state on refresh; only an explicit ?session= that differs from the open tab opens it.
+  if (selId && sessionById(selId)) { if (q.get('session') && selId !== openId) setTranscript(true); selectSession(selId); }
   state.pollTimer = setInterval(async () => {
     await refresh();
     if (state.selected) loadTranscript(state.selected, true);
