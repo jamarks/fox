@@ -478,11 +478,12 @@ async function loadTranscript(id, quiet = false) {
     else if (ev.kind === 'raw') html.push(`<div class="msg"><div class="who">event</div><div class="text muted">${esc(ev.text)}</div></div>`);
   }
   const body = $('#transcript-body');
+  const wasAtBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
   body.innerHTML = html.join('') || '<p class="muted">Empty session.</p>';
-  // Scroll: top when you switch sessions, bottom only when new events arrive and "follow" is on.
+  // Scroll: top when you switch sessions; stay pinned to the end only if you were already there.
   const grew = lastEventCount.id === id && events.length > lastEventCount.n;
   if (lastEventCount.id !== id) body.scrollTop = 0;
-  else if (grew && $('#follow').checked) body.scrollTop = body.scrollHeight;
+  else if (grew && wasAtBottom) body.scrollTop = body.scrollHeight;
   lastEventCount = { id, n: events.length };
 }
 
