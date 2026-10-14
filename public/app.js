@@ -224,11 +224,11 @@ async function openTerminal({ cwd, resume }) {
   if (t.resume) selectSession(t.resume);
 }
 
-function attachTab(t, { user = false } = {}) {
+function attachTab(t, { user = false, activate = true } = {}) {
   if (user) { state.open.add(t.name); saveOpen(); }
-  if (state.tabs.has(t.name) && !state.tabs.get(t.name).closed) return activateTab(t.name);
+  if (state.tabs.has(t.name) && !state.tabs.get(t.name).closed) { if (activate) activateTab(t.name); return; }
   const wrap = document.createElement('div');
-  wrap.className = 'term-wrap';
+  wrap.className = 'term-wrap warming';
   $('#terminals').appendChild(wrap);
   const term = new Terminal({
     cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', scrollback: 5000,
@@ -237,27 +237,27 @@ function attachTab(t, { user = false } = {}) {
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(wrap);
-  const tab = { term, fit, ws: null, wrap, closed: false, ready: false };
-  state.tabs.set(t.name, tab);
+  state.tabs.set(t.name, { name: t.name, term, fit, ws: null, wrap, closed: false, ready: false });
   renderTabs();
-  activateTab(t.name);
-  // Measure first, then connect with the real size: tmux draws once, at the right size, instead of three times.
-  wrap.classList.add('warming');
-  requestAnimationFrame(() => {
-    safeFit(tab);
-    const ws = new WebSocket(`ws://${location.host}/pty?name=${encodeURIComponent(t.name)}&cols=${term.cols}&rows=${term.rows}`);
-    ws.binaryType = 'arraybuffer';
-    tab.ws = ws;
-    let reveal = null;
-    ws.onmessage = (ev) => {
-      term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data));
-      if (!tab.ready) { clearTimeout(reveal); reveal = setTimeout(() => { tab.ready = true; wrap.classList.remove('warming'); }, 120); }
-    };
-    ws.onclose = () => { tab.closed = true; wrap.classList.remove('warming'); renderTabs(); };
-    const sendResize = () => ws.readyState === 1 && ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-    term.onData((data) => ws.readyState === 1 && ws.send(JSON.stringify({ type: 'input', data })));
-    term.onResize(sendResize);
-  });
+  if (activate) activateTab(t.name); // connects lazily, at the measured size
+}
+
+// Connect a tab's WebSocket once it is visible and measured, so tmux draws once at the right size.
+function connectTab(tab) {
+  if (!tab || tab.ws || tab.closed) return;
+  const { term, wrap } = tab;
+  const ws = new WebSocket(`ws://${location.host}/pty?name=${encodeURIComponent(tab.name)}&cols=${term.cols}&rows=${term.rows}`);
+  ws.binaryType = 'arraybuffer';
+  tab.ws = ws;
+  let reveal = null;
+  ws.onmessage = (ev) => {
+    term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data));
+    if (!tab.ready) { clearTimeout(reveal); reveal = setTimeout(() => { tab.ready = true; wrap.classList.remove('warming'); }, 120); }
+  };
+  ws.onclose = () => { tab.closed = true; wrap.classList.remove('warming'); renderTabs(); };
+  const sendResize = () => ws.readyState === 1 && ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+  term.onData((data) => ws.readyState === 1 && ws.send(JSON.stringify({ type: 'input', data })));
+  term.onResize(sendResize);
 }
 
 function tabLabel(name) {
@@ -284,10 +284,11 @@ function renderTabs() {
 
 function activateTab(name) {
   state.activeTab = name;
+  try { localStorage.setItem('fox.active', name); } catch {}
   for (const [n, t] of state.tabs) t.wrap.classList.toggle('active', n === name);
   renderTabs();
   const t = state.tabs.get(name);
-  if (t) requestAnimationFrame(() => { safeFit(t); t.term.focus(); });
+  if (t) { safeFit(t); connectTab(t); t.term.focus(); }
   const term = state.terminals.find((x) => x.name === name);
   if (term?.resume) selectSession(term.resume);
 }
@@ -310,7 +311,7 @@ function syncTabsWithTerminals() {
   for (const [name, tab] of state.tabs) if (!names.has(name) && tab.closed) closeTab(name);
   for (const name of [...state.open]) if (!names.has(name)) state.open.delete(name);
   saveOpen();
-  for (const t of state.terminals) if (!state.tabs.has(t.name) && state.open.has(t.name)) attachTab(t);
+  for (const t of state.terminals) if (!state.tabs.has(t.name) && state.open.has(t.name)) attachTab(t, { activate: false });
   renderTabs();
 }
 
@@ -488,8 +489,10 @@ setTranscript(initialTranscript);
   if (openId && sessionById(openId)) await openSession(openId);
   const selId = q.get('session') ?? openId;
   if (selId && sessionById(selId)) { setTranscript(true); selectSession(selId); }
-  const first = state.terminals.find((t) => state.open.has(t.name));
-  if (first && !openId) activateTab(first.name);
+  let lastActive = null;
+  try { lastActive = localStorage.getItem('fox.active'); } catch {}
+  const restore = state.terminals.find((t) => t.name === lastActive && state.open.has(t.name)) ?? state.terminals.find((t) => state.open.has(t.name));
+  if (restore && !openId) activateTab(restore.name);
   state.pollTimer = setInterval(async () => {
     await refresh();
     if (state.selected) loadTranscript(state.selected, true);

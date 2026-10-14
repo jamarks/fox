@@ -141,3 +141,4 @@ a.agent:hover { border-color: var(--accent); }
 .agent.compact .agent-head { font-size: 11px; }
 .agent.selected { border-color: var(--accent); background: var(--bg); }
 .term-wrap.warming .xterm { visibility: hidden; }
+.term-wrap:not(.active) .xterm { visibility: hidden; }
