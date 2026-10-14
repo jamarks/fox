@@ -5,10 +5,16 @@ const state = {
   sessions: [], terminals: [], selected: null,
   tabs: new Map(), // tmux name -> { term, fit, ws, wrap, label, closed }
   activeTab: null, pollTimer: null, prevStates: new Map(), sound: false,
-  open: new Set(), // tmux names the user opened as tabs; restored after reload. Everything else runs unseen.
+  pinned: new Set(), // tmux names pinned as tabs; restored after reload. Everything else is a preview or runs unseen.
+  preview: null,     // the one unpinned terminal currently shown; replaced when you click another session
 };
-try { state.open = new Set(JSON.parse(localStorage.getItem('fox.open') ?? '[]')); } catch {}
-const saveOpen = () => { try { localStorage.setItem('fox.open', JSON.stringify([...state.open])); } catch {} };
+try { state.pinned = new Set(JSON.parse(localStorage.getItem('fox.pinned') ?? '[]')); } catch {}
+const savePinned = () => { try { localStorage.setItem('fox.pinned', JSON.stringify([...state.pinned])); } catch {} };
+function setPinned(name, on) {
+  if (on) { state.pinned.add(name); if (state.preview === name) state.preview = null; }
+  else { state.pinned.delete(name); if (state.tabs.has(name)) { if (state.preview && state.preview !== name) closeTab(state.preview); state.preview = name; } }
+  savePinned(); renderTabs(); renderSessions();
+}
 
 // ---------- utils ----------
 const fmtTime = (ms) => (ms ? new Date(ms).toLocaleString('en', { dateStyle: 'short', timeStyle: 'short' }) : '');
@@ -103,7 +109,7 @@ function sessionCard(s) {
     <div class="row">
       <div class="title" title="${esc(s.title)}">${esc(displayTitle(s))}</div>
       <div class="actions">
-        ${s.terminal ? `<button class="icon" data-kill="${esc(s.terminal)}" title="Stop the fx process">■</button>` : ''}
+        ${s.terminal ? `<button class="icon ${state.pinned.has(s.terminal) ? 'on' : ''}" data-pin="${esc(s.terminal)}" title="${state.pinned.has(s.terminal) ? 'Unpin tab' : 'Pin as tab'}">📌</button><button class="icon" data-kill="${esc(s.terminal)}" title="Stop the fx process">■</button>` : ''}
         <button class="icon" data-rename="${s.id}" title="Rename">✎</button>
         <button class="icon" data-${s.archived ? 'unarchive' : 'archive'}="${s.id}" title="${s.archived ? 'Restore' : 'Archive'}">${s.archived ? '↩' : '⌫'}</button>
       </div>
@@ -140,6 +146,7 @@ $('#session-groups').addEventListener('click', async (e) => {
   const btn = e.target.closest('button');
   const d = btn?.dataset ?? {};
   if (d.new) return openTerminal({ cwd: d.new });
+  if (d.pin) return setPinned(d.pin, !state.pinned.has(d.pin));
   if (d.rename) return renameInline(d.rename);
   if (d.kill) { if (confirm('Stop this fx process? The session stays saved.')) { await post(`/api/terminals/${encodeURIComponent(d.kill)}`, null, 'DELETE'); closeTab(d.kill); await refresh(); } return; }
   if (d.archive) {
@@ -220,13 +227,17 @@ async function openTerminal({ cwd, resume }) {
   const t = await post('/api/terminals', { cwd, resume });
   if (t.error) { alert(t.error); return; }
   await refresh();
-  attachTab(t, { user: true });
+  attachTab(t);
   if (t.resume) selectSession(t.resume);
 }
 
 function attachTab(t, { user = false, activate = true } = {}) {
-  if (user) { state.open.add(t.name); saveOpen(); }
   if (state.tabs.has(t.name) && !state.tabs.get(t.name).closed) { if (activate) activateTab(t.name); return; }
+  // An unpinned terminal is a preview: opening another one replaces it (its fx keeps running in tmux).
+  if (!state.pinned.has(t.name)) {
+    if (state.preview && state.preview !== t.name) closeTab(state.preview);
+    state.preview = t.name;
+  }
   const wrap = document.createElement('div');
   wrap.className = 'term-wrap warming';
   $('#terminals').appendChild(wrap);
@@ -274,11 +285,18 @@ function renderTabs() {
     const s = t?.resume ? sessionById(t.resume) : null;
     const st = tab.closed ? 'closed' : (s?.state ?? 'working');
     const el = document.createElement('div');
-    el.className = 'tab' + (name === state.activeTab ? ' active' : '');
+    const pinned = state.pinned.has(name);
+    el.className = 'tab' + (name === state.activeTab ? ' active' : '') + (pinned ? '' : ' preview');
     // The dot only shows when there is something to know: working, needs input, or dead. Waiting is the default.
     const dot = st === 'working' || st === 'needs_input' || st === 'closed' ? `<span class="st ${st}" title="${STATE_LABEL[st] || st}"><i></i></span>` : '';
-    el.innerHTML = `${dot}<span>${esc(tabLabel(name))}</span><span class="close" data-close="${esc(name)}" title="Close tab (fx keeps running; click the session to reopen)">×</span>`;
-    el.addEventListener('click', (e) => (e.target.dataset.close ? closeTab(name) : activateTab(name)));
+    el.innerHTML = `${dot}<span class="tab-label">${esc(tabLabel(name))}</span>${pinned
+      ? `<span class="close" data-close="${esc(name)}" title="Unpin and close (fx keeps running)">×</span>`
+      : `<span class="pin" data-pin="${esc(name)}" title="Pin as tab">📌</span>`}`;
+    el.addEventListener('click', (e) => {
+      if (e.target.dataset.close) { state.pinned.delete(name); savePinned(); closeTab(name); renderSessions(); }
+      else if (e.target.dataset.pin) setPinned(name, !state.pinned.has(name));
+      else activateTab(name);
+    });
     root.appendChild(el);
   }
   $('#empty-state').style.display = state.tabs.size ? 'none' : 'flex';
@@ -296,7 +314,7 @@ function activateTab(name) {
 }
 
 function closeTab(name) {
-  state.open.delete(name); saveOpen();
+  if (state.preview === name) state.preview = null;
   const t = state.tabs.get(name);
   if (!t) return;
   try { t.ws.close(); } catch {}
@@ -311,9 +329,9 @@ function closeTab(name) {
 function syncTabsWithTerminals() {
   const names = new Set(state.terminals.map((t) => t.name));
   for (const [name, tab] of state.tabs) if (!names.has(name) && tab.closed) closeTab(name);
-  for (const name of [...state.open]) if (!names.has(name)) state.open.delete(name);
-  saveOpen();
-  for (const t of state.terminals) if (!state.tabs.has(t.name) && state.open.has(t.name)) attachTab(t, { activate: false });
+  for (const name of [...state.pinned]) if (!names.has(name)) state.pinned.delete(name);
+  savePinned();
+  for (const t of state.terminals) if (!state.tabs.has(t.name) && state.pinned.has(t.name)) attachTab(t, { activate: false });
   renderTabs();
 }
 
@@ -524,7 +542,7 @@ setTranscript(initialTranscript);
   // Restore the last active tab first; a deep link then wins over it.
   let lastActive = null;
   try { lastActive = localStorage.getItem('fox.active'); } catch {}
-  const restore = state.terminals.find((t) => t.name === lastActive && state.open.has(t.name)) ?? state.terminals.find((t) => state.open.has(t.name));
+  const restore = state.terminals.find((t) => t.name === lastActive && state.pinned.has(t.name)) ?? state.terminals.find((t) => state.pinned.has(t.name));
   if (restore && !openId) activateTab(restore.name);
   if (openId && sessionById(openId)) await openSession(openId);
   if (selId && sessionById(selId)) { setTranscript(true); selectSession(selId); }

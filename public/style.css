@@ -146,3 +146,7 @@ a.agent:hover { border-color: var(--accent); }
 .round + .round { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
 .round-q { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
 #close-transcript { font-size: 16px; }
+.tab.preview .tab-label { font-style: italic; color: var(--muted); }
+.tab.preview.active .tab-label { color: var(--text); }
+.tab .pin { opacity: .35; padding: 0 2px; cursor: pointer; } .tab .pin:hover { opacity: 1; }
+button.icon.on { opacity: 1; color: var(--accent); }

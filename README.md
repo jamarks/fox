@@ -41,7 +41,7 @@ Open http://127.0.0.1:4848. `PORT` and `FX_BIN` are the only knobs. Deep links w
 | Column | What it is |
 |---|---|
 | Left | Sessions from `~/.fx/sessions`, grouped by workspace. Click one to open it. `+` on a group starts a fresh session there. Hover for ✎ rename, ⌫ archive, ■ stop. |
-| Middle | Tabs of live terminals. `×` closes the tab only; fx keeps running. |
+| Middle | The current terminal (preview, italic) plus pinned tabs. `📌` pins, `×` unpins. fx keeps running either way. |
 | Right (⇥) | Transcript of the selected session, and the subagent board when it has children. |
 
 States come from the tmux screen rather than from fx's event log, because fx flushes that log only at the end of a turn. It is a heuristic: a spinner with seconds means working, the prompt means waiting, a yes/no question means needs input.
