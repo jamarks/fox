@@ -3,27 +3,28 @@
 <h1 align="center">fox</h1>
 
 <p align="center"><b>A tiny local cockpit for the <a href="https://fx.sh">fx</a> coding agent.</b><br/>
-Every session, every subagent, every terminal. One tab. Nothing leaves your machine.</p>
+Every session, every subagent, one terminal that never dies. Nothing leaves your machine.</p>
 
-<p align="center"><img src="docs/screenshot.png" alt="fox: sessions on the left, a tmux-backed fx terminal in the middle, the subagent board and transcript on the right" /></p>
+<p align="center"><img src="docs/screenshot.png" alt="fox: sessions grouped by project on the left, the real fx terminal in the middle, subagents and search on the right" /></p>
 
-<p align="center"><sub>One parent session that delegated to seven subagents. Left: the tree. Middle: the real fx terminal. Right: each subagent's state, answer and conversation.</sub></p>
+<p align="center"><sub>Left: sessions by project, with subagents nested under their parent. Middle: the real fx terminal, running in tmux. Right: the subagent board, search, tokens.</sub></p>
 
 ---
 
-fx is a 7 MB coding agent that lives in your terminal. It is fast and it is honest about being a shell, which also means that once you have four of them running across three repos you lose track of which one is waiting for you.
+fx is a 7 MB coding agent that lives in your terminal. It is fast and honest about being a shell, which also means that once you have four of them across three repos you lose track of which one is waiting for you, and you never quite see what the subagents did.
 
-fox fixes that. It reads what fx already writes to `~/.fx`, runs each session inside tmux so it never dies with a browser tab, and shows you the whole picture:
+fox fixes that. It reads what fx already writes to `~/.fx`, runs every session inside tmux so nothing dies with a browser tab, and shows the whole picture. It never talks to a model itself: it only runs the real `fx` binary, so it uses whatever provider you logged fx into, a ChatGPT subscription included.
 
-- **Sidebar of sessions** grouped by project, with the first prompt under each title so "Casual Greeting" makes sense again.
-- **Live state per agent**: `working`, `waiting`, `needs input`. The summary at the top tells you where you are needed. Optional beep and desktop notification when something finishes.
-- **Subagents, visibly.** Children nest under their parent, with their phase pulsing in real time. Pick the parent and you get a board: one card per subagent with its task, elapsed time, result and tokens.
-- **Terminals that survive.** Each session runs in a tmux session named `fx-<id>`. Close the tab, reload, restart the server, open it from a real terminal with `tmux attach -t fx-<id>`. It is still there.
-- **Search the conversation.** Type in the right column, get the matching messages, click one and the real terminal jumps there (tmux copy-mode search, highlighted). ↑ walks to earlier matches, "done" leaves search mode.
-- **Transcript viewer** for sessions whose terminal is not open, with tool calls you can expand, plus tokens and cost per session. Collapsed by default, one click away.
-- **Archive and rename** without touching fx's files. fox keeps its own notes in `~/.config/fox/state.json`.
+## What it does
 
-fox does not talk to any model. It only ever runs the real `fx` binary, so it uses whatever provider you logged fx into, including a ChatGPT subscription.
+- **Sessions by project.** The sidebar groups fx sessions by workspace, collapsible per folder, with the first prompt under each title so fx's auto-generated names ("Casual Greeting") make sense. Groups with running agents sort first.
+- **Live state.** Each running session shows `working`, `waiting` or `needs input`, read from the tmux screen every few seconds. The summary at the top counts them. A 🔔 toggle beeps and sends a desktop notification when an agent finishes a turn or asks for input.
+- **Subagents, visibly.** Children nest under their parent and pulse while they run. Select the parent and you get one row per subagent with its state, elapsed time and the answer it returned. Select a child and you see exactly what it gave back to the parent, every round for named agents, and its own conversation underneath.
+- **One terminal, pinned tabs.** Clicking a session shows its terminal in the middle as a preview; clicking another replaces it. Pin the ones you want to keep as tabs. Either way fx keeps running in tmux: close the tab, reload, restart fox, `tmux attach -t fx-<id>` from a real terminal, it is all still there.
+- **Search the conversation.** Type in the right column, get the matching messages, click one and the terminal jumps to that text (tmux copy-mode search, highlighted). ↑ walks to earlier matches, `done` leaves search mode. Tool output and files the agent read are searchable too, behind a checkbox.
+- **Tokens and cost** per session, and a transcript viewer with expandable tool calls for sessions whose terminal is not open.
+- **Archive and rename** without touching fx's files. Archiving a running session stops its process first, after asking.
+- **Open any folder** with the native macOS picker, or the `+` on a group for a new session in that project.
 
 ## Run it
 
@@ -35,36 +36,50 @@ npm install
 npm start
 ```
 
-Open http://127.0.0.1:4848. `PORT` and `FX_BIN` are the only knobs. Deep links work too: `?session=<id>` selects a session, `?open=<id>` also opens its terminal.
+Open http://127.0.0.1:4848. Knobs: `PORT`, `FX_BIN` (path to the fx binary), `TMUX_BIN`.
+
+Deep links: `?session=<id>` selects a session, `?open=<id>` also opens its terminal.
 
 ## How to read the screen
 
-| Column | What it is |
+| Where | What |
 |---|---|
-| Left | Sessions from `~/.fx/sessions`, grouped by workspace. Click one to open it. `+` on a group starts a fresh session there. Hover for ✎ rename, ⌫ archive, ■ stop. |
-| Middle | The current terminal (preview, italic) plus pinned tabs. `📌` pins, `×` unpins. fx keeps running either way. |
-| Right (⇥) | Search box, tokens and cost, the subagent board when there are children, and the transcript when the session's terminal is not open. |
+| Left | Sessions from `~/.fx/sessions`, grouped by workspace. Click to open. Hover for pin, rename, archive. `+` on a group starts a new session there; the folder icon in the header opens any other folder. |
+| Middle | The current terminal (preview, italic) plus pinned tabs. 📌 pins, × unpins. fx keeps running either way. |
+| Right (⇥) | Search, tokens and cost, the subagent board when there are children, and the transcript when the session's terminal is not open. × closes it. |
 
-States come from the tmux screen rather than from fx's event log, because fx flushes that log only at the end of a turn. It is a heuristic: a spinner with seconds means working, the prompt means waiting, a yes/no question means needs input.
+## How it works
 
-## Subagents
+fx keeps everything on disk and fox only reads it:
 
-fx can delegate work to subagents, one-off or named ("create a subagent named reviewer"). fx writes the family tree to disk: the parent keeps `subagent/children.json` with each child's phase, and every child points back with `subagent/owner.json`. fox reads both every few seconds, which is why the board updates while the agents are still running.
+- `~/.fx/sessions/<id>/session.json`: title, workspace, model.
+- `events.jsonl`: every message, tool call and result. fx flushes it at the end of each turn, which is why live state comes from the tmux screen instead: a spinner with seconds means working, the prompt means waiting, a yes/no question means needs input.
+- `subagent/children.json` in the parent and `subagent/owner.json` in each child: the family tree, with each child's phase, task, start time and outcome. This file does update while subagents run.
+- `usage-v2.json`: tokens, cost, wall time. Subagents bill to their parent.
 
-Try it in any session:
+Terminals are tmux sessions named `fx-<session id>`, created with `fx session resume <id>` in the session's workspace. The browser attaches over a WebSocket through node-pty and detaches when the tab closes. tmux is told to size the window to the most recent active client, so a second browser or a real terminal can attach without fighting.
+
+fox's own state (archived ids, custom names, pins, collapsed groups) lives in `~/.config/fox/state.json` and the browser's local storage.
+
+## Try the subagents
+
+Open a session in any project and paste:
 
 ```
-Delegate to two subagents in parallel: one reads README.md and summarizes it, the other lists the files that lack tests. Merge their answers when done.
+Do this in stages, without asking me anything. Stage 1: launch three one-off subagents in parallel: one counts the lines of every .js file, one looks for TODOs or FIXMEs, one reads README.md and proposes three improvements. Wait for all three. Stage 2: write a ten-line report from their answers. Stage 3: create a subagent named reviewer and ask it to critique the report in five points. Stage 4: ask reviewer for a second round on the most serious point only. Stage 5: fold the critique in and show the final report, saying what changed thanks to each subagent.
 ```
+
+Watch the sidebar: three children appear and pulse, the parent sits in `working` without writing anything until they return, `reviewer` stays alive in green between rounds while the one-offs go grey as they finish.
 
 ## Why not libfx?
 
-Vercel ships `libfx`, a library version of the agent, and a browser terminal built on it. fox deliberately runs the CLI instead: it is the same binary you use by hand, it shares the same sessions, and it works with the subscription you already have. libfx needs an AI Gateway key and keeps its own state.
+Vercel ships `libfx`, a library version of the agent, and a browser terminal built on it. fox runs the CLI instead on purpose: it is the same binary you use by hand, it shares the same sessions and subscription, and it does not need an AI Gateway key.
 
 ## Gotchas
 
 - `node-pty` ships a `spawn-helper` that npm installs without the execute bit. The `postinstall` script fixes it; if you see `posix_spawnp failed`, run `chmod +x node_modules/node-pty/prebuilds/*/spawn-helper`.
 - fx allows one process per session. If a session is open in another terminal, fox shows `other terminal` and only lets you read it.
-- Session titles are fx's: it asks the model for one after the first turn. Rename in fox if you disagree.
+- tmux search covers the session's scrollback (20,000 lines). Very old matches still appear in the list but may not be reachable in the terminal.
+- The native folder picker is macOS only. Shift-click the folder icon to type a path instead.
 
 MIT. Built in an afternoon with fx 0.0.13 and a lot of `tmux capture-pane`. Issues and forks welcome.
