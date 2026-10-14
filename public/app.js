@@ -819,10 +819,9 @@ setTranscript(initialTranscript);
 })();
 
 // ---------- themes ----------
-// Palettes. "system" follows the OS appearance; "sky" adds the star field.
+// Palettes. "sky" adds the star field.
 const PALETTES = {
   dark:    { bg: '#0f1115', panel: '#161920', panel2: '#1d2129', border: '#262b36', text: '#e6e8ee', muted: '#8b93a7', accent: '#7aa2f7', ok: '#9ece6a', err: '#f7768e', warn: '#e0af68', cursor: '#7aa2f7', sel: '#2a3550' },
-  light:   { bg: '#f6f6f3', panel: '#ffffff', panel2: '#efefeb', border: '#dedcd6', text: '#1d1f27', muted: '#6b7280', accent: '#2f6feb', ok: '#2e8b57', err: '#cf3a3f', warn: '#b7791f', cursor: '#2f6feb', sel: '#cfe0ff' },
   mauve:   { bg: '#2b2230', panel: '#352a3b', panel2: '#413449', border: '#5f4e6a', text: '#f8f0ff', muted: '#b8a7c7', accent: '#ffb86b', ok: '#a8e6a8', err: '#ff7b94', warn: '#ffd98a', cursor: '#ffb86b', sel: '#5a4a66' },
 };
 // Sky: the dark palette with translucent panels over a slowly drifting star field (real constellations).
@@ -830,10 +829,6 @@ const SKY = { bg: 'rgba(7,9,18,0)', panel: 'rgba(13,16,28,0.55)', panel2: 'rgba(
 const hex2rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 const rgb2hex = (c) => '#' + c.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
 const mixPal = (A, B, t) => Object.fromEntries(Object.keys(A).map((k) => [k, rgb2hex(hex2rgb(A[k]).map((v, i) => v + (hex2rgb(B[k])[i] - v) * t))]));
-// "system" follows the OS appearance (light or dark) and updates when macOS switches.
-const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
-const systemPalette = () => (systemDark.matches ? PALETTES.dark : PALETTES.light);
-
 function applyPalette(p) {
   const r = document.documentElement.style;
   r.setProperty('--bg', p.bg); r.setProperty('--panel', p.panel); r.setProperty('--panel-2', p.panel2); r.setProperty('--border', p.border);
@@ -847,7 +842,7 @@ function applyPalette(p) {
 }
 function applyTheme() {
   const mode = $('#theme').value;
-  applyPalette(mode === 'sky' ? SKY : mode === 'system' ? systemPalette() : PALETTES[mode] ?? PALETTES.dark);
+  applyPalette(mode === 'sky' ? SKY : PALETTES[mode] ?? PALETTES.dark);
 }
 
 // ---------- star field ----------
@@ -944,9 +939,8 @@ const sky = (() => {
   return { start() { if (!raf) raf = requestAnimationFrame(draw); }, stop() { if (raf) cancelAnimationFrame(raf); raf = null; } };
 })();
 $('#theme').addEventListener('change', () => { try { localStorage.setItem('fox.theme', $('#theme').value); } catch {} applyTheme(); });
-try { const saved = localStorage.getItem('fox.theme'); $('#theme').value = saved === 'night' ? 'sky' : saved && saved !== 'auto' && saved !== 'sundown' ? saved : 'system'; } catch {}
+try { const saved = localStorage.getItem('fox.theme'); $('#theme').value = saved === 'night' ? 'sky' : ['dark', 'mauve', 'sky'].includes(saved) ? saved : 'dark'; } catch {}
 applyTheme();
-systemDark.addEventListener('change', () => { if ($('#theme').value === 'system') applyTheme(); });
 
 // ---------- new session sheet (folder + optional model) ----------
 let modelsCatalog = null;
