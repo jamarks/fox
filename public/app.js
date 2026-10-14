@@ -573,6 +573,8 @@ function answerFor(parent, c) {
 // Board: subagents grouped by task, so the same task on several models reads as a comparison.
 // Click a row to read its whole answer in place; bad answers are flagged.
 const expandedAgents = new Set();
+let agentsCollapsed = false;
+try { agentsCollapsed = localStorage.getItem('fox.agentsCollapsed') === '1'; } catch {}
 let lastChildShown = null;
 const fmtDur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + 's' : s < 3600 ? Math.round(s / 60) + 'm' : Math.floor(s / 3600) + 'h ' + Math.round((s % 3600) / 60) + 'm'; };
 const vendorDot = (model) => { const v = vendorOf(model); return `<span class="vdot" style="background:${v?.[2] ?? 'var(--muted)'}" title="${esc(v?.[3] ?? 'unknown vendor')}"></span>`; };
@@ -614,18 +616,17 @@ function agentsBoard(parent, { selectedId = null } = {}) {
       : !answer && c.outcome === 'cancelled' ? 'cancelled before answering' + (res ? ', it had started to write:' : '')
       : !res && parentBusy ? 'the answer arrives when the parent finishes its turn'
       : !res ? 'no answer recorded' : '';
-    const body = failure ? `<div class="agent-answer err">${esc(failure)}</div>`
-      : open ? `${note ? `<div class="agent-note">${note}</div>` : ''}${rounds.length > 1
+    // Closed rows are one line; everything else (its own task, the answer, why there is none) opens on click.
+    const taskLine = single && task ? `<div class="agent-note">task · ${esc(task.slice(0, 300))}${task.length > 300 ? '…' : ''}</div>` : '';
+    const body = !open ? ''
+      : failure ? `${taskLine}<div class="agent-answer err">${esc(failure)}</div>`
+      : `${taskLine}${note ? `<div class="agent-note">${note}</div>` : ''}${rounds.length > 1
           ? rounds.map((r, k) => `<div class="agent-note">round ${k + 1} · ${esc(r.message.slice(0, 160))}</div><div class="agent-answer">${esc(r.text)}</div>`).join('')
-          : res ? `<div class="agent-answer">${esc(res)}</div>` : ''}`
-      : res ? `<div class="agent-answer">${esc(res.slice(0, 400))}</div>`
-      : single && task ? `<div class="agent-answer muted" title="${esc(task)}">${esc(task.slice(0, 400))}</div>`
-      : c.phase === 'running' ? '<div class="agent-answer muted">working…</div>' : '';
+          : res ? `<div class="agent-answer">${esc(res)}</div>` : ''}`;
     const selected = c.id === selectedId;
-    return `<div class="agent ${open ? 'open' : ''} ${selected ? 'selected' : ''}" data-agent="${c.id}">${head}${body}${open && !selected ? `<a class="agent-open" href="#" data-child="${c.id}">its conversation →</a>` : ''}</div>`;
+    return `<div class="agent ${open ? 'open' : ''} ${selected ? 'selected' : ''}" data-agent="${c.id}" title="${open ? '' : esc(task)}">${head}${body}${open && !selected ? `<a class="agent-open" href="#" data-child="${c.id}">its conversation →</a>` : ''}</div>`;
   };
   // A header only where it says something: the same task on several models, or a named agent.
-  // A subagent with a task of its own shows that task in its row until its answer arrives.
   const html = [...groups.values()].map((g) => {
     if (g.items.length === 1 && !g.name) return `<div class="agroup">${row(g.items[0], true)}</div>`;
     const label = g.name ? `${ICON.threads} ${esc(g.name)}` : esc(g.task || 'no task');
@@ -634,7 +635,8 @@ function agentsBoard(parent, { selectedId = null } = {}) {
   });
   const n = parent.children.length;
   const title = `${n} subagent${n === 1 ? '' : 's'}${groups.size > 1 && groups.size < n ? ` · ${groups.size} tasks` : ''}`;
-  return `<div class="board"><div class="board-title">${title}</div>${html.join('')}</div>`;
+  const head = `<a href="#" class="section-title fold ${agentsCollapsed ? 'closed' : ''}" data-toggle-agents>${title}</a>`;
+  return agentsCollapsed ? head : `${head}<div class="board">${html.join('')}</div>`;
 }
 
 const convoShown = new Set();
@@ -678,6 +680,11 @@ async function toggleFile(path) {
 $('#transcript').addEventListener('click', (e) => {
   const opener = e.target.closest('[data-open-file]');
   if (opener) { e.preventDefault(); return post(`/api/sessions/${state.selected}/open-file`, { path: opener.dataset.openFile }); }
+  if (e.target.closest('[data-toggle-agents]')) {
+    e.preventDefault(); agentsCollapsed = !agentsCollapsed;
+    try { localStorage.setItem('fox.agentsCollapsed', agentsCollapsed ? '1' : '0'); } catch {}
+    lastTranscriptKey = ''; return loadTranscript(state.selected, true);
+  }
   if (e.target.closest('[data-toggle-files]')) {
     e.preventDefault(); filesCollapsed = !filesCollapsed;
     try { localStorage.setItem('fox.filesCollapsed', filesCollapsed ? '1' : '0'); } catch {}
