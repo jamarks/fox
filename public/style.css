@@ -293,3 +293,6 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 .file-preview { margin: 2px 0 8px; padding: 8px 10px; max-height: 320px; overflow: auto; font-size: 11px; line-height: 1.45; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; white-space: pre; cursor: text; user-select: text; }
 .file-note { margin: 2px 0 8px 76px; font-size: 11px; color: var(--muted); }
 .files-more { margin: 4px 6px 0; font-size: 11px; color: var(--accent); text-decoration: none; }
+.agent-note { margin-top: 4px; padding-left: 21px; font-size: 11px; color: var(--muted); font-style: italic; }
+.board .agent.selected { border-color: var(--accent); }
+.files + .board { margin-top: 18px; }

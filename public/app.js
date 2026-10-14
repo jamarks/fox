@@ -573,6 +573,7 @@ function answerFor(parent, c) {
 // Board: subagents grouped by task, so the same task on several models reads as a comparison.
 // Click a row to read its whole answer in place; bad answers are flagged.
 const expandedAgents = new Set();
+let lastChildShown = null;
 const fmtDur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + 's' : s < 3600 ? Math.round(s / 60) + 'm' : Math.floor(s / 3600) + 'h ' + Math.round((s % 3600) / 60) + 'm'; };
 const vendorDot = (model) => { const v = vendorOf(model); return `<span class="vdot" style="background:${v?.[2] ?? 'var(--muted)'}" title="${esc(v?.[3] ?? 'unknown vendor')}"></span>`; };
 // What went wrong with an answer, if anything: weak models often print a tool call instead of making it.
@@ -585,7 +586,7 @@ function answerFlag(c, text, parentBusy) {
   if (/^\s*(lo siento|sorry)/i.test(text) || /\b(no (?:puedo|pude|puede|es posible)|no se puede|i can(?:no|')t|i couldn't|i'm (?:not able|unable)|i am unable|unable to)\b/i.test(text.slice(0, 160))) return ["couldn't", 'err'];
   return null;
 }
-function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
+function agentsBoard(parent, { selectedId = null } = {}) {
   if (!parent?.children?.length) return '';
   const groups = new Map();
   parent.children.forEach((c, i) => {
@@ -604,15 +605,24 @@ function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
     const flag = !answer && res ? ['cancelled', 'muted'] : answerFlag(c, res, parentBusy);
     const task = c.task ?? child?.firstPrompt ?? '';
     const elapsed = c.phase === 'running' && c.startedAt ? fmtDur(Date.now() - c.startedAt) : child?.usage.wallMs ? fmtDur(child.usage.wallMs) : '';
-    const open = !compact && expandedAgents.has(c.id);
+    const open = expandedAgents.has(c.id);
     const head = `<div class="agent-head"><span class="idx">${i + 1}</span>${model ? vendorDot(model) : ''}<span class="agent-name">${model ? esc(modelShort(model)) : 'failed to start'}</span>${c.phase === 'running' ? '<span class="st working"><i></i></span>' : ''}${flag ? `<span class="flag ${flag[1]}">${flag[0]}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>`;
-    if (compact) return `<a class="agent compact ${c.id === selectedId ? 'selected' : ''}" href="#" data-child="${c.id}">${head}</a>`;
     const failure = c.failure ? (typeof c.failure === 'string' ? c.failure : (c.failure.message ?? c.failure.reason ?? JSON.stringify(c.failure))) : '';
+    // Open: the whole answer it returned to the parent (every round for a named agent), or why there is none.
+    const rounds = c.name ? (cachedResults.id === parent.id ? cachedResults.byAgent.get(c.name) ?? [] : []) : [];
+    const note = c.phase === 'running' ? 'working…'
+      : !answer && c.outcome === 'cancelled' ? 'cancelled before answering' + (res ? ', it had started to write:' : '')
+      : !res && parentBusy ? 'the answer arrives when the parent finishes its turn'
+      : !res ? 'no answer recorded' : '';
     const body = failure ? `<div class="agent-answer err">${esc(failure)}</div>`
-      : res ? `<div class="agent-answer">${esc(open ? res : res.slice(0, 400))}</div>`
+      : open ? `${note ? `<div class="agent-note">${note}</div>` : ''}${rounds.length > 1
+          ? rounds.map((r, k) => `<div class="agent-note">round ${k + 1} · ${esc(r.message.slice(0, 160))}</div><div class="agent-answer">${esc(r.text)}</div>`).join('')
+          : res ? `<div class="agent-answer">${esc(res)}</div>` : ''}`
+      : res ? `<div class="agent-answer">${esc(res.slice(0, 400))}</div>`
       : single && task ? `<div class="agent-answer muted" title="${esc(task)}">${esc(task.slice(0, 400))}</div>`
       : c.phase === 'running' ? '<div class="agent-answer muted">working…</div>' : '';
-    return `<div class="agent ${open ? 'open' : ''}" data-agent="${c.id}">${head}${body}${open ? `<a class="agent-open" href="#" data-child="${c.id}">its conversation →</a>` : ''}</div>`;
+    const selected = c.id === selectedId;
+    return `<div class="agent ${open ? 'open' : ''} ${selected ? 'selected' : ''}" data-agent="${c.id}">${head}${body}${open && !selected ? `<a class="agent-open" href="#" data-child="${c.id}">its conversation →</a>` : ''}</div>`;
   };
   // A header only where it says something: the same task on several models, or a named agent.
   // A subagent with a task of its own shows that task in its row until its answer arrives.
@@ -624,7 +634,7 @@ function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
   });
   const n = parent.children.length;
   const title = `${n} subagent${n === 1 ? '' : 's'}${groups.size > 1 && groups.size < n ? ` · ${groups.size} tasks` : ''}`;
-  return `<div class="board ${compact ? 'compact' : ''}"><div class="board-title">${title}</div>${html.join('')}</div>`;
+  return `<div class="board"><div class="board-title">${title}</div>${html.join('')}</div>`;
 }
 
 const convoShown = new Set();
@@ -789,27 +799,12 @@ async function loadTranscript(id, quiet = false) {
   $('#transcript-meta').innerHTML = `<span title="${esc([tokens, s.workspace].filter(Boolean).join('\n'))}">${s.model ? vendorDot(s.model) + esc(modelShort(s.model)) : ''}${s.provider ? ` · <span title="${esc(providerLabel(s.provider))}">${s.provider === 'gateway' ? '▲ gateway' : esc(s.provider)}</span>` : ''}${u.wallMs ? ' · ' + fmtDur(u.wallMs) : ''}${isChild ? ' · billed to parent' : u.cost ? ' · $' + u.cost.toFixed(2) : ''}</span>`;
 
   const html = [];
+  // Files first, then the subagents (a subagent's answer opens in its row), then the conversation.
+  html.push(filesSection(id, files));
   if (isChild) {
-    // Subagent view: what it gave back to the parent first, then how it got there.
-    const c = parent.children.find((x) => x.id === id);
-    const rounds = c?.name ? (resultsByAgent(parent).get(c.name) ?? []) : [];
-    const res = rounds.length ? null : answerFor(parent, c);
-    html.push(agentsBoard(parent, { selectedId: id, compact: true }));
-    html.push(`<section class="answer">
-      <div class="section-title">${rounds.length > 1 ? `${rounds.length} answers returned to the parent` : 'answer returned to the parent'}</div>
-      ${rounds.length ? rounds.map((r, i) => `<div class="round"><div class="round-q">${rounds.length > 1 ? `round ${i + 1} · ` : ''}${esc(r.message.slice(0, 200))}${r.message.length > 200 ? '…' : ''}</div><div class="answer-text">${esc(r.text)}</div></div>`).join('')
-        : res ? `<div class="answer-text">${esc(res)}</div>`
-        : c?.phase === 'running' ? '<div class="muted">still working</div>'
-        : c?.outcome === 'cancelled' ? `<div class="muted">cancelled before answering${s.partial ? ', it had started to write:' : ''}</div>${s.partial ? `<div class="answer-text muted">${esc(s.partial)}</div>` : ''}`
-        : parent.state === 'working' ? '<div class="muted">available when the parent finishes its turn</div>'
-        : '<div class="muted">no answer recorded</div>'}
-    </section>
-    `);
-    html.push(filesSection(id, files), '<div class="section-title">its conversation</div>');
-  } else {
-    if (parent.children?.length) html.push(agentsBoard(parent));
-    html.push(filesSection(id, files));
-  }
+    if (lastChildShown !== id) { expandedAgents.add(id); lastChildShown = id; } // arrive with its answer open
+    html.push(agentsBoard(parent, { selectedId: id }), '<div class="section-title">its conversation</div>');
+  } else if (parent.children?.length) html.push(agentsBoard(parent));
   // With the terminal open you are already reading the conversation there: keep this column to what the
   // terminal does not show (subagents, tokens) unless you ask for it.
   const terminalOpen = Boolean(s.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
