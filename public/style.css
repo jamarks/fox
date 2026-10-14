@@ -145,3 +145,4 @@ a.agent:hover { border-color: var(--accent); }
 .section-title a { color: var(--accent); text-decoration: none; text-transform: none; letter-spacing: 0; }
 .round + .round { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
 .round-q { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+#close-transcript { font-size: 16px; }

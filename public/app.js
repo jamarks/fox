@@ -509,6 +509,7 @@ function setTranscript(visible) {
   requestAnimationFrame(() => safeFit(state.tabs.get(state.activeTab)));
 }
 transcriptToggle.addEventListener('click', () => setTranscript(document.body.classList.contains('no-transcript')));
+$('#close-transcript').addEventListener('click', () => setTranscript(false));
 let initialTranscript = false;
 try { initialTranscript = localStorage.getItem('fox.transcript') === '1'; } catch {}
 setTranscript(initialTranscript);
