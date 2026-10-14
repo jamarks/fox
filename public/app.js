@@ -17,6 +17,8 @@ const shortPath = (p) => (p ?? '').replace(/^\/Users\/[^/]+/, '~');
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const briefArgs = (args) => {
   if (!args || typeof args !== 'object') return String(args ?? '');
+  if (args.request?.task) return args.request.task;
+  if (args.request?.message) return `${args.request.agent ? args.request.agent + ': ' : ''}${args.request.message}`;
   const v = args.command ?? args.path ?? args.pattern ?? args.file_path ?? args.query ?? args.prompt ?? Object.values(args)[0];
   return typeof v === 'string' ? v : JSON.stringify(v);
 };
@@ -428,10 +430,16 @@ try { initialTranscript = localStorage.getItem('fox.transcript') === '1'; } catc
 setTranscript(initialTranscript);
 
 // ---------- boot ----------
+// Deep links: ?session=<id> selects a session and shows its transcript; ?open=<id> also opens its terminal tab.
 (async () => {
   await refresh();
+  const q = new URLSearchParams(location.search);
+  const openId = q.get('open');
+  if (openId && sessionById(openId)) await openSession(openId);
+  const selId = q.get('session') ?? openId;
+  if (selId && sessionById(selId)) { setTranscript(true); selectSession(selId); }
   const first = state.terminals.find((t) => state.open.has(t.name));
-  if (first) activateTab(first.name);
+  if (first && !openId) activateTab(first.name);
   state.pollTimer = setInterval(async () => {
     await refresh();
     if (state.selected) loadTranscript(state.selected, true);

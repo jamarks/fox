@@ -5,6 +5,10 @@
 <p align="center"><b>A tiny local cockpit for the <a href="https://fx.sh">fx</a> coding agent.</b><br/>
 Every session, every subagent, every terminal. One tab. Nothing leaves your machine.</p>
 
+<p align="center"><img src="docs/screenshot.png" alt="fox: sessions on the left, a tmux-backed fx terminal in the middle, the subagent board and transcript on the right" /></p>
+
+<p align="center"><sub>One parent session that delegated to seven subagents. Left: the tree. Middle: the real fx terminal. Right: each subagent's state, answer and conversation.</sub></p>
+
 ---
 
 fx is a 7 MB coding agent that lives in your terminal. It is fast and it is honest about being a shell, which also means that once you have four of them running across three repos you lose track of which one is waiting for you.
@@ -30,7 +34,7 @@ npm install
 npm start
 ```
 
-Open http://127.0.0.1:4848. `PORT` and `FX_BIN` are the only knobs.
+Open http://127.0.0.1:4848. `PORT` and `FX_BIN` are the only knobs. Deep links work too: `?session=<id>` selects a session, `?open=<id>` also opens its terminal.
 
 ## How to read the screen
 
