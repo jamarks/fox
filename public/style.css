@@ -253,3 +253,5 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 .global-search-result mark { background: none; color: var(--accent); font-weight: 700; }
 .msg.global-match { outline: 1px solid var(--accent); border-radius: 6px; }
 .global-search-footer { display: flex; gap: 15px; padding: 8px 18px; border-top: 1px solid var(--border); color: var(--muted); font: 11px var(--mono); }
+.prov { margin-left: 6px; font-size: 10px; color: var(--muted); opacity: .85; }
+.prov.gw { color: var(--warn); opacity: .9; }

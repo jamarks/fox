@@ -65,6 +65,9 @@ function modelBadge(model) {
   return `<span class="vendor" style="background:${color}">${esc(name)}</span>`;
 }
 // "openai/gpt-5.2" → "gpt-5.2" once the vendor pill says who makes it.
+// Who pays: a subscription (codex, grok) or the pay-per-use Vercel AI Gateway. Shown next to the model.
+const providerLabel = (p) => ({ gateway: 'Vercel AI Gateway (pay per use)', codex: 'ChatGPT subscription', grok: 'Grok subscription' })[p] ?? (p || 'unknown provider');
+const providerTag = (p) => !p ? '' : p === 'gateway' ? '<span class="prov gw">▲ gateway</span>' : `<span class="prov">${esc(p)}</span>`;
 const modelShort = (model) => String(model ?? '').replace(/^[a-z0-9-]+\//i, '');
 const STATE_LABEL = { working: 'working', ready: 'waiting', needs_input: 'needs input', external: 'other terminal', done: 'done', idle: '' };
 const STATE_ORDER = { needs_input: 0, working: 1, ready: 2, external: 3, done: 4, idle: 5 };
@@ -164,7 +167,7 @@ function sessionCard(s, index = null) {
     ${s.firstPrompt ? `<div class="prompt">${esc(s.firstPrompt)}</div>` : ''}
     <div class="sub">
       ${stateHtml}
-      <span class="model mono" title="${esc(s.model ?? '')}">${esc(modelShort(s.model))}</span>
+      <span class="model mono" title="${esc(s.model ?? '')} via ${esc(providerLabel(s.provider))}">${esc(modelShort(s.model))}${providerTag(s.provider)}</span>
       <span>${fmtTime(s.updatedAt)}</span>
     </div>
     ${childrenHtml(s)}`;
@@ -715,7 +718,7 @@ async function loadTranscript(id, quiet = false) {
     ? `<a href="#" class="crumb" data-goto="${parent.id}">${esc(displayTitle(parent))}</a><span class="crumb-sep">›</span>${esc(displayTitle(s))}`
     : esc(displayTitle(s));
   $('#transcript-meta').innerHTML = `
-    <span>${modelBadge(s.model)}${esc(modelShort(s.model))} <span class="muted">· ${esc(s.provider)}</span></span>
+    <span>${modelBadge(s.model)}${esc(modelShort(s.model))} <span class="muted" title="${esc(providerLabel(s.provider))}">· ${s.provider === 'gateway' ? '▲ gateway' : esc(s.provider)}</span></span>
     ${s.usage.input + s.usage.output ? `<span>${fmtTokens(s.usage.input)} in · ${fmtTokens(s.usage.output)} out · ${fmtTokens(s.usage.cacheRead)} cache</span><span>${s.usage.cost ? '$' + s.usage.cost.toFixed(4) : 'subscription'}</span><span>${(s.usage.wallMs / 1000).toFixed(0)}s</span>` : '<span>tokens billed to parent</span>'}
     <span title="${esc(s.workspace)}">${esc(shortPath(s.workspace))}</span>`;
 
