@@ -386,6 +386,42 @@ function answerFor(parent, c, child) {
   return resultsByTask(parent).get(norm(c?.task ?? child?.firstPrompt ?? '')) ?? null;
 }
 
+// Board: one compact row per subagent. Click goes to that subagent's view.
+function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
+  if (!parent?.children?.length) return '';
+  const rows = parent.children.map((c) => {
+    const child = sessionById(c.id);
+    const st = child?.state ?? 'done';
+    const elapsed = c.phase === 'running' && c.startedAt ? Math.round((Date.now() - c.startedAt) / 1000) + 's' : child?.usage.wallMs ? Math.round(child.usage.wallMs / 1000) + 's' : '';
+    const res = answerFor(parent, c, child);
+    const sel = c.id === selectedId;
+    return `<a class="agent ${st} ${sel ? 'selected' : ''} ${compact ? 'compact' : ''}" href="#" data-child="${c.id}">
+      <div class="agent-head"><span class="st ${st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 90))}</span><span class="agent-elapsed">${elapsed}</span></div>
+      ${!compact ? (res ? `<div class="agent-answer">${esc(res.slice(0, 160))}${res.length > 160 ? '…' : ''}</div>` : c.phase === 'running' ? '<div class="agent-answer muted">working, no answer yet</div>' : '') : ''}
+    </a>`;
+  });
+  const title = compact
+    ? `${parent.children.length} subagents · pick another, or the parent name above to go back`
+    : `${parent.children.length} subagent${parent.children.length === 1 ? '' : 's'} · click one to see its answer and conversation`;
+  return `<div class="board ${compact ? 'compact' : ''}"><div class="board-title">${title}</div>${rows.join('')}</div>`;
+}
+
+const convoShown = new Set();
+
+$('#transcript').addEventListener('click', (e) => {
+  const toggle = e.target.closest('a[data-show-convo], a[data-hide-convo]');
+  if (toggle) {
+    e.preventDefault();
+    const id = toggle.dataset.showConvo ?? toggle.dataset.hideConvo;
+    toggle.dataset.showConvo ? convoShown.add(id) : convoShown.delete(id);
+    lastTranscriptKey = ''; return loadTranscript(id);
+  }
+  const link = e.target.closest('a[data-child], a[data-goto]');
+  if (!link) return;
+  e.preventDefault();
+  selectSession(link.dataset.child ?? link.dataset.goto);
+});
+
 let lastTranscriptKey = '';
 let lastEventCount = { id: null, n: 0 };
 async function loadTranscript(id, quiet = false) {
@@ -395,6 +431,7 @@ async function loadTranscript(id, quiet = false) {
   const isChild = Boolean(s.parentId);
   if (parent?.children?.length && (cachedResults.id !== parent.id || parent.children.some((c) => c.phase === 'running'))) await refreshResults(parent);
   const events = await (await fetch(`/api/sessions/${id}/events`)).json();
+  if (state.selected !== id) return; // selection changed while we were fetching: drop this render
   const termOpenKey = Boolean(s.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
   const key = id + ':' + events.length + ':' + (s.updatedAt ?? 0) + ':' + (parent?.children ?? []).map((c) => c.phase).join(',') + ':' + termOpenKey + ':' + Math.floor(Date.now() / 5000);
   if (quiet && key === lastTranscriptKey) return;
@@ -482,13 +519,14 @@ setTranscript(initialTranscript);
   await refresh();
   const q = new URLSearchParams(location.search);
   const openId = q.get('open');
-  if (openId && sessionById(openId)) await openSession(openId);
   const selId = q.get('session') ?? openId;
-  if (selId && sessionById(selId)) { setTranscript(true); selectSession(selId); }
+  // Restore the last active tab first; a deep link then wins over it.
   let lastActive = null;
   try { lastActive = localStorage.getItem('fox.active'); } catch {}
   const restore = state.terminals.find((t) => t.name === lastActive && state.open.has(t.name)) ?? state.terminals.find((t) => state.open.has(t.name));
   if (restore && !openId) activateTab(restore.name);
+  if (openId && sessionById(openId)) await openSession(openId);
+  if (selId && sessionById(selId)) { setTranscript(true); selectSession(selId); }
   state.pollTimer = setInterval(async () => {
     await refresh();
     if (state.selected) loadTranscript(state.selected, true);
