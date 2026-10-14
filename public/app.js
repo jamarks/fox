@@ -101,6 +101,8 @@ function detectTransitions() {
 let inboxSeen = null;
 function renderReplyInbox() {
   if (!inboxSeen) {
+    // A browser can load new JS while an older server is still running. Wait for its new overview shape.
+    if (state.sessions.length && !state.sessions.some((s) => Object.hasOwn(s, 'latestReply'))) return;
     try { inboxSeen = JSON.parse(localStorage.getItem('fox.inbox.seen')); } catch {}
     if (!inboxSeen || typeof inboxSeen !== 'object' || Array.isArray(inboxSeen)) {
       // First visit: don't flood the inbox with all the old conversations.

@@ -31,6 +31,10 @@
       </div>
     </header>
     <div id="summary"></div>
+    <div id="reply-inbox" class="hidden">
+      <button id="reply-inbox-toggle" type="button" aria-expanded="false">● <span id="reply-inbox-count"></span> <span id="reply-inbox-label">new replies</span> <span class="inbox-caret">▾</span></button>
+      <div id="reply-inbox-list" class="hidden"></div>
+    </div>
     <form id="new-session" autocomplete="off" class="hidden">
       <div class="row">
         <input id="new-cwd" placeholder="~/path/to/repo" />
