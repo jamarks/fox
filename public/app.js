@@ -357,61 +357,35 @@ $('#bell').addEventListener('click', () => {
 try { state.sound = localStorage.getItem('fx-panel.sound') === '1'; $('#bell').classList.toggle('on', state.sound); } catch {}
 
 // ---------- transcript ----------
-// The parent stores each subagent's answer as a tool_result; we link them by task text.
-let cachedResults = { id: null, map: new Map() };
-function resultsByTask(parent) {
-  return cachedResults.id === parent.id ? cachedResults.map : new Map();
-}
+// The parent stores each subagent's answer as a tool_result. One-off agents are matched by task text
+// (normalized, prefix only: the sidebar prompt is truncated); named agents by name, keeping every round.
+const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 140);
+let cachedResults = { id: null, byTask: new Map(), byAgent: new Map() };
+function resultsByTask(parent) { return cachedResults.id === parent.id ? cachedResults.byTask : new Map(); }
+function resultsByAgent(parent) { return cachedResults.id === parent.id ? cachedResults.byAgent : new Map(); }
 async function refreshResults(parent) {
   if (!parent?.children?.length) return;
   const events = await (await fetch(`/api/sessions/${parent.id}/events`)).json();
-  const map = new Map();
+  const byTask = new Map(); const byAgent = new Map();
   for (const ev of events) {
     if (ev.kind !== 'tool_call' || ev.name !== 'subagent' || !ev.result) continue;
-    const task = ev.args?.request?.task ?? ev.args?.request?.message ?? '';
+    const req = ev.args?.request ?? {};
     let text = ev.result.preview;
     try { const j = JSON.parse(text); text = j.result ?? text; } catch {}
-    if (task) map.set(task, text);
+    if (req.agent) {
+      if (!byAgent.has(req.agent)) byAgent.set(req.agent, []);
+      byAgent.get(req.agent).push({ message: req.message ?? '', text });
+    }
+    const task = req.task ?? req.message;
+    if (task) byTask.set(norm(task), text);
   }
-  cachedResults = { id: parent.id, map };
+  cachedResults = { id: parent.id, byTask, byAgent };
+}
+function answerFor(parent, c, child) {
+  if (c?.name) { const rounds = resultsByAgent(parent).get(c.name) ?? []; return rounds.length ? rounds.at(-1).text : null; }
+  return resultsByTask(parent).get(norm(c?.task ?? child?.firstPrompt ?? '')) ?? null;
 }
 
-// Board: shown only when a parent is selected. One compact row per subagent; click goes to that subagent's view.
-function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
-  if (!parent?.children?.length) return '';
-  const results = resultsByTask(parent);
-  const rows = parent.children.map((c) => {
-    const child = sessionById(c.id);
-    const st = child?.state ?? 'done';
-    const elapsed = c.phase === 'running' && c.startedAt ? Math.round((Date.now() - c.startedAt) / 1000) + 's' : child?.usage.wallMs ? Math.round(child.usage.wallMs / 1000) + 's' : '';
-    const res = results.get(c.task ?? child?.firstPrompt ?? '');
-    const sel = c.id === selectedId;
-    return `<a class="agent ${st} ${sel ? 'selected' : ''} ${compact ? 'compact' : ''}" href="#" data-child="${c.id}">
-      <div class="agent-head"><span class="st ${st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 90))}</span><span class="agent-elapsed">${elapsed}</span></div>
-      ${!compact ? (res ? `<div class="agent-answer">${esc(res.slice(0, 160))}${res.length > 160 ? '…' : ''}</div>` : c.phase === 'running' ? '<div class="agent-answer muted">working, no answer yet</div>' : '') : ''}
-    </a>`;
-  });
-  const title = compact
-    ? `${parent.children.length} subagents · pick another, or the parent name above to go back`
-    : `${parent.children.length} subagent${parent.children.length === 1 ? '' : 's'} · click one to see its answer and conversation`;
-  return `<div class="board ${compact ? 'compact' : ''}"><div class="board-title">${title}</div>${rows.join('')}</div>`;
-}
-
-$('#transcript').addEventListener('click', (e) => {
-  const toggle = e.target.closest('a[data-show-convo], a[data-hide-convo]');
-  if (toggle) {
-    e.preventDefault();
-    const id = toggle.dataset.showConvo ?? toggle.dataset.hideConvo;
-    toggle.dataset.showConvo ? convoShown.add(id) : convoShown.delete(id);
-    lastTranscriptKey = ''; return loadTranscript(id);
-  }
-  const link = e.target.closest('a[data-child], a[data-goto]');
-  if (!link) return;
-  e.preventDefault();
-  selectSession(link.dataset.child ?? link.dataset.goto);
-});
-
-const convoShown = new Set();
 let lastTranscriptKey = '';
 let lastEventCount = { id: null, n: 0 };
 async function loadTranscript(id, quiet = false) {
@@ -439,11 +413,13 @@ async function loadTranscript(id, quiet = false) {
   if (isChild) {
     // Subagent view: what it gave back to the parent first, then how it got there.
     const c = parent.children.find((x) => x.id === id);
-    const res = resultsByTask(parent).get(c?.task ?? s.firstPrompt ?? '');
+    const rounds = c?.name ? (resultsByAgent(parent).get(c.name) ?? []) : [];
+    const res = rounds.length ? null : answerFor(parent, c, s);
     html.push(agentsBoard(parent, { selectedId: id, compact: true }));
     html.push(`<section class="answer">
-      <div class="section-title">answer returned to the parent</div>
-      ${res ? `<div class="answer-text">${esc(res)}</div>`
+      <div class="section-title">${rounds.length > 1 ? `${rounds.length} answers returned to the parent` : 'answer returned to the parent'}</div>
+      ${rounds.length ? rounds.map((r, i) => `<div class="round"><div class="round-q">${rounds.length > 1 ? `round ${i + 1} · ` : ''}${esc(r.message.slice(0, 200))}${r.message.length > 200 ? '…' : ''}</div><div class="answer-text">${esc(r.text)}</div></div>`).join('')
+        : res ? `<div class="answer-text">${esc(res)}</div>`
         : c?.phase === 'running' ? '<div class="muted">still working, nothing returned yet</div>'
         : parent.state === 'working' ? '<div class="muted">answered, but the parent is still in the middle of its turn. fx writes the answer to disk when that turn ends; until then it is only visible in the terminal.</div>'
         : '<div class="muted">no answer recorded</div>'}
