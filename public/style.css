@@ -200,3 +200,6 @@ body.night aside, body.night section, body.night main { position: relative; z-in
 body.night #center { background: transparent; }
 body.night .term-wrap .xterm, body.night .xterm-viewport { background: transparent !important; }
 .agent-answer.err { color: var(--err); }
+body.night aside, body.night section { backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+body.night .tab, body.night .session.active, body.night .child.active { background: rgba(22,26,42,0.55); }
+body.night .tab.active { background: rgba(7,9,18,0.35); }
