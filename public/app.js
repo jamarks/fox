@@ -247,6 +247,7 @@ function selectSession(id) {
   state.selected = id;
   renderSessions();
   loadTranscript(id);
+  syncUrl();
 }
 
 async function renameInline(id) {
@@ -390,6 +391,16 @@ function renderTabs() {
   $('#empty-state').style.display = state.tabs.size ? 'none' : 'flex';
 }
 
+// Keep the address bar in sync so a refresh (or a bookmark) lands on the same session.
+function syncUrl() {
+  const t = state.terminals.find((x) => x.name === state.activeTab);
+  const sel = state.selected;
+  const q = new URLSearchParams();
+  if (t?.resume) q.set('open', t.resume);
+  if (sel && sel !== t?.resume) q.set('session', sel);
+  const url = q.toString() ? `?${q}` : location.pathname;
+  if (location.search !== (q.toString() ? `?${q}` : '')) history.replaceState(null, '', url);
+}
 function activateTab(name) {
   state.activeTab = name;
   try { localStorage.setItem('fox.active', name); } catch {}
@@ -399,6 +410,7 @@ function activateTab(name) {
   if (t) { safeFit(t); connectTab(t); t.term.focus(); }
   const term = state.terminals.find((x) => x.name === name);
   if (term?.resume) selectSession(term.resume);
+  syncUrl();
 }
 
 function closeTab(name) {
@@ -410,7 +422,7 @@ function closeTab(name) {
   t.wrap.remove();
   state.tabs.delete(name);
   if (state.activeTab === name) state.activeTab = [...state.tabs.keys()].pop() ?? null;
-  if (state.activeTab) activateTab(state.activeTab); else renderTabs();
+  if (state.activeTab) activateTab(state.activeTab); else { renderTabs(); syncUrl(); }
 }
 
 // Tabs follow tmux: terminals that died disappear, new ones (e.g. opened from another browser) get a tab.
