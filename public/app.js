@@ -30,7 +30,7 @@ const briefArgs = (args) => {
   return typeof v === 'string' ? v : JSON.stringify(v);
 };
 const sessionById = (id) => state.sessions.find((s) => s.id === id);
-const displayTitle = (s) => s.customName || (s.subagent ? (s.subagent.name ? `🧵 ${s.subagent.name}` : (s.subagent.task ?? s.firstPrompt ?? '').slice(0, 60) || s.title) : s.title);
+const displayTitle = (s) => s.customName || (s.subagent ? (s.subagent.name ? s.subagent.name : (s.subagent.task ?? s.firstPrompt ?? '').slice(0, 60) || s.title) : s.title);
 const post = (path, body, method = 'POST') => fetch(path, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json());
 const showArchived = { value: false };
 let groupOrder = [];
@@ -42,6 +42,8 @@ const saveCollapsed = () => { try { localStorage.setItem('fox.collapsed', JSON.s
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 const ICON = {
+  // subagents: one line branching into three, drawn in the current text color
+  threads: '<svg class="threads" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8h4M6.5 8c2 0 2-4 4-4h3M6.5 8h7M6.5 8c2 0 2 4 4 4h3"/><circle cx="2.5" cy="8" r="1.3" fill="currentColor" stroke="none"/></svg>',
   github: '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>',
   git: '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="4" cy="3.5" r="1.5"/><circle cx="4" cy="12.5" r="1.5"/><circle cx="12" cy="6" r="1.5"/><path d="M4 5v6M12 7.5c0 2-8 1-8 3.5"/></svg>',
   archive: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="3" rx=".6"/><path d="M2.5 5.5v7a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-7M6.5 8.5h3"/></svg>',
@@ -103,7 +105,7 @@ function renderSummary() {
   if (count('needs_input')) parts.push(`<span class="st needs_input">${count('needs_input')} need input</span>`);
   if (count('working')) parts.push(`<span class="st working">${count('working')} working</span>`);
   const subs = state.sessions.filter((s) => s.subagent?.phase === 'running').length;
-  if (subs) parts.push(`<span class="st working">🧵 ${subs} subagent${subs === 1 ? '' : 's'}</span>`);
+  if (subs) parts.push(`<span class="st working">${ICON.threads} ${subs} subagent${subs === 1 ? '' : 's'}</span>`);
   // Always rendered, even empty, so the list below never jumps when activity starts or stops.
   $('#summary').innerHTML = parts.join('') || '<span class="muted">quiet</span>';
 }
@@ -186,7 +188,7 @@ function childrenHtml(parent) {
   const parts = [`${kids.length} subagent${kids.length === 1 ? '' : 's'}`];
   if (working) parts.push(`<span class="st working"><i></i>${working} working</span>`);
   if (waiting) parts.push(`<span class="st ready"><i></i>${waiting} waiting</span>`);
-  return `<div class="children-count" data-child="${kids[0].id}" title="open the subagent board">🧵 ${parts.join(' · ')}</div>`;
+  return `<div class="children-count" data-child="${kids[0].id}" title="open the subagent board">${ICON.threads} ${parts.join(' · ')}</div>`;
 }
 
 // Drag a project header to reorder groups.
@@ -536,7 +538,7 @@ function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
     const model = child?.model ?? null;
     const task = c.task ?? child?.firstPrompt ?? '';
     // Row: number · state · who (name, or vendor + model) · elapsed. The task itself is the tooltip.
-    const who = c.name ? `🧵 ${esc(c.name)}` : model ? `${modelBadge(model)}<span class="agent-modelname">${esc(modelShort(model))}</span>` : esc(task.slice(0, 60) || 'failed to start');
+    const who = c.name ? `${ICON.threads} ${esc(c.name)}` : model ? `${modelBadge(model)}<span class="agent-modelname">${esc(modelShort(model))}</span>` : esc(task.slice(0, 60) || 'failed to start');
     return `<a class="agent ${st} ${sel ? 'selected' : ''} ${compact ? 'compact' : ''}" href="#" data-child="${c.id}" title="${esc(task)}">
       <div class="agent-head"><span class="idx">${i + 1}</span><span class="st ${c.failure ? 'needs_input' : st}"><i></i></span><span class="agent-name">${who}</span>${c.name && model && model !== parent.model ? `<span class="agent-model">${modelBadge(model)}${esc(modelShort(model))}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>
       ${!compact ? (c.failure ? `<div class="agent-answer err">failed · ${esc(typeof c.failure === 'string' ? c.failure : (c.failure.message ?? c.failure.reason ?? JSON.stringify(c.failure))).slice(0, 140)}</div>` : res ? `<div class="agent-answer">${esc(res.slice(0, 160))}${res.length > 160 ? '…' : ''}</div>` : c.phase === 'running' ? '<div class="agent-answer muted">working, no answer yet</div>' : '') : ''}
@@ -765,12 +767,12 @@ async function loadTranscript(id, quiet = false) {
     if (!isChild && ev.kind === 'tool_call' && ev.name === 'subagent' && parent.children?.length) continue; // already in the board
     const match = globalMessage?.id === id && globalMessage.index === messageIndex;
     if (ev.kind === 'user') html.push(`<div class="msg user${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? 'task from parent' : 'you'}</div><div class="text">${esc(ev.text)}</div></div>`);
-    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? (s.subagent?.name ? '🧵 ' + esc(s.subagent.name) : 'subagent') : 'fx'}</div><div class="text">${esc(ev.text)}</div></div>`);
+    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? (s.subagent?.name ? ICON.threads + ' ' + esc(s.subagent.name) : 'subagent') : 'fx'}</div><div class="text">${esc(ev.text)}</div></div>`);
     else if (ev.kind === 'tool_call') {
       const st = ev.result?.status ?? 'pending';
       const isSub = ev.name === 'subagent';
       html.push(`<details class="tool ${st}">
-        <summary><span class="dot"></span><span class="name">${isSub ? '🧵 ' : ''}${esc(ev.name)}</span><span class="brief">${esc(briefArgs(ev.args))}</span></summary>
+        <summary><span class="dot"></span><span class="name">${isSub ? ICON.threads + ' ' : ''}${esc(ev.name)}</span><span class="brief">${esc(briefArgs(ev.args))}</span></summary>
         <pre class="label">args</pre><pre>${esc(typeof ev.args === 'string' ? ev.args : JSON.stringify(ev.args, null, 2))}</pre>
         ${ev.result ? `<pre class="label">result · ${st} · ${ev.result.bytes} bytes</pre><pre>${esc(ev.result.preview)}</pre>` : ''}
       </details>`);
