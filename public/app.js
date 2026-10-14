@@ -335,7 +335,7 @@ function attachTab(t, { user = false, activate = true } = {}) {
   wrap.className = 'term-wrap warming';
   $('#terminals').appendChild(wrap);
   const term = new Terminal({
-    cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', scrollback: 5000, allowTransparency: true,
+    cursorBlink: true, fontSize, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', scrollback: 5000, allowTransparency: true,
     theme: state.palette ? { background: state.palette.sky ? 'rgba(0,0,0,0)' : state.palette.bg, foreground: state.palette.text, cursor: state.palette.cursor, selectionBackground: state.palette.sel } : undefined,
   });
   const fit = new FitAddon.FitAddon();
@@ -822,6 +822,10 @@ setTranscript(initialTranscript);
 // Palettes. "sky" adds the star field.
 const PALETTES = {
   dark:    { bg: '#0f1115', panel: '#161920', panel2: '#1d2129', border: '#262b36', text: '#e6e8ee', muted: '#8b93a7', accent: '#7aa2f7', ok: '#9ece6a', err: '#f7768e', warn: '#e0af68', cursor: '#7aa2f7', sel: '#2a3550' },
+  dusk:    { bg: '#1b1530', panel: '#241c40', panel2: '#2e2452', border: '#45396f', text: '#f1e9ff', muted: '#a99cc9', accent: '#ff9f6b', ok: '#7ee8a2', err: '#ff6b8a', warn: '#ffd36b', cursor: '#ff9f6b', sel: '#3d3270' },
+  terracotta: { bg: '#2a1510', panel: '#33190f', panel2: '#3f2014', border: '#5c3222', text: '#fbe9d9', muted: '#cfa48a', accent: '#ffb000', ok: '#9fd36b', err: '#ff6a5a', warn: '#ffc857', cursor: '#ffb000', sel: '#5a2e1c' },
+  copper:  { bg: '#171a1f', panel: '#1d2127', panel2: '#252a32', border: '#3a414c', text: '#f2ece4', muted: '#9aa3ad', accent: '#e0875a', ok: '#8fd18b', err: '#f27f73', warn: '#e8b35b', cursor: '#e0875a', sel: '#3a3f4a' },
+  plum:    { bg: '#241421', panel: '#2c1a2a', panel2: '#382236', border: '#573a55', text: '#fdeaf4', muted: '#c69ab8', accent: '#ff9e3d', ok: '#9be6a3', err: '#ff6680', warn: '#ffd36b', cursor: '#ff9e3d', sel: '#4e2d4b' },
   mauve:   { bg: '#2b2230', panel: '#352a3b', panel2: '#413449', border: '#5f4e6a', text: '#f8f0ff', muted: '#b8a7c7', accent: '#ffb86b', ok: '#a8e6a8', err: '#ff7b94', warn: '#ffd98a', cursor: '#ffb86b', sel: '#5a4a66' },
 };
 // Sky: the dark palette with translucent panels over a slowly drifting star field (real constellations).
@@ -939,8 +943,24 @@ const sky = (() => {
   return { start() { if (!raf) raf = requestAnimationFrame(draw); }, stop() { if (raf) cancelAnimationFrame(raf); raf = null; } };
 })();
 $('#theme').addEventListener('change', () => { try { localStorage.setItem('fox.theme', $('#theme').value); } catch {} applyTheme(); });
-try { const saved = localStorage.getItem('fox.theme'); $('#theme').value = saved === 'night' ? 'sky' : ['dark', 'mauve', 'sky'].includes(saved) ? saved : 'dark'; } catch {}
+const THEME_ORDER = ['dark', 'dusk', 'mauve', 'terracotta', 'copper', 'plum', 'sky'];
+try { const saved = localStorage.getItem('fox.theme'); $('#theme').value = saved === 'night' ? 'sky' : THEME_ORDER.includes(saved) ? saved : 'dark'; } catch {}
 applyTheme();
+function cycleTheme(step = 1) {
+  const i = THEME_ORDER.indexOf($('#theme').value);
+  $('#theme').value = THEME_ORDER[(i + step + THEME_ORDER.length) % THEME_ORDER.length];
+  $('#theme').dispatchEvent(new Event('change'));
+}
+
+// ---------- terminal font size ----------
+let fontSize = 13;
+try { fontSize = Number(localStorage.getItem('fox.fontSize')) || 13; } catch {}
+function setFontSize(px) {
+  fontSize = Math.min(24, Math.max(9, px));
+  try { localStorage.setItem('fox.fontSize', String(fontSize)); } catch {}
+  for (const t of state.tabs.values()) { t.term.options.fontSize = fontSize; t.settled = null; }
+  fitActive();
+}
 
 // ---------- new session sheet (folder + optional model) ----------
 let modelsCatalog = null;
@@ -1001,6 +1021,9 @@ const SHORTCUTS = [
   ['⌥F', 'search this conversation'],
   ['⌥Space', 'search all sessions'],
   ['⌥\\', 'show / hide the right column'],
+  ['⌥L / ⌥⇧L', 'next / previous theme'],
+  ['⌥= / ⌥-', 'bigger / smaller terminal font'],
+  ['⌥0', 'reset font size'],
   ['⌥?', 'this list'],
 ];
 function currentWorkspace() {
@@ -1032,6 +1055,10 @@ window.addEventListener('keydown', (e) => {
   else if (code === 'KeyF') { setTranscript(true); $('#search').focus(); $('#search').select(); }
   else if (code === 'Space') { globalSearch.classList.contains('hidden') ? openGlobalSearch() : closeGlobalSearch(); }
   else if (code === 'Backslash') { setTranscript(document.body.classList.contains('no-transcript')); }
+  else if (code === 'KeyL') { cycleTheme(e.shiftKey ? -1 : 1); }
+  else if (code === 'Equal' || code === 'NumpadAdd') { setFontSize(fontSize + 1); }
+  else if (code === 'Minus' || code === 'NumpadSubtract') { setFontSize(fontSize - 1); }
+  else if (code === 'Digit0') { setFontSize(13); }
   else if (code === 'Slash' || e.key === '?') { showShortcuts(); }
   else handled = false;
   if (handled) { e.preventDefault(); e.stopPropagation(); }

@@ -29,7 +29,7 @@ fox fixes that. It reads what fx already writes to `~/.fx`, runs every session i
 - **Archive and rename** without touching fx's files. Archiving a running session stops its process first, after asking.
 - **Open any folder** with the native macOS picker, or the `+` on a group for a new session in that project.
 - **Git at a glance.** Each workspace shows its GitHub repo (linked), current branch and the number of uncommitted files.
-- **Themes.** Dark (default), *mauve*, and *sky*: the dark palette with translucent panels over a slowly drifting star field drawn from real star coordinates, Orion, the Big Dipper, Cassiopeia, Scorpius, Cygnus, Lyra, Leo and friends.
+- **Themes.** Dark (default), *dusk*, *mauve*, *terracotta*, *copper*, *plum*, and *sky*: the dark palette with translucent panels over a slowly drifting star field drawn from real star coordinates, Orion, the Big Dipper, Cassiopeia, Scorpius, Cygnus, Lyra, Leo and friends.
 - **Resizable columns.** Drag the dividers; widths are remembered.
 
 ## Run it
@@ -61,6 +61,8 @@ Option is the modifier, because ⌘T and ⌘W belong to the browser.
 | ⌥F | Search this conversation |
 | ⌥Space | Search all sessions |
 | ⌥\ | Show / hide the right column |
+| ⌥L / ⌥⇧L | Next / previous theme |
+| ⌥= / ⌥- / ⌥0 | Terminal font bigger / smaller / reset |
 | ⌥? | Shortcut list |
 
 ## How to read the screen
