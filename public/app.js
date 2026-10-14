@@ -29,7 +29,7 @@ const showArchived = { value: false };
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 const STATE_LABEL = { working: 'working', ready: 'waiting', needs_input: 'needs input', external: 'other terminal', done: 'done', idle: '' };
-const STATE_ORDER = { needs_input: 0, ready: 1, working: 2, external: 3, done: 4, idle: 5 };
+const STATE_ORDER = { needs_input: 0, working: 1, ready: 2, external: 3, done: 4, idle: 5 };
 
 // ---------- data ----------
 async function refresh() {
