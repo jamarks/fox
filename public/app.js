@@ -227,7 +227,9 @@ $('#session-groups').addEventListener('click', async (e) => {
   if (d.archive) {
     const s = sessionById(d.archive);
     if (s?.terminal) {
-      if (!confirm('This session has a running fx process. Stop it and archive?')) return;
+      // An idle fx loses nothing when stopped (the session is on disk); only ask when it is mid-task.
+      const busy = s.state === 'working' || s.state === 'needs_input';
+      if (busy && !confirm(s.state === 'working' ? 'fx is working in this session. Stop it and archive?' : 'fx is waiting for your answer in this session. Stop it and archive?')) return;
       await post(`/api/terminals/${encodeURIComponent(s.terminal)}`, null, 'DELETE');
       closeTab(s.terminal);
     }

@@ -28,7 +28,7 @@ fox fixes that. It reads what fx already writes to `~/.fx`, runs every session i
 - **Drop files on the terminal.** Drag images, text or anything else from Finder onto the terminal. Images become fx image attachments (`[Image 1]`); text files up to 200 KB are pasted inline with their name; other files are saved to `~/.config/fox/drops/` and their path is pasted so the agent can read them. Nothing is sent until you press Enter.
 - **Search across all sessions.** ⌥Space (or the ⌕ in the header) opens a palette that searches session names and messages in every project, archived ones included. Pick a hit and the session opens on that message. The index lives in memory, refreshes only the sessions whose files changed, and never includes tool output.
 - **Tokens and cost** per session, and a transcript viewer with expandable tool calls for sessions whose terminal is not open.
-- **Archive and rename** without touching fx's files. Archiving a running session stops its process first, after asking.
+- **Archive and rename** without touching fx's files. Archiving stops the session's fx process first; it asks only if fx is working or waiting for your answer.
 - **Open any folder** with the native macOS picker, or the `+` on a group for a new session in that project.
 - **Keyboard first.** Option shortcuts for new sessions, tabs, pinning, search, themes and terminal font size; ⌥? lists them.
 - **Git at a glance.** Each workspace shows its GitHub repo (linked), current branch and the number of uncommitted files.
