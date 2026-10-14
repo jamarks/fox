@@ -96,12 +96,13 @@ function renderSummary() {
   const live = state.sessions.filter((s) => s.terminal && !s.archived);
   const count = (st) => live.filter((s) => s.state === st).length;
   const parts = [];
+  // Only what needs attention: waiting is the normal state and is not worth a line.
   if (count('needs_input')) parts.push(`<span class="st needs_input">${count('needs_input')} need input</span>`);
-  if (count('ready')) parts.push(`<span class="st ready">${count('ready')} waiting</span>`);
   if (count('working')) parts.push(`<span class="st working">${count('working')} working</span>`);
   const subs = state.sessions.filter((s) => s.subagent?.phase === 'running').length;
   if (subs) parts.push(`<span class="st working">🧵 ${subs} subagent${subs === 1 ? '' : 's'}</span>`);
-  $('#summary').innerHTML = parts.join('') || '<span class="muted">no agents running</span>';
+  $('#summary').innerHTML = parts.join('');
+  $('#summary').classList.toggle('hidden', !parts.length);
 }
 
 function renderSessions() {
@@ -555,6 +556,87 @@ $('#transcript').addEventListener('click', (e) => {
   selectSession(link.dataset.child ?? link.dataset.goto);
 });
 
+// ---------- global search ----------
+const globalSearch = $('#global-search');
+const globalQuery = $('#global-search-query');
+const globalResults = $('#global-search-results');
+let globalHits = [], globalActive = 0, globalRequest = 0, globalTimer;
+let globalMessage = null;
+function openGlobalSearch() {
+  globalSearch.classList.remove('hidden');
+  globalQuery.value = '';
+  globalHits = []; globalActive = 0;
+  globalResults.innerHTML = '<div class="global-search-empty">Search session names and messages across all projects</div>';
+  globalQuery.focus();
+}
+function closeGlobalSearch() {
+  globalSearch.classList.add('hidden');
+  clearTimeout(globalTimer);
+  globalRequest++; // discard responses from the previous query/opening
+}
+function markedMatch(text, query) {
+  const at = text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
+  return at < 0 ? esc(text) : esc(text.slice(0, at)) + '<mark>' + esc(text.slice(at, at + query.length)) + '</mark>' + esc(text.slice(at + query.length));
+}
+function renderGlobalHits() {
+  const q = globalQuery.value.trim();
+  globalResults.innerHTML = globalHits.map((hit, i) => {
+    const s = sessionById(hit.id);
+    if (!s) return '';
+    const label = hit.kind === 'name' ? 'session' : hit.kind === 'user' ? 'you' : 'fx';
+    return `<button type="button" role="option" aria-selected="${i === globalActive}" class="global-search-result${i === globalActive ? ' active' : ''}" data-result="${i}">
+      <div class="gs-context"><strong>${esc(displayTitle(s))}</strong><span>· ${esc(shortPath(s.workspace))}${s.archived ? ' · archived' : ''}${s.parentId ? ' · subagent' : ''}</span></div>
+      <div class="gs-text">${esc(label)} · ${markedMatch(hit.text, q)}</div>
+    </button>`;
+  }).join('') || '<div class="global-search-empty">No matches</div>';
+  globalResults.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
+}
+async function queryGlobalSearch() {
+  const q = globalQuery.value.trim();
+  const request = ++globalRequest;
+  if (!q) { globalHits = []; globalResults.innerHTML = '<div class="global-search-empty">Search session names and messages across all projects</div>'; return; }
+  globalResults.innerHTML = '<div class="global-search-empty">Searching…</div>';
+  try {
+    const response = await fetch('/api/search?q=' + encodeURIComponent(q));
+    if (!response.ok) throw new Error('search failed');
+    const results = await response.json();
+    if (request !== globalRequest || globalSearch.classList.contains('hidden')) return;
+    globalHits = results.filter((hit) => sessionById(hit.id));
+    globalActive = 0;
+    renderGlobalHits();
+  } catch {
+    if (request === globalRequest) globalResults.innerHTML = '<div class="global-search-empty">Could not search sessions. Try again.</div>';
+  }
+}
+function chooseGlobalHit(hit) {
+  if (!hit) return;
+  closeGlobalSearch();
+  if (hit.kind !== 'name') {
+    globalMessage = { id: hit.id, index: hit.messageIndex };
+    convoShown.add(hit.id); // display transcript even when its terminal is open
+  } else globalMessage = null;
+  setTranscript(true);
+  selectSession(hit.id); // do not resume archived/idle sessions
+}
+$('#global-search-open').addEventListener('click', openGlobalSearch);
+globalSearch.addEventListener('click', (e) => { if (e.target === globalSearch) closeGlobalSearch(); });
+globalResults.addEventListener('click', (e) => chooseGlobalHit(globalHits[Number(e.target.closest('[data-result]')?.dataset.result)]));
+globalQuery.addEventListener('input', () => {
+  clearTimeout(globalTimer);
+  ++globalRequest;
+  globalTimer = setTimeout(queryGlobalSearch, 160);
+});
+globalQuery.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { e.stopPropagation(); closeGlobalSearch(); }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (!globalHits.length) return;
+    globalActive = (globalActive + (e.key === 'ArrowDown' ? 1 : -1) + globalHits.length) % globalHits.length;
+    renderGlobalHits();
+  }
+  if (e.key === 'Enter') { e.preventDefault(); chooseGlobalHit(globalHits[globalActive]); }
+});
+
 // ---------- search ----------
 const terminalOpenFor = (s) => Boolean(s?.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
 // Human-visible text of a tool result: fx wraps shell/subagent output in a JSON envelope with metadata
@@ -671,10 +753,12 @@ async function loadTranscript(id, quiet = false) {
       ? `<div class="section-title">conversation${terminalOpen ? ` · <a href="#" data-hide-convo="${id}">hide</a>` : ''}</div>`
       : `<div class="section-title"><a href="#" data-show-convo="${id}">show conversation</a></div>`);
   }
+  let messageIndex = 0;
   for (const ev of showConvo ? events : []) {
     if (!isChild && ev.kind === 'tool_call' && ev.name === 'subagent' && parent.children?.length) continue; // already in the board
-    if (ev.kind === 'user') html.push(`<div class="msg user"><div class="who">${isChild ? 'task from parent' : 'you'}</div><div class="text">${esc(ev.text)}</div></div>`);
-    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant"><div class="who">${isChild ? (s.subagent?.name ? '🧵 ' + esc(s.subagent.name) : 'subagent') : 'fx'}</div><div class="text">${esc(ev.text)}</div></div>`);
+    const match = globalMessage?.id === id && globalMessage.index === messageIndex;
+    if (ev.kind === 'user') html.push(`<div class="msg user${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? 'task from parent' : 'you'}</div><div class="text">${esc(ev.text)}</div></div>`);
+    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? (s.subagent?.name ? '🧵 ' + esc(s.subagent.name) : 'subagent') : 'fx'}</div><div class="text">${esc(ev.text)}</div></div>`);
     else if (ev.kind === 'tool_call') {
       const st = ev.result?.status ?? 'pending';
       const isSub = ev.name === 'subagent';
@@ -695,6 +779,10 @@ async function loadTranscript(id, quiet = false) {
   if (lastEventCount.id !== id) body.scrollTop = 0;
   else if (grew && wasAtBottom) body.scrollTop = body.scrollHeight;
   lastEventCount = { id, n: events.length };
+  if (globalMessage?.id === id) {
+    const target = body.querySelector(`.msg[data-message="${globalMessage.index}"]`);
+    if (target && !globalMessage.scrolled) { target.scrollIntoView({ block: 'center' }); globalMessage.scrolled = true; }
+  }
 }
 
 const transcriptToggle = $('#toggle-transcript');
@@ -917,6 +1005,7 @@ const SHORTCUTS = [
   ['⌥1…9', 'jump to tab'],
   ['⌥P', 'pin / unpin the current tab'],
   ['⌥F', 'search this conversation'],
+  ['⌥Space', 'search all sessions'],
   ['⌥\\', 'show / hide the right column'],
   ['⌥?', 'this list'],
 ];
@@ -947,6 +1036,7 @@ window.addEventListener('keydown', (e) => {
   else if (/^Digit[1-9]$/.test(code)) { const n = Number(code.slice(5)) - 1; if (tabs[n]) activateTab(tabs[n]); }
   else if (code === 'KeyP') { if (state.activeTab) setPinned(state.activeTab, !state.pinned.has(state.activeTab)); }
   else if (code === 'KeyF') { setTranscript(true); $('#search').focus(); $('#search').select(); }
+  else if (code === 'Space') { globalSearch.classList.contains('hidden') ? openGlobalSearch() : closeGlobalSearch(); }
   else if (code === 'Backslash') { setTranscript(document.body.classList.contains('no-transcript')); }
   else if (code === 'Slash' || e.key === '?') { showShortcuts(); }
   else handled = false;

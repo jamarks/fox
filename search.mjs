@@ -15,12 +15,20 @@ export function createSearchIndex(sessionsDir, loadState) {
       const dir = join(sessionsDir, id);
       const metaPath = join(dir, 'session.json');
       const eventsPath = join(dir, 'events.jsonl');
-      const [metaStamp, eventsStamp] = await Promise.all([fileStamp(metaPath), fileStamp(eventsPath)]);
+      const ownerPath = join(dir, 'subagent', 'owner.json');
+      const [metaStamp, eventsStamp, ownerStamp] = await Promise.all([fileStamp(metaPath), fileStamp(eventsPath), fileStamp(ownerPath)]);
+      const owner = ownerStamp ? await readJson(ownerPath) : null;
+      const parentId = owner?.parent_id;
+      const childrenPath = /^[A-Za-z0-9_-]{4,64}$/.test(parentId ?? '') ? join(sessionsDir, parentId, 'subagent', 'children.json') : null;
+      const childrenStamp = childrenPath ? await fileStamp(childrenPath) : '';
       const name = state.names[id] ?? '';
       const previous = cache.get(id);
-      if (previous && previous.metaStamp === metaStamp && previous.eventsStamp === eventsStamp && previous.name === name) return;
+      if (previous && previous.metaStamp === metaStamp && previous.eventsStamp === eventsStamp && previous.ownerStamp === ownerStamp && previous.childrenStamp === childrenStamp && previous.name === name) return;
       const meta = await readJson(metaPath);
       if (!meta) { cache.delete(id); return; }
+      const children = childrenPath ? (await readJson(childrenPath))?.children ?? [] : [];
+      const child = children.find((c) => c.id === id);
+      const alias = child?.persistent?.agent ?? '';
       const messages = [];
       if (eventsStamp) {
         try {
@@ -38,7 +46,7 @@ export function createSearchIndex(sessionsDir, loadState) {
           }
         } catch { /* names remain searchable if events disappear during an update */ }
       }
-      cache.set(id, { metaStamp, eventsStamp, name, title: meta.title ?? '(untitled)', updatedAt: meta.updated_at_ms ?? 0, messages });
+      cache.set(id, { metaStamp, eventsStamp, ownerStamp, childrenStamp, name, alias, title: meta.title ?? '(untitled)', updatedAt: meta.updated_at_ms ?? 0, messages });
     }));
   }
   return async function search(query) {
@@ -47,9 +55,8 @@ export function createSearchIndex(sessionsDir, loadState) {
     await update();
     const hits = [];
     for (const [id, entry] of cache) {
-      if ([entry.name, entry.title].some((text) => text.toLocaleLowerCase().includes(q))) {
-        hits.push({ id, kind: 'name', text: entry.name || entry.title, updatedAt: entry.updatedAt });
-      }
+      const matchedName = [entry.name, entry.alias, entry.title].find((text) => text.toLocaleLowerCase().includes(q));
+      if (matchedName) hits.push({ id, kind: 'name', text: matchedName, updatedAt: entry.updatedAt });
       for (const message of entry.messages) {
         const at = message.text.toLocaleLowerCase().indexOf(q);
         if (at < 0) continue;
