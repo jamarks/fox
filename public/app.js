@@ -371,14 +371,16 @@ function agentsBoard(s) {
   const cards = parent.children.map((c) => {
     const child = sessionById(c.id);
     const st = child?.state ?? 'done';
-    const elapsed = c.phase === 'running' && c.startedAt ? Math.round((Date.now() - c.startedAt) / 1000) + 's' : child ? Math.round(child.usage.wallMs / 1000) + 's' : '';
+    const elapsed = c.phase === 'running' && c.startedAt ? Math.round((Date.now() - c.startedAt) / 1000) + 's' : child?.usage.wallMs ? Math.round(child.usage.wallMs / 1000) + 's' : '';
     const res = results.get(c.task ?? child?.firstPrompt ?? '');
-    return `<div class="agent ${st} ${c.id === s.id ? 'selected' : ''}" data-child="${c.id}">
-      <div class="agent-head"><span class="st ${st}"><i></i>${STATE_LABEL[st] || st}</span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : 'one-off'}</span><span class="agent-elapsed">${elapsed}</span></div>
-      <div class="agent-task">${esc(c.task ?? child?.firstPrompt ?? '')}</div>
-      ${res ? `<div class="agent-result">${esc(res)}</div>` : ''}
-      ${c.failure ? `<div class="agent-result err">${esc(JSON.stringify(c.failure))}</div>` : ''}
-      ${child ? `<div class="agent-meta">${child.turns} turn${child.turns === 1 ? '' : 's'}${child.usage.input + child.usage.output ? ' · ' + fmtTokens(child.usage.input + child.usage.output) + ' tok' : ''}</div>` : ''}
+    const open = expandedAgents.has(c.id) || c.id === s.id;
+    return `<div class="agent ${st} ${c.id === s.id ? 'selected' : ''} ${open ? 'open' : ''}" data-agent="${c.id}">
+      <div class="agent-head"><span class="st ${st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 80))}</span><span class="agent-elapsed">${elapsed}</span></div>
+      ${open ? `
+        ${c.name ? `<div class="agent-task">${esc(c.task ?? child?.firstPrompt ?? '')}</div>` : ''}
+        ${res ? `<div class="agent-result">${esc(res)}</div>` : ''}
+        ${c.failure ? `<div class="agent-result err">${esc(JSON.stringify(c.failure))}</div>` : ''}
+        <div class="agent-meta">${STATE_LABEL[st] || st}${child ? ` · ${child.turns} turn${child.turns === 1 ? '' : 's'}` : ''}${child?.usage.input + child?.usage.output ? ' · ' + fmtTokens(child.usage.input + child.usage.output) + ' tok' : ''} · <a href="#" data-child="${c.id}">open transcript</a></div>` : ''}
     </div>`;
   });
   return `<div class="board"><div class="board-title">${esc(displayTitle(parent))} → ${parent.children.length} subagent${parent.children.length === 1 ? '' : 's'}</div>${cards.join('')}</div>`;
@@ -386,6 +388,7 @@ function agentsBoard(s) {
 
 // El padre guarda el resultado de cada subagente como tool_result; lo enlazamos por el texto de la tarea.
 let cachedResults = { id: null, map: new Map() };
+const expandedAgents = new Set();
 function resultsByTask(parent) {
   return cachedResults.id === parent.id ? cachedResults.map : new Map();
 }
@@ -405,7 +408,9 @@ async function refreshResults(parent) {
 
 $('#board').addEventListener('click', (e) => {
   const goto = e.target.closest('[data-goto]'); if (goto) { e.preventDefault(); return selectSession(goto.dataset.goto); }
-  const card = e.target.closest('.agent[data-child]'); if (card) selectSession(card.dataset.child);
+  const link = e.target.closest('a[data-child]'); if (link) { e.preventDefault(); return selectSession(link.dataset.child); }
+  const card = e.target.closest('.agent[data-agent]');
+  if (card) { const id = card.dataset.agent; expandedAgents.has(id) ? expandedAgents.delete(id) : expandedAgents.add(id); lastTranscriptKey = ''; loadTranscript(state.selected); }
 });
 
 const transcriptToggle = $('#toggle-transcript');
