@@ -275,7 +275,9 @@ function renderTabs() {
     const st = tab.closed ? 'closed' : (s?.state ?? 'working');
     const el = document.createElement('div');
     el.className = 'tab' + (name === state.activeTab ? ' active' : '');
-    el.innerHTML = `<span class="st ${st}"><i></i></span><span>${esc(tabLabel(name))}</span><span class="close" data-close="${esc(name)}" title="Close tab (fx keeps running; click the session to reopen)">×</span>`;
+    // The dot only shows when there is something to know: working, needs input, or dead. Waiting is the default.
+    const dot = st === 'working' || st === 'needs_input' || st === 'closed' ? `<span class="st ${st}" title="${STATE_LABEL[st] || st}"><i></i></span>` : '';
+    el.innerHTML = `${dot}<span>${esc(tabLabel(name))}</span><span class="close" data-close="${esc(name)}" title="Close tab (fx keeps running; click the session to reopen)">×</span>`;
     el.addEventListener('click', (e) => (e.target.dataset.close ? closeTab(name) : activateTab(name)));
     root.appendChild(el);
   }
