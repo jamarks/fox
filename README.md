@@ -7,9 +7,9 @@ Every session, every subagent, one terminal that never dies. Nothing leaves your
 
 <p align="center"><sub>Independent project, not affiliated with Vercel. fx is <a href="https://github.com/vercel-labs/fx">vercel-labs/fx</a>, Apache-2.0.</sub></p>
 
-<p align="center"><img src="docs/screenshot.png" alt="fox: sessions grouped by project on the left, the real fx terminal in the middle, subagents and search on the right" /></p>
+<p align="center"><img src="docs/screenshot.png" alt="fox: sessions grouped by project on the left, the real fx terminal in the middle, subagents on the right" /></p>
 
-<p align="center"><sub>Left: sessions by project, with subagents nested under their parent. Middle: the real fx terminal, running in tmux. Right: the subagent board, search, tokens.</sub></p>
+<p align="center"><sub>Left: sessions by project, with subagents nested under their parent. Middle: the real fx terminal, running in tmux. Right: the subagent board.</sub></p>
 
 ---
 
@@ -25,7 +25,6 @@ fox fixes that. It reads what fx already writes to `~/.fx`, runs every session i
 - **Subagents, visibly.** Each session counts its subagents and how many are working. Select the parent and the right column groups them by task, so the same task sent to several models reads as a side-by-side comparison: each row has a vendor-colored dot, the full model id, elapsed time and the first lines of its answer. Click a row to read the whole answer in place. Weak answers are flagged: `didn't run tools` when a model printed a tool call as text instead of making it, `couldn't` when it refused or gave up, `failed` when it never started. Subagents can run on different models than the parent, as long as they share its provider.
 - **One terminal, pinned tabs.** Clicking a session shows its terminal in the middle as a preview; clicking another replaces it. Pin the ones you want to keep as tabs. Either way fx keeps running in tmux: close the tab, reload, restart fox, `tmux attach -t fx-<id>` from a real terminal, it is all still there.
 - **Drop files on the terminal.** Drag images, text or anything else from Finder onto the terminal. Images become fx image attachments (`[Image 1]`); text files up to 200 KB are pasted inline with their name; other files are saved to `~/.config/fox/drops/` and their path is pasted so the agent can read them. Nothing is sent until you press Enter.
-- **Search the conversation.** Type in the right column, get the matching messages, click one and the terminal jumps to that text (tmux copy-mode search, highlighted); click it again for the previous occurrence, `done` leaves search mode. Messages and commands only, never tool output.
 - **Search across all sessions.** ⌥Space (or the ⌕ in the header) opens a palette that searches session names and messages in every project, archived ones included. Pick a hit and the session opens on that message. The index lives in memory, refreshes only the sessions whose files changed, and never includes tool output.
 - **Tokens and cost** per session, and a transcript viewer with expandable tool calls for sessions whose terminal is not open.
 - **Archive and rename** without touching fx's files. Archiving a running session stops its process first, after asking.
@@ -61,8 +60,6 @@ Option is the modifier, because ⌘T and ⌘W belong to the browser.
 | ⌥W | Close the current tab (fx keeps running) |
 | ⌥] / ⌥[ · ⌥1…9 | Switch tabs |
 | ⌥P | Pin / unpin the current tab |
-| ⌥F | Search this conversation |
-| ⌥Space | Search all sessions |
 | ⌥Space | Search all sessions |
 | ⌥\ | Show / hide the right column |
 | ⌥L / ⌥⇧L | Next / previous theme |
@@ -75,7 +72,7 @@ Option is the modifier, because ⌘T and ⌘W belong to the browser.
 |---|---|
 | Left | Sessions from `~/.fx/sessions`, grouped by workspace. Click to open. Hover for pin, rename, archive. `+` on a group starts a new session there; the folder icon in the header opens any other folder. |
 | Middle | The current terminal (preview, italic) plus pinned tabs. 📌 pins, × unpins. fx keeps running either way. |
-| Right (⇥) | Search, tokens and cost, the subagent board when there are children, and the transcript when the session's terminal is not open. × closes it. |
+| Right (⇥) | Model, provider, duration and cost; the subagent board when there are children; the transcript only when the session's terminal is not open. × closes it. |
 
 ## How it works
 
@@ -118,7 +115,6 @@ Vercel ships `libfx`, a library version of the agent, and a browser terminal bui
 
 - `node-pty` ships a `spawn-helper` that npm installs without the execute bit. The `postinstall` script fixes it; if you see `posix_spawnp failed`, run `chmod +x node_modules/node-pty/prebuilds/*/spawn-helper`.
 - fx allows one process per session. If a session is open in another terminal, fox shows `other terminal` and only lets you read it.
-- tmux search covers the session's scrollback (20,000 lines). Very old matches still appear in the list but may not be reachable in the terminal.
 - The native folder picker is macOS only. Shift-click the folder icon to type a path instead.
 
 MIT. Built in an afternoon with fx 0.0.13 and a lot of `tmux capture-pane`. Issues and forks welcome.

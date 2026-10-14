@@ -256,7 +256,6 @@ async function openSession(id) {
 }
 
 function selectSession(id) {
-  if (state.selected !== id) { $('#search').value = ''; $('#search-done').classList.add('hidden'); }
   state.selected = id;
   renderSessions();
   loadTranscript(id);
@@ -717,65 +716,6 @@ globalQuery.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); chooseGlobalHit(globalHits[globalActive]); }
 });
 
-// ---------- search ----------
-const terminalOpenFor = (s) => Boolean(s?.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
-// Human-visible text of a tool result: fx wraps shell/subagent output in a JSON envelope with metadata
-// (handles, replay refs, exit codes); only the output itself is worth searching.
-function toolOutput(ev) {
-  const p = ev.result?.preview ?? '';
-  try {
-    const j = JSON.parse(p);
-    if (typeof j === 'object' && j) return String(j.output ?? j.result ?? j.stdout ?? j.text ?? j.content ?? '');
-  } catch {}
-  return p;
-}
-function renderSearch(s, events, q, terminalOpen) {
-  const hits = [];
-  const includeTools = false; // messages and commands only; tool output stays out
-  events.forEach((ev, i) => {
-    // Messages always; for tool calls the command/args, and their output only when asked.
-    const text = ev.kind === 'user' || ev.kind === 'assistant' ? ev.text
-      : ev.kind === 'tool_call' ? (includeTools ? `${briefArgs(ev.args)}\n${toolOutput(ev)}` : briefArgs(ev.args)) : '';
-    const at = text.toLowerCase().indexOf(q);
-    if (at < 0) return;
-    const start = Math.max(0, at - 60);
-    const end = Math.min(text.length, at + q.length + 90);
-    const snippet = (start > 0 ? '…' : '') + esc(text.slice(start, at)) + '<mark>' + esc(text.slice(at, at + q.length)) + '</mark>' + esc(text.slice(at + q.length, end)) + (end < text.length ? '…' : '');
-    hits.push({ i, ev, snippet });
-  });
-  const who = (ev) => ev.kind === 'user' ? 'you' : ev.kind === 'assistant' ? 'fx' : ev.name;
-  const body = $('#transcript-body');
-  body.innerHTML = `<div class="section-title">${hits.length} match${hits.length === 1 ? '' : 'es'}${terminalOpen ? ' · click to jump there in the terminal, click again for the previous one' : ''}</div>` +
-    (hits.map((h) => `<div class="hit" data-hit="${h.i}"><div class="who">${esc(who(h.ev))}</div><div class="snippet">${h.snippet}</div></div>`).join('') || '<p class="muted">Nothing found.</p>');
-  body.dataset.hits = JSON.stringify(hits.map((h) => ({ i: h.i, text: h.ev.kind === 'tool_call' ? `${briefArgs(h.ev.args)}\n\n${toolOutput(h.ev)}` : String(h.ev.text ?? '') })));
-}
-async function jumpInTerminal(s, query, again = false) {
-  if (!terminalOpenFor(s)) return;
-  const r = await post(`/api/terminals/${encodeURIComponent(s.terminal)}/search`, { query, again });
-  $('#search-done').classList.remove('hidden');
-  const t = state.tabs.get(s.terminal); if (t) t.term.focus();
-  return r;
-}
-$('#search').addEventListener('input', debounce(() => { lastTranscriptKey = ''; if (state.selected) loadTranscript(state.selected); }, 150));
-$('#search').addEventListener('keydown', (e) => { if (e.key === 'Enter') jumpInTerminal(sessionById(state.selected), $('#search').value.trim()); if (e.key === 'Escape') { $('#search').value = ''; lastTranscriptKey = ''; loadTranscript(state.selected); } });
-$('#search-done').addEventListener('click', async () => { const s = sessionById(state.selected); if (s?.terminal) await post(`/api/terminals/${encodeURIComponent(s.terminal)}/search-cancel`); $('#search-done').classList.add('hidden'); });
-$('#transcript-body').addEventListener('click', (e) => {
-  const hit = e.target.closest('.hit');
-  if (!hit) return;
-  const s = sessionById(state.selected);
-  const q = $('#search').value.trim();
-  const again = hit.dataset.jumped === '1';
-  document.querySelectorAll('.hit').forEach((h) => { if (h !== hit) delete h.dataset.jumped; });
-  hit.dataset.jumped = '1';
-  hit.classList.toggle('open');
-  if (hit.classList.contains('open') && !hit.querySelector('.full')) {
-    const hits = JSON.parse($('#transcript-body').dataset.hits || '[]');
-    const h = hits.find((x) => String(x.i) === hit.dataset.hit);
-    if (h) { const d = document.createElement('div'); d.className = 'full'; d.textContent = h.text; hit.appendChild(d); }
-  }
-  jumpInTerminal(s, q, again);
-});
-
 let lastTranscriptKey = '';
 let lastEventCount = { id: null, n: 0 };
 async function loadTranscript(id, quiet = false) {
@@ -800,12 +740,6 @@ async function loadTranscript(id, quiet = false) {
   $('#transcript-meta').innerHTML = `<span title="${esc([tokens, s.workspace].filter(Boolean).join('\n'))}">${s.model ? vendorDot(s.model) + esc(modelShort(s.model)) : ''}${s.provider ? ` · <span title="${esc(providerLabel(s.provider))}">${s.provider === 'gateway' ? '▲ gateway' : esc(s.provider)}</span>` : ''}${u.wallMs ? ' · ' + fmtDur(u.wallMs) : ''}${isChild ? ' · billed to parent' : u.cost ? ' · $' + u.cost.toFixed(2) : ''}</span>`;
 
   const html = [];
-  $('#search-row').classList.toggle('hidden', isChild); // a subagent has no terminal to jump in
-  const q = isChild ? '' : $('#search').value.trim().toLowerCase();
-  if (q) {
-    renderSearch(s, events, q, terminalOpenFor(s));
-    return;
-  }
   if (isChild) {
     // Subagent view: what it gave back to the parent first, then how it got there.
     const c = parent.children.find((x) => x.id === id);
@@ -829,9 +763,8 @@ async function loadTranscript(id, quiet = false) {
   const terminalOpen = Boolean(s.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
   const showConvo = isChild || !terminalOpen || convoShown.has(id);
   if (!isChild) {
-    html.push(showConvo
-      ? `<div class="section-title">conversation${terminalOpen ? ` · <a href="#" data-hide-convo="${id}">hide</a>` : ''}</div>`
-      : `<div class="section-title"><a href="#" data-show-convo="${id}">show conversation</a></div>`);
+    // Shown here only when the terminal is closed, or when global search opened a message.
+    if (showConvo) html.push(`<div class="section-title">conversation${terminalOpen ? ` · <a href="#" data-hide-convo="${id}">hide</a>` : ''}</div>`);
   }
   let messageIndex = 0;
   for (const ev of showConvo ? events : []) {
@@ -1098,7 +1031,6 @@ const SHORTCUTS = [
   ['⌥] / ⌥[', 'next / previous tab'],
   ['⌥1…9', 'jump to tab'],
   ['⌥P', 'pin / unpin the current tab'],
-  ['⌥F', 'search this conversation'],
   ['⌥Space', 'search all sessions'],
   ['⌥\\', 'show / hide the right column'],
   ['⌥L / ⌥⇧L', 'next / previous theme'],
@@ -1132,7 +1064,6 @@ window.addEventListener('keydown', (e) => {
   else if (code === 'BracketLeft') { if (tabs.length) activateTab(tabs[(idx - 1 + tabs.length) % tabs.length]); }
   else if (/^Digit[1-9]$/.test(code)) { const n = Number(code.slice(5)) - 1; if (tabs[n]) activateTab(tabs[n]); }
   else if (code === 'KeyP') { if (state.activeTab) setPinned(state.activeTab, !state.pinned.has(state.activeTab)); }
-  else if (code === 'KeyF') { setTranscript(true); $('#search').focus(); $('#search').select(); }
   else if (code === 'Space') { globalSearch.classList.contains('hidden') ? openGlobalSearch() : closeGlobalSearch(); }
   else if (code === 'Backslash') { setTranscript(document.body.classList.contains('no-transcript')); }
   else if (code === 'KeyL') { cycleTheme(e.shiftKey ? -1 : 1); }
