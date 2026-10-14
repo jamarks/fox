@@ -358,7 +358,8 @@ async function loadTranscript(id, quiet = false) {
     else if (ev.kind === 'raw') html.push(`<div class="msg"><div class="who">event</div><div class="text muted">${esc(ev.text)}</div></div>`);
   }
   const body = $('#transcript-body');
-  body.innerHTML = html.join('') || '<p class="muted">Empty session.</p>';
+  const heading = s?.parentId ? `<div class="body-heading">full conversation of ${esc(displayTitle(s))}: what it read, ran and wrote before answering the parent</div>` : '';
+  body.innerHTML = heading + (html.join('') || '<p class="muted">Empty session.</p>');
   if ($('#follow').checked) body.scrollTop = body.scrollHeight;
 }
 
@@ -378,9 +379,9 @@ function agentsBoard(s) {
       <div class="agent-head"><span class="st ${st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 80))}</span><span class="agent-elapsed">${elapsed}</span></div>
       ${open ? `
         ${c.name ? `<div class="agent-task">${esc(c.task ?? child?.firstPrompt ?? '')}</div>` : ''}
-        ${res ? `<div class="agent-result">${esc(res)}</div>` : ''}
+        ${res ? `<div class="agent-label">answer returned to parent</div><div class="agent-result">${esc(res)}</div>` : c.phase === 'running' ? '<div class="agent-label">still working, no answer yet</div>' : ''}
         ${c.failure ? `<div class="agent-result err">${esc(JSON.stringify(c.failure))}</div>` : ''}
-        <div class="agent-meta">${STATE_LABEL[st] || st}${child ? ` · ${child.turns} turn${child.turns === 1 ? '' : 's'}` : ''}${child?.usage.input + child?.usage.output ? ' · ' + fmtTokens(child.usage.input + child.usage.output) + ' tok' : ''} · <a href="#" data-child="${c.id}">open transcript</a></div>` : ''}
+        <div class="agent-meta">${STATE_LABEL[st] || st}${child ? ` · ${child.turns} turn${child.turns === 1 ? '' : 's'}` : ''}${child?.usage.input + child?.usage.output ? ' · ' + fmtTokens(child.usage.input + child.usage.output) + ' tok' : ''} · <a href="#" data-child="${c.id}">${c.id === s.id ? 'conversation below ↓' : 'see its full conversation'}</a></div>` : ''}
     </div>`;
   });
   return `<div class="board"><div class="board-title">${esc(displayTitle(parent))} → ${parent.children.length} subagent${parent.children.length === 1 ? '' : 's'}</div>${cards.join('')}</div>`;
