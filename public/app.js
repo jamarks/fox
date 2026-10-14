@@ -450,7 +450,7 @@ function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
     const res = answerFor(parent, c, child);
     const sel = c.id === selectedId;
     return `<a class="agent ${st} ${sel ? 'selected' : ''} ${compact ? 'compact' : ''}" href="#" data-child="${c.id}">
-      <div class="agent-head"><span class="st ${st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 90))}</span><span class="agent-elapsed">${elapsed}</span></div>
+      <div class="agent-head"><span class="st ${st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 90))}</span>${child?.model && child.model !== parent.model ? `<span class="agent-model" title="runs on a different model than the parent">${esc(child.model)}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>
       ${!compact ? (res ? `<div class="agent-answer">${esc(res.slice(0, 160))}${res.length > 160 ? '…' : ''}</div>` : c.phase === 'running' ? '<div class="agent-answer muted">working, no answer yet</div>' : '') : ''}
     </a>`;
   });

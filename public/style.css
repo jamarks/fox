@@ -190,3 +190,4 @@ aside, section, .tab, .session, button, input, #summary, #transcript-meta { tran
 #theme { background: transparent; color: var(--muted); border: 0; font: inherit; font-size: 11px; cursor: pointer; padding: 2px 0; }
 #theme:hover { color: var(--text); }
 #theme option { background: var(--panel); color: var(--text); }
+.agent-model { flex: none; font-family: var(--mono); font-size: 10px; color: var(--accent); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
