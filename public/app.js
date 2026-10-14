@@ -405,7 +405,10 @@ async function loadTranscript(id, quiet = false) {
     html.push(agentsBoard(parent, { selectedId: id, compact: true }));
     html.push(`<section class="answer">
       <div class="section-title">answer returned to ${esc(displayTitle(parent))}</div>
-      ${res ? `<div class="answer-text">${esc(res)}</div>` : c?.phase === 'running' ? '<div class="muted">still working, nothing returned yet</div>' : '<div class="muted">no answer recorded</div>'}
+      ${res ? `<div class="answer-text">${esc(res)}</div>`
+        : c?.phase === 'running' ? '<div class="muted">still working, nothing returned yet</div>'
+        : parent.state === 'working' ? '<div class="muted">answered, but the parent is still in the middle of its turn. fx writes the answer to disk when that turn ends; until then it is only visible in the terminal.</div>'
+        : '<div class="muted">no answer recorded</div>'}
     </section>
     <div class="section-title">its own conversation: what it read, ran and wrote to get there</div>`);
   } else if (parent.children?.length) {
@@ -414,7 +417,7 @@ async function loadTranscript(id, quiet = false) {
   }
   for (const ev of events) {
     if (ev.kind === 'user') html.push(`<div class="msg user"><div class="who">${isChild ? 'task from parent' : 'you'}</div><div class="text">${esc(ev.text)}</div></div>`);
-    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant"><div class="who">${isChild ? esc(displayTitle(s)) : 'fx'}</div><div class="text">${esc(ev.text)}</div></div>`);
+    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant"><div class="who">${isChild ? (s.subagent?.name ? '🧵 ' + esc(s.subagent.name) : 'subagent') : 'fx'}</div><div class="text">${esc(ev.text)}</div></div>`);
     else if (ev.kind === 'tool_call') {
       const st = ev.result?.status ?? 'pending';
       const isSub = ev.name === 'subagent';
