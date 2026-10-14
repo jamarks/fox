@@ -242,7 +242,7 @@ function attachTab(t, { user = false } = {}) {
   ws.onmessage = (ev) => term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data));
   ws.onclose = () => { const tab = state.tabs.get(t.name); if (tab) { tab.closed = true; renderTabs(); } };
   const sendResize = () => ws.readyState === 1 && ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-  ws.onopen = () => { fit.fit(); sendResize(); };
+  ws.onopen = () => { requestAnimationFrame(() => { safeFit(state.tabs.get(t.name)); sendResize(); }); };
   term.onData((data) => ws.readyState === 1 && ws.send(JSON.stringify({ type: 'input', data })));
   term.onResize(sendResize);
   state.tabs.set(t.name, { term, fit, ws, wrap, closed: false });
@@ -277,7 +277,7 @@ function activateTab(name) {
   for (const [n, t] of state.tabs) t.wrap.classList.toggle('active', n === name);
   renderTabs();
   const t = state.tabs.get(name);
-  if (t) requestAnimationFrame(() => { t.fit.fit(); t.term.focus(); });
+  if (t) requestAnimationFrame(() => { safeFit(t); t.term.focus(); });
   const term = state.terminals.find((x) => x.name === name);
   if (term?.resume) selectSession(term.resume);
 }
@@ -304,10 +304,20 @@ function syncTabsWithTerminals() {
   renderTabs();
 }
 
-// Refit the visible terminal whenever its box changes (window, column toggle, tab bar wrapping).
-const fitActive = debounce(() => { const t = state.tabs.get(state.activeTab); if (t && !t.closed) t.fit.fit(); }, 50);
+// Fit, then verify: if xterm's screen is taller than the box (rounding, font metrics), drop rows until it fits.
+function safeFit(t) {
+  if (!t || t.closed) return;
+  t.fit.fit();
+  const screen = t.wrap.querySelector('.xterm-screen');
+  const cs = getComputedStyle(t.wrap);
+  const avail = t.wrap.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  let guard = 3;
+  while (screen && screen.offsetHeight > avail && t.term.rows > 5 && guard-- > 0) t.term.resize(t.term.cols, t.term.rows - 1);
+}
+const fitActive = debounce(() => safeFit(state.tabs.get(state.activeTab)), 50);
 window.addEventListener('resize', fitActive);
 new ResizeObserver(fitActive).observe($('#terminals'));
+setInterval(fitActive, 3000);
 
 // ---------- notifications ----------
 function notify(title, body) {
@@ -366,7 +376,7 @@ function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
     </a>`;
   });
   const title = compact
-    ? `<a href="#" class="crumb" data-goto="${parent.id}">← ${esc(displayTitle(parent))}</a> · ${parent.children.length} subagents`
+    ? `${parent.children.length} subagents · pick another, or the parent name above to go back`
     : `${parent.children.length} subagent${parent.children.length === 1 ? '' : 's'} · click one to see its answer and conversation`;
   return `<div class="board ${compact ? 'compact' : ''}"><div class="board-title">${title}</div>${rows.join('')}</div>`;
 }
@@ -407,7 +417,7 @@ async function loadTranscript(id, quiet = false) {
     const res = resultsByTask(parent).get(c?.task ?? s.firstPrompt ?? '');
     html.push(agentsBoard(parent, { selectedId: id, compact: true }));
     html.push(`<section class="answer">
-      <div class="section-title">answer returned to ${esc(displayTitle(parent))}</div>
+      <div class="section-title">answer returned to the parent</div>
       ${res ? `<div class="answer-text">${esc(res)}</div>`
         : c?.phase === 'running' ? '<div class="muted">still working, nothing returned yet</div>'
         : parent.state === 'working' ? '<div class="muted">answered, but the parent is still in the middle of its turn. fx writes the answer to disk when that turn ends; until then it is only visible in the terminal.</div>'
@@ -448,7 +458,7 @@ function setTranscript(visible) {
   transcriptToggle.textContent = visible ? '⇥' : '⇤';
   transcriptToggle.title = visible ? 'Hide transcript' : 'Show transcript';
   try { localStorage.setItem('fox.transcript', visible ? '1' : '0'); } catch {}
-  requestAnimationFrame(() => state.tabs.get(state.activeTab)?.fit.fit());
+  requestAnimationFrame(() => safeFit(state.tabs.get(state.activeTab)));
 }
 transcriptToggle.addEventListener('click', () => setTranscript(document.body.classList.contains('no-transcript')));
 let initialTranscript = false;

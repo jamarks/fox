@@ -62,15 +62,15 @@ body.no-transcript #transcript { display: none; }
 .term-wrap .xterm { height: 100%; }
 #empty-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--muted); }
 #empty-state h2 { font-weight: 500; margin: 0 0 6px; color: var(--text); }
-#transcript-meta { padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11px; display: flex; gap: 10px; flex-wrap: wrap; }
-#transcript-body { overflow-y: auto; flex: 1; padding: 10px 12px; }
+#transcript-meta { padding: 8px 16px 10px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11px; display: flex; gap: 12px; flex-wrap: wrap; }
+#transcript-body { overflow-y: auto; flex: 1; padding: 14px 16px 24px; }
 .muted { color: var(--muted); }
-.msg { margin-bottom: 10px; }
+.msg { margin-bottom: 14px; }
 .msg .who { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 2px; }
 .msg.user { border-left: 2px solid var(--accent); padding-left: 8px; }
 .msg.assistant { padding-left: 10px; }
 .msg .text { white-space: pre-wrap; word-break: break-word; }
-.tool { margin: 6px 0 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); font-family: var(--mono); font-size: 11px; }
+.tool { margin: 8px 0 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); font-family: var(--mono); font-size: 11px; }
 .tool summary { padding: 5px 8px; cursor: pointer; display: flex; gap: 8px; align-items: center; list-style: none; }
 .tool summary::-webkit-details-marker { display: none; }
 .tool .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
@@ -104,7 +104,7 @@ label.toggle { font-weight: 400; color: var(--muted); font-size: 11px; display: 
 .child .cmeta { flex: none; display: flex; gap: 6px; } .child .err, .agent-result.err { color: var(--err); }
 .st.done i { background: var(--border); } .st.done { color: var(--muted); }
 #board:not(:empty) { padding: 10px 12px; border-bottom: 1px solid var(--border); flex: none; max-height: 50%; overflow-y: auto; }
-.board { display: flex; flex-direction: column; gap: 6px; }
+.board { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
 .board-title, .board-note { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
 .board-note a { color: var(--accent); text-decoration: none; text-transform: none; letter-spacing: 0; }
 .agent { border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; background: var(--panel-2); cursor: pointer; border-left-width: 3px; }
@@ -126,16 +126,16 @@ label.toggle { font-weight: 400; color: var(--muted); font-size: 11px; display: 
 #transcript-title { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .crumb { color: var(--accent); text-decoration: none; } .crumb:hover { text-decoration: underline; }
 .crumb-sep { color: var(--muted); margin: 0 6px; }
-.section-title { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 14px 0 6px; }
+.section-title { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 20px 0 8px; }
 .section-title:first-child { margin-top: 0; }
-.answer { border: 1px solid var(--ok); border-radius: 8px; padding: 8px 10px; background: var(--panel-2); }
+.answer { border: 1px solid var(--ok); border-radius: 8px; padding: 10px 12px; background: var(--panel-2); margin-bottom: 4px; }
 .answer .section-title { margin: 0 0 4px; color: var(--ok); }
 .answer-text { white-space: pre-wrap; font-size: 12px; }
 a.agent { display: block; text-decoration: none; color: inherit; }
 a.agent:hover { border-color: var(--accent); }
 .agent-answer { margin-top: 4px; font-size: 11px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agent-answer.muted { color: var(--muted); }
-.board.compact { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); gap: 3px; }
+.board.compact { margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); gap: 4px; }
 .board.compact .board-title { text-transform: none; letter-spacing: 0; }
 .agent.compact { padding: 3px 8px; border-radius: 4px; }
 .agent.compact .agent-head { font-size: 11px; }
