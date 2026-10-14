@@ -27,6 +27,9 @@ fox fixes that. It reads what fx already writes to `~/.fx`, runs every session i
 - **Tokens and cost** per session, and a transcript viewer with expandable tool calls for sessions whose terminal is not open.
 - **Archive and rename** without touching fx's files. Archiving a running session stops its process first, after asking.
 - **Open any folder** with the native macOS picker, or the `+` on a group for a new session in that project.
+- **Git at a glance.** Each workspace shows its GitHub repo (linked), current branch and the number of uncommitted files.
+- **Themes.** Dark, light, and *sundown*, a warm high-contrast palette. The default is *auto*: the colors drift through the day, dark at night, light at noon, sundown around dawn and dusk. Append `?day=demo` to watch a whole day in 30 seconds.
+- **Resizable columns.** Drag the dividers; widths are remembered.
 
 ## Run it
 
@@ -39,6 +42,8 @@ npm start
 ```
 
 Open http://127.0.0.1:4848. Knobs: `PORT`, `FX_BIN` (path to the fx binary), `TMUX_BIN`.
+
+fox is a plain Node process: run `npm start` in any terminal tab and leave it there, or put it under a process manager if you want it always on. Stopping fox never stops fx: the sessions live in tmux and are picked up again on the next start.
 
 Deep links: `?session=<id>` selects a session, `?open=<id>` also opens its terminal.
 

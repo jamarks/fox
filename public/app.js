@@ -274,7 +274,7 @@ function attachTab(t, { user = false, activate = true } = {}) {
   $('#terminals').appendChild(wrap);
   const term = new Terminal({
     cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', scrollback: 5000,
-    theme: { background: '#0f1115', foreground: '#e6e8ee', cursor: '#7aa2f7', selectionBackground: '#2a3550' },
+    theme: state.palette ? { background: state.palette.bg, foreground: state.palette.text, cursor: state.palette.cursor, selectionBackground: state.palette.sel } : undefined,
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
@@ -629,6 +629,70 @@ $('#close-transcript').addEventListener('click', () => setTranscript(false));
 let initialTranscript = false;
 try { initialTranscript = localStorage.getItem('fox.transcript') === '1'; } catch {}
 setTranscript(initialTranscript);
+
+// ---------- resizable columns ----------
+(() => {
+  const root = document.documentElement;
+  const load = (k, d) => { try { return Number(localStorage.getItem(k)) || d; } catch { return d; } };
+  const apply = () => { root.style.setProperty('--left', load('fox.left', 300) + 'px'); root.style.setProperty('--right', load('fox.right', 380) + 'px'); };
+  apply();
+  const drag = (el, compute, key) => {
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      el.classList.add('dragging'); document.body.classList.add('resizing');
+      const move = (ev) => { const v = compute(ev.clientX); root.style.setProperty(key === 'fox.left' ? '--left' : '--right', v + 'px'); try { localStorage.setItem(key, String(v)); } catch {} };
+      const up = () => { el.classList.remove('dragging'); document.body.classList.remove('resizing'); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); fitActive(); };
+      window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+    });
+  };
+  drag($('#rs-left'), (x) => Math.min(640, Math.max(220, x)), 'fox.left');
+  drag($('#rs-right'), (x) => Math.min(900, Math.max(280, window.innerWidth - x)), 'fox.right');
+})();
+
+// ---------- themes ----------
+// Three palettes, plus "auto": the colors drift through the day, dark at night, light at noon,
+// sundown around dawn and dusk. Updated every minute.
+const PALETTES = {
+  dark:    { bg: '#0f1115', panel: '#161920', panel2: '#1d2129', border: '#262b36', text: '#e6e8ee', muted: '#8b93a7', accent: '#7aa2f7', ok: '#9ece6a', err: '#f7768e', warn: '#e0af68', cursor: '#7aa2f7', sel: '#2a3550' },
+  light:   { bg: '#f6f6f3', panel: '#ffffff', panel2: '#efefeb', border: '#dedcd6', text: '#1d1f27', muted: '#6b7280', accent: '#2f6feb', ok: '#2e8b57', err: '#cf3a3f', warn: '#b7791f', cursor: '#2f6feb', sel: '#cfe0ff' },
+  sundown: { bg: '#190d08', panel: '#22110a', panel2: '#2e1810', border: '#4c2a19', text: '#ffeedd', muted: '#d7a383', accent: '#ff8a3d', ok: '#a8e063', err: '#ff5d5d', warn: '#ffd166', cursor: '#ff8a3d', sel: '#5a2d16' },
+};
+const hex2rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const rgb2hex = (c) => '#' + c.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
+const mixPal = (A, B, t) => Object.fromEntries(Object.keys(A).map((k) => [k, rgb2hex(hex2rgb(A[k]).map((v, i) => v + (hex2rgb(B[k])[i] - v) * t))]));
+// Keyframes by hour: night → dawn (sundown) → day → dusk (sundown) → night.
+function autoPalette(date = new Date()) {
+  const h = date.getHours() + date.getMinutes() / 60;
+  const seg = (a, b, P, Q) => mixPal(P, Q, (h - a) / (b - a));
+  const { dark, light, sundown } = PALETTES;
+  if (h < 5) return dark;
+  if (h < 6.5) return seg(5, 6.5, dark, sundown);
+  if (h < 8.5) return seg(6.5, 8.5, sundown, light);
+  if (h < 17.5) return light;
+  if (h < 19) return seg(17.5, 19, light, sundown);
+  if (h < 21) return seg(19, 21, sundown, dark);
+  return dark;
+}
+function applyPalette(p) {
+  const r = document.documentElement.style;
+  r.setProperty('--bg', p.bg); r.setProperty('--panel', p.panel); r.setProperty('--panel-2', p.panel2); r.setProperty('--border', p.border);
+  r.setProperty('--text', p.text); r.setProperty('--muted', p.muted); r.setProperty('--accent', p.accent);
+  r.setProperty('--ok', p.ok); r.setProperty('--err', p.err); r.setProperty('--warn', p.warn);
+  for (const t of state.tabs.values()) t.term.options.theme = { background: p.bg, foreground: p.text, cursor: p.cursor, selectionBackground: p.sel };
+  state.palette = p;
+}
+function applyTheme() {
+  const mode = $('#theme').value;
+  applyPalette(mode === 'auto' ? autoPalette() : PALETTES[mode] ?? PALETTES.dark);
+}
+$('#theme').addEventListener('change', () => { try { localStorage.setItem('fox.theme', $('#theme').value); } catch {} applyTheme(); });
+try { $('#theme').value = localStorage.getItem('fox.theme') || 'auto'; } catch {}
+applyTheme();
+setInterval(() => { if ($('#theme').value === 'auto') applyTheme(); }, 60000);
+// ?day=demo runs a whole day in 30 seconds, to see the auto mode drift.
+if (new URLSearchParams(location.search).get('day') === 'demo') {
+  let m = 0; setInterval(() => { m = (m + 10) % 1440; applyPalette(autoPalette(new Date(2026, 0, 1, Math.floor(m / 60), m % 60))); }, 200);
+}
 
 // ---------- boot ----------
 // Deep links: ?session=<id> selects a session and shows its transcript; ?open=<id> also opens its terminal tab.
