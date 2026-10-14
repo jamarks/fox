@@ -650,13 +650,16 @@ try { filesCollapsed = localStorage.getItem('fox.filesCollapsed') === '1'; } cat
 const FILE_LABEL = { write: 'wrote', edit: 'edited', mention: 'mentioned', read: 'read' };
 function fileRow(f) {
   const open = expandedFiles.has(f.path);
-  const subs = f.by.filter((b) => b > 0).map((b) => '#' + b).join(' ');
+  const kids = f.by.filter((b) => b > 0).map((b) => '#' + b);
+  const subs = kids.join(' ');
+  // Name first so a narrow column still tells files apart; the folder follows, muted.
+  const name = f.rel.split('/').pop(), dir = f.rel.slice(0, f.rel.length - name.length);
   const c = fileCache.get(f.path);
   const preview = !open ? '' : !c ? '<div class="file-note">loading…</div>'
     : c.text !== undefined ? `<pre class="file-preview">${esc(c.text)}</pre>`
     : `<div class="file-note">${c.binary ? 'binary file' : c.tooLarge ? `too large to preview (${Math.round(c.size / 1024)} KB)` : esc(c.error ?? 'not available')}</div>`;
   return `<div class="file ${open ? 'open' : ''} ${f.exists ? '' : 'missing'}" ${f.exists ? `data-file="${esc(f.path)}"` : ''}>
-    <div class="file-head"><span class="file-act ${f.action}">${FILE_LABEL[f.action]}</span><span class="file-path" title="${esc(f.path)}">${esc(f.rel)}</span>${subs ? `<span class="file-by" title="written by subagent ${subs}">${subs}</span>` : ''}${f.exists ? `<a href="#" class="file-open" data-open-file="${esc(f.path)}" title="Open with the default app">↗</a>` : '<span class="file-by">deleted</span>'}</div>
+    <div class="file-head"><span class="file-act ${f.action}">${FILE_LABEL[f.action]}</span><span class="file-path" title="${esc(f.path)}"><span class="file-name">${esc(name)}</span>${dir ? `<span class="file-dir">${esc(dir.replace(/\/$/, ''))}</span>` : ''}</span>${subs ? `<span class="file-by" title="by subagent ${subs}">${kids[0]}${kids.length > 1 ? ' +' + (kids.length - 1) : ''}</span>` : ''}${f.exists ? `<a href="#" class="file-open" data-open-file="${esc(f.path)}" title="Open with the default app">↗</a>` : '<span class="file-by">deleted</span>'}</div>
     ${preview}</div>`;
 }
 function filesSection(id, files) {

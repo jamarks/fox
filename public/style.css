@@ -302,3 +302,5 @@ a.section-title.fold.closed::before { content: '▸'; }
 a.section-title.fold:hover { color: var(--text); }
 .fold-n { margin-left: 4px; opacity: .8; }
 .agent .idx { min-width: 18px; text-align: center; box-sizing: border-box; }
+.file-dir { margin-left: 8px; color: var(--muted); font-size: 10.5px; }
+.file-act.read + .file-path .file-name { color: var(--muted); }
