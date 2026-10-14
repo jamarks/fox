@@ -479,47 +479,56 @@ $('#bell').addEventListener('click', () => {
 try { state.sound = localStorage.getItem('fx-panel.sound') === '1'; $('#bell').classList.toggle('on', state.sound); } catch {}
 
 // ---------- transcript ----------
-// The parent stores each subagent's answer as a tool_result. One-off agents are matched by task text
-// (normalized, prefix only: the sidebar prompt is truncated); named agents by name, keeping every round.
+// The parent stores each subagent's answer as a tool_result. Results and children appear in the same order,
+// so one-off agents are matched by normalized task text *in sequence* (three identical tasks get three
+// different answers); named agents by name, keeping every round.
 const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 140);
-let cachedResults = { id: null, byTask: new Map(), byAgent: new Map() };
-function resultsByTask(parent) { return cachedResults.id === parent.id ? cachedResults.byTask : new Map(); }
+let cachedResults = { id: null, runs: [], byAgent: new Map(), assigned: new Map() };
 function resultsByAgent(parent) { return cachedResults.id === parent.id ? cachedResults.byAgent : new Map(); }
 async function refreshResults(parent) {
   if (!parent?.children?.length) return;
   const events = await (await fetch(`/api/sessions/${parent.id}/events`)).json();
-  const byTask = new Map(); const byAgent = new Map();
+  const runs = []; const byAgent = new Map();
   for (const ev of events) {
     if (ev.kind !== 'tool_call' || ev.name !== 'subagent' || !ev.result) continue;
     const req = ev.args?.request ?? {};
     let text = ev.result.preview;
     try { const j = JSON.parse(text); text = j.result ?? text; } catch {}
-    if (req.agent) {
-      if (!byAgent.has(req.agent)) byAgent.set(req.agent, []);
-      byAgent.get(req.agent).push({ message: req.message ?? '', text });
-    }
-    const task = req.task ?? req.message;
-    if (task) byTask.set(norm(task), text);
+    if (req.agent) { if (!byAgent.has(req.agent)) byAgent.set(req.agent, []); byAgent.get(req.agent).push({ message: req.message ?? '', text }); }
+    else if (req.task) runs.push({ task: norm(req.task), text, used: false });
   }
-  cachedResults = { id: parent.id, byTask, byAgent };
+  // Walk the one-off children in order and give each the first unused result with the same task.
+  const assigned = new Map();
+  for (const c of parent.children) {
+    if (c.name) continue;
+    const task = norm(c.task ?? sessionById(c.id)?.firstPrompt ?? '');
+    const r = runs.find((x) => !x.used && x.task === task);
+    if (r) { r.used = true; assigned.set(c.id, r.text); }
+  }
+  cachedResults = { id: parent.id, runs, byAgent, assigned };
 }
-function answerFor(parent, c, child) {
-  if (c?.name) { const rounds = resultsByAgent(parent).get(c.name) ?? []; return rounds.length ? rounds.at(-1).text : null; }
-  return resultsByTask(parent).get(norm(c?.task ?? child?.firstPrompt ?? '')) ?? null;
+function answerFor(parent, c) {
+  if (cachedResults.id !== parent.id) return null;
+  if (c?.name) { const rounds = cachedResults.byAgent.get(c.name) ?? []; return rounds.length ? rounds.at(-1).text : null; }
+  return cachedResults.assigned.get(c.id) ?? null;
 }
 
 // Board: one compact row per subagent. Click goes to that subagent's view.
 function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
   if (!parent?.children?.length) return '';
-  const rows = parent.children.map((c) => {
+  const rows = parent.children.map((c, i) => {
     const child = sessionById(c.id);
     const st = child?.state ?? 'done';
     const elapsed = c.phase === 'running' && c.startedAt ? Math.round((Date.now() - c.startedAt) / 1000) + 's' : child?.usage.wallMs ? Math.round(child.usage.wallMs / 1000) + 's' : '';
-    const res = answerFor(parent, c, child);
+    const res = answerFor(parent, c);
     const sel = c.id === selectedId;
-    return `<a class="agent ${st} ${sel ? 'selected' : ''} ${compact ? 'compact' : ''}" href="#" data-child="${c.id}">
-      <div class="agent-head"><span class="st ${c.failure ? 'needs_input' : st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? (c.failure ? 'failed to start' : c.id)).slice(0, 90))}</span>${child?.model && child.model !== parent.model ? `<span class="agent-model" title="runs on a different model than the parent">${modelBadge(child.model)}${esc(modelShort(child.model))}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>
-      ${!compact ? (c.failure ? `<div class="agent-answer err">failed${child?.model ? ' · ' + esc(child.model) : ''} · ${esc(typeof c.failure === 'string' ? c.failure : (c.failure.message ?? c.failure.reason ?? JSON.stringify(c.failure))).slice(0, 140)}</div>` : res ? `<div class="agent-answer">${esc(res.slice(0, 160))}${res.length > 160 ? '…' : ''}</div>` : c.phase === 'running' ? '<div class="agent-answer muted">working, no answer yet</div>' : '') : ''}
+    const model = child?.model ?? null;
+    const task = c.task ?? child?.firstPrompt ?? '';
+    // Row: number · state · who (name, or vendor + model) · elapsed. The task itself is the tooltip.
+    const who = c.name ? `🧵 ${esc(c.name)}` : model ? `${modelBadge(model)}<span class="agent-modelname">${esc(modelShort(model))}</span>` : esc(task.slice(0, 60) || 'failed to start');
+    return `<a class="agent ${st} ${sel ? 'selected' : ''} ${compact ? 'compact' : ''}" href="#" data-child="${c.id}" title="${esc(task)}">
+      <div class="agent-head"><span class="idx">${i + 1}</span><span class="st ${c.failure ? 'needs_input' : st}"><i></i></span><span class="agent-name">${who}</span>${c.name && model && model !== parent.model ? `<span class="agent-model">${modelBadge(model)}${esc(modelShort(model))}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>
+      ${!compact ? (c.failure ? `<div class="agent-answer err">failed · ${esc(typeof c.failure === 'string' ? c.failure : (c.failure.message ?? c.failure.reason ?? JSON.stringify(c.failure))).slice(0, 140)}</div>` : res ? `<div class="agent-answer">${esc(res.slice(0, 160))}${res.length > 160 ? '…' : ''}</div>` : c.phase === 'running' ? '<div class="agent-answer muted">working, no answer yet</div>' : '') : ''}
     </a>`;
   });
   const title = `${parent.children.length} subagent${parent.children.length === 1 ? '' : 's'}`;
@@ -635,7 +644,7 @@ async function loadTranscript(id, quiet = false) {
     // Subagent view: what it gave back to the parent first, then how it got there.
     const c = parent.children.find((x) => x.id === id);
     const rounds = c?.name ? (resultsByAgent(parent).get(c.name) ?? []) : [];
-    const res = rounds.length ? null : answerFor(parent, c, s);
+    const res = rounds.length ? null : answerFor(parent, c);
     html.push(agentsBoard(parent, { selectedId: id, compact: true }));
     html.push(`<section class="answer">
       <div class="section-title">${rounds.length > 1 ? `${rounds.length} answers returned to the parent` : 'answer returned to the parent'}</div>
