@@ -47,6 +47,20 @@ fox is a plain Node process: run `npm start` in any terminal tab and leave it th
 
 Deep links: `?session=<id>` selects a session, `?open=<id>` also opens its terminal.
 
+## Keyboard
+
+Option is the modifier, because ⌘T and ⌘W belong to the browser.
+
+| Keys | Action |
+|---|---|
+| ⌥T | New session in the current project |
+| ⌥W | Close the current tab (fx keeps running) |
+| ⌥] / ⌥[ · ⌥1…9 | Switch tabs |
+| ⌥P | Pin / unpin the current tab |
+| ⌥F | Search this conversation |
+| ⌥\ | Show / hide the right column |
+| ⌥? | Shortcut list |
+
 ## How to read the screen
 
 | Where | What |

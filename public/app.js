@@ -242,6 +242,7 @@ $('#new-session').addEventListener('submit', async (e) => {
   if (r.ok) openTerminal({ cwd: r.path });
 });
 $('#refresh').addEventListener('click', refresh);
+$('#keys').addEventListener('click', () => showShortcuts());
 // Shift-click or right-click the folder icon to type a path instead of using the native picker.
 $('#pick-folder').addEventListener('contextmenu', (e) => { e.preventDefault(); $('#new-session').classList.toggle('hidden'); $('#new-cwd').focus(); });
 $('#pick-folder').addEventListener('click', async (e) => {
@@ -780,6 +781,53 @@ $('#theme').addEventListener('change', () => { try { localStorage.setItem('fox.t
 try { const saved = localStorage.getItem('fox.theme'); $('#theme').value = saved === 'night' ? 'sky' : saved && saved !== 'auto' && saved !== 'sundown' ? saved : 'system'; } catch {}
 applyTheme();
 systemDark.addEventListener('change', () => { if ($('#theme').value === 'system') applyTheme(); });
+
+// ---------- keyboard ----------
+// ⌥ as the modifier: ⌘T and ⌘W belong to the browser. Captured on window before xterm sees them.
+const SHORTCUTS = [
+  ['⌥T', 'new session in the current project'],
+  ['⌥W', 'close the current tab'],
+  ['⌥] / ⌥[', 'next / previous tab'],
+  ['⌥1…9', 'jump to tab'],
+  ['⌥P', 'pin / unpin the current tab'],
+  ['⌥F', 'search this conversation'],
+  ['⌥\\', 'show / hide the right column'],
+  ['⌥?', 'this list'],
+];
+function currentWorkspace() {
+  const t = state.terminals.find((x) => x.name === state.activeTab);
+  if (t?.cwd) return t.cwd;
+  const s = sessionById(state.selected);
+  return s?.workspace ?? null;
+}
+function showShortcuts() {
+  let el = $('#shortcuts');
+  if (el) { el.remove(); return; }
+  el = document.createElement('div'); el.id = 'shortcuts';
+  el.innerHTML = `<div class="sheet"><div class="section-title">keyboard</div>${SHORTCUTS.map(([k, d]) => `<div class="kb"><kbd>${esc(k)}</kbd><span>${esc(d)}</span></div>`).join('')}<div class="muted" style="margin-top:8px;font-size:11px">⌘T and ⌘W are reserved by the browser.</div></div>`;
+  el.addEventListener('click', () => el.remove());
+  document.body.appendChild(el);
+}
+window.addEventListener('keydown', (e) => {
+  if (!e.altKey || e.metaKey || e.ctrlKey) return;
+  const tabs = [...state.tabs.keys()];
+  const idx = tabs.indexOf(state.activeTab);
+  const code = e.code; // physical key: Option changes e.key on macOS
+  let handled = true;
+  if (code === 'KeyT' || code === 'KeyN') { const ws = currentWorkspace(); if (ws) openTerminal({ cwd: ws }); else $('#pick-folder').click(); }
+  else if (code === 'KeyW') { if (state.activeTab) closeTab(state.activeTab); }
+  else if (code === 'BracketRight') { if (tabs.length) activateTab(tabs[(idx + 1) % tabs.length]); }
+  else if (code === 'BracketLeft') { if (tabs.length) activateTab(tabs[(idx - 1 + tabs.length) % tabs.length]); }
+  else if (/^Digit[1-9]$/.test(code)) { const n = Number(code.slice(5)) - 1; if (tabs[n]) activateTab(tabs[n]); }
+  else if (code === 'KeyP') { if (state.activeTab) setPinned(state.activeTab, !state.pinned.has(state.activeTab)); }
+  else if (code === 'KeyF') { setTranscript(true); $('#search').focus(); $('#search').select(); }
+  else if (code === 'Backslash') { setTranscript(document.body.classList.contains('no-transcript')); }
+  else if (code === 'Slash' || e.key === '?') { showShortcuts(); }
+  else handled = false;
+  if (handled) { e.preventDefault(); e.stopPropagation(); }
+}, true);
+// Escape closes the shortcuts sheet or leaves the search box.
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#shortcuts')) $('#shortcuts').remove(); });
 
 // ---------- boot ----------
 // Deep links: ?session=<id> selects a session and shows its transcript; ?open=<id> also opens its terminal tab.

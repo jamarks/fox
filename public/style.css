@@ -203,3 +203,7 @@ body.night .term-wrap .xterm, body.night .xterm-viewport { background: transpare
 body.night aside, body.night section { backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
 body.night .tab, body.night .session.active, body.night .child.active { background: rgba(22,26,42,0.55); }
 body.night .tab.active { background: rgba(7,9,18,0.35); }
+#shortcuts { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; }
+#shortcuts .sheet { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; min-width: 300px; }
+.kb { display: flex; gap: 12px; align-items: center; padding: 4px 0; font-size: 12px; }
+.kb kbd { font-family: var(--mono); font-size: 11px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; min-width: 64px; text-align: center; }
