@@ -145,8 +145,10 @@ function sessionCard(s) {
 }
 
 function childrenHtml(parent) {
-  if (!parent.children?.length) return '';
-  const rows = parent.children.map((c) => {
+  // Failed or never-started children stay out of the sidebar; the board on the right lists them with the reason.
+  const shown = (parent.children ?? []).filter((c) => !c.failure && (c.name || c.task || sessionById(c.id)?.firstPrompt));
+  if (!shown.length) return '';
+  const rows = shown.map((c) => {
     const child = sessionById(c.id);
     const st = child?.state ?? (c.phase === 'running' ? 'working' : c.phase === 'idle' ? 'ready' : 'done');
     const label = c.name ? `<b>${esc(c.name)}</b>` : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 70));
@@ -450,8 +452,8 @@ function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
     const res = answerFor(parent, c, child);
     const sel = c.id === selectedId;
     return `<a class="agent ${st} ${sel ? 'selected' : ''} ${compact ? 'compact' : ''}" href="#" data-child="${c.id}">
-      <div class="agent-head"><span class="st ${st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 90))}</span>${child?.model && child.model !== parent.model ? `<span class="agent-model" title="runs on a different model than the parent">${esc(child.model)}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>
-      ${!compact ? (res ? `<div class="agent-answer">${esc(res.slice(0, 160))}${res.length > 160 ? '…' : ''}</div>` : c.phase === 'running' ? '<div class="agent-answer muted">working, no answer yet</div>' : '') : ''}
+      <div class="agent-head"><span class="st ${c.failure ? 'needs_input' : st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? (c.failure ? 'failed to start' : c.id)).slice(0, 90))}</span>${child?.model && child.model !== parent.model ? `<span class="agent-model" title="runs on a different model than the parent">${esc(child.model)}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>
+      ${!compact ? (c.failure ? `<div class="agent-answer err">failed${child?.model ? ' · ' + esc(child.model) : ''} · ${esc(typeof c.failure === 'string' ? c.failure : (c.failure.message ?? c.failure.reason ?? JSON.stringify(c.failure))).slice(0, 140)}</div>` : res ? `<div class="agent-answer">${esc(res.slice(0, 160))}${res.length > 160 ? '…' : ''}</div>` : c.phase === 'running' ? '<div class="agent-answer muted">working, no answer yet</div>' : '') : ''}
     </a>`;
   });
   const title = `${parent.children.length} subagent${parent.children.length === 1 ? '' : 's'}`;
