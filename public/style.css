@@ -45,7 +45,7 @@ button:disabled { opacity: .3; cursor: not-allowed; }
 .badge { display: inline-block; padding: 0 5px; border-radius: 4px; font-size: 10px; background: var(--panel-2); border: 1px solid var(--border); }
 .badge.live { color: var(--ok); border-color: var(--ok); }
 .badge.sub { color: var(--warn); border-color: var(--warn); }
-#center { display: flex; flex-direction: column; min-width: 0; }
+#center { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 #tabbar { display: flex; align-items: flex-end; background: var(--panel); border-bottom: 1px solid var(--border); padding-right: 6px; }
 #tabbar > button { margin-bottom: 4px; }
 #tabs { display: flex; gap: 2px; padding: 6px 8px 0; overflow-x: auto; flex: 1; }
@@ -57,7 +57,7 @@ body.no-transcript #transcript { display: none; }
 .tab .close { opacity: .5; padding: 0 2px; } .tab .close:hover { opacity: 1; color: var(--err); }
 .tab .st { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); } .tab .st.on { background: var(--ok); }
 #terminals { flex: 1; position: relative; min-height: 0; }
-.term-wrap { position: absolute; inset: 0; padding: 8px; display: none; }
+.term-wrap { position: absolute; inset: 0; padding: 8px 8px 10px; display: none; overflow: hidden; }
 .term-wrap.active { display: block; }
 .term-wrap .xterm { height: 100%; }
 #empty-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--muted); }

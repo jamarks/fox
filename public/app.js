@@ -304,7 +304,10 @@ function syncTabsWithTerminals() {
   renderTabs();
 }
 
-window.addEventListener('resize', () => state.tabs.get(state.activeTab)?.fit.fit());
+// Refit the visible terminal whenever its box changes (window, column toggle, tab bar wrapping).
+const fitActive = debounce(() => { const t = state.tabs.get(state.activeTab); if (t && !t.closed) t.fit.fit(); }, 50);
+window.addEventListener('resize', fitActive);
+new ResizeObserver(fitActive).observe($('#terminals'));
 
 // ---------- notifications ----------
 function notify(title, body) {
