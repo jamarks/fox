@@ -124,7 +124,7 @@ function renderSessions() {
     // GitHub remote: owner/repo as a link. Plain git: just the branch (and the repo root if the workspace is a subfolder).
     const gitLine = repo ? `<div class="git" title="${esc(repo.remote || 'git repo without a remote: add one (git remote add origin …) and this becomes a link')}">${repo.url ? `<a href="${esc(repo.url)}" target="_blank" rel="noopener" title="Open ${esc(repo.repo)} on GitHub">${ICON.github}${esc(repo.repo)}</a>` : `<span>${ICON.git}${repo.root !== ws ? esc(shortPath(repo.root)) : 'no remote'}</span>`}${repo.branch ? `<span class="branch">${esc(repo.branch)}</span>` : ''}${repo.changed ? `<span class="changed" title="${repo.changed} changed file${repo.changed === 1 ? '' : 's'}">±${repo.changed}</span>` : ''}</div>` : '';
     g.innerHTML = `<h3><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(ws)}">${esc(shortPath(ws))}</span><span class="gcount">${list.length}${busy ? ` <b class="st working">· ${busy} active</b>` : ''}</span><button class="icon" data-new="${esc(ws)}" title="New session in this folder">+</button></h3>${isCollapsed ? '' : gitLine}`;
-    if (!isCollapsed) for (const s of list) g.appendChild(sessionCard(s));
+    if (!isCollapsed) list.forEach((s, i) => g.appendChild(sessionCard(s, i + 1)));
     root.appendChild(g);
   }
   if (archived.length) {
@@ -136,12 +136,13 @@ function renderSessions() {
   }
 }
 
-function sessionCard(s) {
+function sessionCard(s, index = null) {
   const el = document.createElement('div');
   el.className = `session state-${s.state}` + (s.id === state.selected ? ' active' : '') + (s.archived ? ' is-archived' : '');
   el.dataset.id = s.id;
   const stateHtml = s.state !== 'idle' ? `<span class="st ${s.state}" title="${s.state === 'external' ? 'open in another terminal; fx allows one process per session' : STATE_LABEL[s.state]}"><i></i>${STATE_LABEL[s.state]}</span>` : '';
   el.innerHTML = `
+    ${index ? `<span class="idx">${index}</span>` : ''}
     <div class="row">
       <div class="title" title="${esc(s.title)}">${esc(displayTitle(s))}</div>
       <div class="actions">
@@ -153,10 +154,7 @@ function sessionCard(s) {
     ${s.firstPrompt ? `<div class="prompt">${esc(s.firstPrompt)}</div>` : ''}
     <div class="sub">
       ${stateHtml}
-      <span class="model">${modelBadge(s.model)}${esc(s.model ?? '')}</span>
-      <span>${s.turns} turn${s.turns === 1 ? '' : 's'}</span>
-      <span>${fmtTokens(s.usage.input + s.usage.output)} tok</span>
-      ${s.usage.cost ? `<span>$${s.usage.cost.toFixed(4)}</span>` : ''}
+      <span class="model">${modelBadge(s.model)}${esc(modelShort(s.model))}</span>
       <span>${fmtTime(s.updatedAt)}</span>
     </div>
     ${childrenHtml(s)}`;

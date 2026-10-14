@@ -29,9 +29,14 @@ input { width: 100%; background: var(--bg); color: var(--text); border: 1px soli
 .group { padding: 8px 0; }
 .group h3 { margin: 0; padding: 6px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
 .group h3 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session { padding: 8px 12px; cursor: pointer; border-left: 2px solid transparent; }
+.session { position: relative; padding: 8px 12px 8px 34px; margin-left: 14px; cursor: pointer; border-left: 1px solid var(--border); }
+.session .idx { position: absolute; left: 10px; top: 9px; font-family: var(--mono); font-size: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; line-height: 14px; }
+.session.active .idx { color: var(--accent); border-color: var(--accent); }
+.session.active { border-left-color: var(--accent); }
+.group { padding: 4px 0 10px; }
+.group h3 { padding: 8px 12px 4px; }
 .session:hover { background: var(--panel-2); }
-.session.active { background: var(--panel-2); border-left-color: var(--accent); }
+.session.active { background: var(--panel-2); }
 .session .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .session .sub { color: var(--muted); font-size: 11px; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
 .session .actions { display: flex; gap: 2px; opacity: 0; flex: none; }
@@ -217,6 +222,6 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 .ns-hint { font-size: 11px; margin-right: auto; }
 .vendor { display: inline-flex; align-items: center; border-radius: 4px; color: #fff; font: 600 9px/1 -apple-system, sans-serif; padding: 3px 5px; margin-right: 5px; vertical-align: -2px; flex: none; letter-spacing: .01em; }
 .sub .model { display: inline-flex; align-items: center; }
-.children-count { margin: 6px 0 0 2px; font-size: 11px; color: var(--muted); cursor: pointer; display: flex; gap: 6px; align-items: center; }
+.children-count { margin: 6px 0 0 0; font-size: 11px; color: var(--muted); cursor: pointer; display: flex; gap: 6px; align-items: center; }
 .children-count:hover { color: var(--text); }
 .children-count .st { gap: 4px; }
