@@ -58,9 +58,11 @@ function vendorOf(model) { const m = String(model ?? '').toLowerCase(); return V
 function modelBadge(model) {
   if (!model) return '';
   const v = vendorOf(model);
-  const [, abbr, color, name] = v ?? [null, '?', '#555', 'unknown vendor'];
-  return `<span class="vendor" style="background:${color}" title="${esc(name)}">${abbr}</span>`;
+  const [, , color, name] = v ?? [null, '?', '#555', 'unknown vendor'];
+  return `<span class="vendor" style="background:${color}">${esc(name)}</span>`;
 }
+// "openai/gpt-5.2" → "gpt-5.2" once the vendor pill says who makes it.
+const modelShort = (model) => String(model ?? '').replace(/^[a-z0-9-]+\//i, '');
 const STATE_LABEL = { working: 'working', ready: 'waiting', needs_input: 'needs input', external: 'other terminal', done: 'done', idle: '' };
 const STATE_ORDER = { needs_input: 0, working: 1, ready: 2, external: 3, done: 4, idle: 5 };
 
@@ -168,7 +170,7 @@ function childrenHtml(parent) {
   const rows = shown.map((c) => {
     const child = sessionById(c.id);
     const st = child?.state ?? (c.phase === 'running' ? 'working' : c.phase === 'idle' ? 'ready' : 'done');
-    const label = `${child?.model && child.model !== parent.model ? modelBadge(child.model) : ''}${c.name ? `<b>${esc(c.name)}</b>` : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 70))}`;
+    const label = `${child?.model && child.model !== parent.model ? modelBadge(child.model) + esc(modelShort(child.model)) + ' · ' : ''}${c.name ? `<b>${esc(c.name)}</b>` : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 70))}`;
     const tokN = child ? child.usage.input + child.usage.output : 0;
     const tok = tokN ? fmtTokens(tokN) + ' tok' : '';
     return `<div class="child ${c.id === state.selected ? 'active' : ''}" data-child="${c.id}" title="${esc(c.task ?? '')}">
@@ -479,7 +481,7 @@ function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
     const res = answerFor(parent, c, child);
     const sel = c.id === selectedId;
     return `<a class="agent ${st} ${sel ? 'selected' : ''} ${compact ? 'compact' : ''}" href="#" data-child="${c.id}">
-      <div class="agent-head"><span class="st ${c.failure ? 'needs_input' : st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? (c.failure ? 'failed to start' : c.id)).slice(0, 90))}</span>${child?.model && child.model !== parent.model ? `<span class="agent-model" title="runs on a different model than the parent">${modelBadge(child.model)}${esc(child.model)}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>
+      <div class="agent-head"><span class="st ${c.failure ? 'needs_input' : st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? (c.failure ? 'failed to start' : c.id)).slice(0, 90))}</span>${child?.model && child.model !== parent.model ? `<span class="agent-model" title="runs on a different model than the parent">${modelBadge(child.model)}${esc(modelShort(child.model))}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>
       ${!compact ? (c.failure ? `<div class="agent-answer err">failed${child?.model ? ' · ' + esc(child.model) : ''} · ${esc(typeof c.failure === 'string' ? c.failure : (c.failure.message ?? c.failure.reason ?? JSON.stringify(c.failure))).slice(0, 140)}</div>` : res ? `<div class="agent-answer">${esc(res.slice(0, 160))}${res.length > 160 ? '…' : ''}</div>` : c.phase === 'running' ? '<div class="agent-answer muted">working, no answer yet</div>' : '') : ''}
     </a>`;
   });
@@ -581,7 +583,7 @@ async function loadTranscript(id, quiet = false) {
     ? `<a href="#" class="crumb" data-goto="${parent.id}">${esc(displayTitle(parent))}</a><span class="crumb-sep">›</span>${esc(displayTitle(s))}`
     : esc(displayTitle(s));
   $('#transcript-meta').innerHTML = `
-    <span>${modelBadge(s.model)}${esc(s.model)} <span class="muted">· ${esc(s.provider)}</span></span>
+    <span>${modelBadge(s.model)}${esc(modelShort(s.model))} <span class="muted">· ${esc(s.provider)}</span></span>
     ${s.usage.input + s.usage.output ? `<span>${fmtTokens(s.usage.input)} in · ${fmtTokens(s.usage.output)} out · ${fmtTokens(s.usage.cacheRead)} cache</span><span>${s.usage.cost ? '$' + s.usage.cost.toFixed(4) : 'subscription'}</span><span>${(s.usage.wallMs / 1000).toFixed(0)}s</span>` : '<span>tokens billed to parent</span>'}
     <span title="${esc(s.workspace)}">${esc(shortPath(s.workspace))}</span>`;
 
