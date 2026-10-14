@@ -750,11 +750,11 @@ $('#transcript').addEventListener('click', (e) => {
   if (reads) { e.preventDefault(); const id = reads.dataset.toggleReads; readsShown.has(id) ? readsShown.delete(id) : readsShown.add(id); lastTranscriptKey = ''; return loadTranscript(id, true); }
   const file = e.target.closest('[data-file]');
   if (file && !e.target.closest('.file-preview')) { toggleFile(file.dataset.file); return; }
-  const toggle = e.target.closest('a[data-show-convo], a[data-hide-convo]');
+  const toggle = e.target.closest('a[data-hide-convo]');
   if (toggle) {
     e.preventDefault();
-    const id = toggle.dataset.showConvo ?? toggle.dataset.hideConvo;
-    toggle.dataset.showConvo ? convoShown.add(id) : convoShown.delete(id);
+    const id = toggle.dataset.hideConvo;
+    convoShown.delete(id);
     lastTranscriptKey = ''; return loadTranscript(id);
   }
   const link = e.target.closest('a[data-child], a[data-goto]');
@@ -877,14 +877,10 @@ async function loadTranscript(id, quiet = false) {
     if (lastChildShown !== id) { expandedAgents.add(id); lastChildShown = id; } // arrive with its answer open
     html.push(agentsBoard(parent, { selectedId: id }), '<div class="section-title">its conversation</div>');
   } else if (parent.children?.length) html.push(agentsBoard(parent));
-  // With the terminal open you are already reading the conversation there: keep this column to what the
-  // terminal does not show (subagents, tokens) unless you ask for it.
-  const terminalOpen = Boolean(s.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
-  const showConvo = isChild || !terminalOpen || convoShown.has(id);
-  if (!isChild) {
-    // Shown here only when the terminal is closed, or when global search opened a message.
-    if (showConvo) html.push(`<div class="section-title">conversation${terminalOpen ? ` · <a href="#" data-hide-convo="${id}">hide</a>` : ''}</div>`);
-  }
+  // The conversation lives in the terminal. This column shows it only for a subagent (it has no terminal)
+  // or when global search or the replies inbox pointed at one message.
+  const showConvo = isChild || convoShown.has(id);
+  if (!isChild && showConvo) html.push(`<div class="section-title">conversation · <a href="#" data-hide-convo="${id}">hide</a></div>`);
   let messageIndex = 0;
   for (const ev of showConvo ? events : []) {
     if (!isChild && ev.kind === 'tool_call' && ev.name === 'subagent' && parent.children?.length) continue; // already in the board
@@ -1134,19 +1130,24 @@ async function loadTools() {
   const box = $('#ns-tools');
   let tools = [];
   try { tools = await (await fetch('/api/tools')).json(); } catch {}
-  const missing = tools.filter((t) => !t.installed);
-  box.classList.toggle('hidden', !missing.length);
-  box.innerHTML = !missing.length ? '' : `<label class="ns-label">give fx more tools <span class="muted">(added to fx's own config, for every session)</span></label>` +
-    missing.map((t) => `<div class="ns-tool"><div class="ns-tool-text"><b>${esc(t.label)}</b><span class="muted">${esc(t.description)}</span></div><button type="button" data-add-tool="${t.id}">Add</button></div>`).join('');
+  const todo = tools.filter((t) => !t.installed || t.needsSignIn);
+  box.classList.toggle('hidden', !todo.length);
+  box.innerHTML = !todo.length ? '' : `<label class="ns-label">give fx more tools <span class="muted">(added to fx's own config, for every session)</span></label>` +
+    todo.map((t) => `<div class="ns-tool"><div class="ns-tool-text"><b>${esc(t.label)}</b><span class="muted">${esc(t.description)}</span></div>${t.installed ? signInButton(t.id) : `<button type="button" data-add-tool="${t.id}">Add</button>`}</div>`).join('');
 }
+const signInButton = (id) => `<button type="button" data-signin-tool="${id}" title="Opens the sign-in page in your browser">Sign in</button>`;
 $('#ns-tools').addEventListener('click', async (e) => {
-  const btn = e.target.closest('[data-add-tool]');
+  const btn = e.target.closest('[data-add-tool], [data-signin-tool]');
   if (!btn) return;
-  btn.disabled = true; btn.textContent = 'Adding…';
-  const r = await fetch(`/api/tools/${btn.dataset.addTool}/add`, { method: 'POST' });
+  const id = btn.dataset.addTool ?? btn.dataset.signinTool, adding = Boolean(btn.dataset.addTool);
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = adding ? 'Adding…' : 'Waiting for sign-in…';
+  const r = await fetch(`/api/tools/${id}/${adding ? 'add' : 'signin'}`, { method: 'POST' });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) { btn.disabled = false; btn.textContent = 'Add'; return alert(j.error || 'Could not add it'); }
-  btn.replaceWith(Object.assign(document.createElement('span'), { className: 'ns-tool-done', textContent: 'Added · new sessions have it' }));
+  if (!r.ok) { btn.disabled = false; btn.textContent = label; return alert(j.error || (adding ? 'Could not add it' : 'Sign-in did not finish')); }
+  const tool = Array.isArray(j) ? j.find((t) => t.id === id) : null;
+  if (tool?.needsSignIn) { btn.outerHTML = signInButton(id); return; } // added; one more step
+  btn.replaceWith(Object.assign(document.createElement('span'), { className: 'ns-tool-done', textContent: adding ? 'Added · new sessions have it' : 'Signed in' }));
 });
 function updateNsBadge() { const v = $('#ns-model').value; $('#ns-badge').innerHTML = modelBadge(v ? v.split('|')[1] : modelsCatalog?.default?.model); }
 $('#ns-model').addEventListener('change', updateNsBadge);

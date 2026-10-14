@@ -23,4 +23,5 @@ test('docs tool is found by URL under any name', () => {
 test('add arguments: local command or remote HTTP server', () => {
   assert.deepEqual(addArgs(TOOLS.find((t) => t.id === 'browser')), ['mcp', 'add', 'playwright', 'npx', '@playwright/mcp@latest']);
   assert.deepEqual(addArgs(TOOLS.find((t) => t.id === 'docs')), ['mcp', 'add', '--transport', 'http', 'docs', 'https://mcp.context7.com/mcp']);
+  assert.deepEqual(addArgs(TOOLS.find((t) => t.id === 'vercel')), ['mcp', 'add', '--transport', 'http', 'vercel', 'https://mcp.vercel.com']);
 });

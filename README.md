@@ -57,7 +57,7 @@ Do this in stages, without asking me anything. Stage 1: launch three one-off sub
 - **One terminal**: fx runs in tmux, so closing the tab or the browser never stops it; pin to keep tabs.
 - **Drop files**: drag images or files onto the terminal to attach them to your next message.
 - **Search everything**: ⌥Space searches names and messages across all sessions.
-- **Tools for fx**: one click in the new-session panel gives fx a browser, Chrome DevTools or current library docs (Context7); the catalog lives in `tools.mjs`.
+- **Tools for fx**: one click in the new-session panel gives fx a browser, Chrome DevTools, current library docs (Context7) or your Vercel projects and deploy logs (with sign-in); the catalog lives in `tools.mjs`.
 - **Archive and rename** without touching fx's files.
 - **Git at a glance**: repo, branch and uncommitted files per project.
 - **Keyboard first**: ⌥ shortcuts for sessions, tabs, search, themes and font size; ⌥? lists them.
@@ -107,7 +107,7 @@ Option is the modifier, because ⌘T and ⌘W belong to the browser.
 |---|---|
 | Left | Sessions from `~/.fx/sessions`, grouped by workspace. Click to open. Hover for pin, rename, archive. `+` on a group starts a new session there; the folder icon in the header opens any other folder. |
 | Middle | The current terminal (preview, italic) plus pinned tabs. 📌 pins, × unpins. fx keeps running either way. |
-| Right (⇥) | Model, provider, duration and cost; the subagent board when there are children; the transcript only when the session's terminal is not open. × closes it. |
+| Right (⇥) | Model, provider, duration and cost; the subagent board when there are children; a subagent's own conversation; a session's conversation only when global search or the replies inbox points at a message (the terminal has the rest). × closes it. |
 
 ## How it works
 

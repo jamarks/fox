@@ -30,7 +30,8 @@ const STATE_FILE = join(STATE_DIR, 'state.json');
 // Estado del panel: qué sesiones están archivadas y nombres propios. Nunca se escribe en ~/.fx.
 async function loadState() {
   const st = await readJson(STATE_FILE, {});
-  return { archived: Array.isArray(st.archived) ? st.archived : [], names: st.names && typeof st.names === 'object' ? st.names : {} };
+  const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+  return { archived: Array.isArray(st.archived) ? st.archived : [], names: obj(st.names), toolsSignedIn: obj(st.toolsSignedIn) };
 }
 async function saveState(st) {
   await mkdir(STATE_DIR, { recursive: true });
@@ -300,7 +301,12 @@ async function fxMcpConfig() {
 }
 async function listTools() {
   const config = await fxMcpConfig().catch(() => ({}));
-  return TOOLS.map((t) => ({ id: t.id, label: t.label, description: t.description, installed: isInstalled(t, config) }));
+  const st = await loadState();
+  return TOOLS.map((t) => {
+    const installed = isInstalled(t, config);
+    // fx keeps OAuth tokens to itself; fox only remembers that a sign-in it started went through.
+    return { id: t.id, label: t.label, description: t.description, installed, needsSignIn: installed && t.auth === 'oauth' && !st.toolsSignedIn[t.id] };
+  });
 }
 
 // ---------- HTTP ----------
@@ -417,13 +423,19 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { path });
     }
     if (p === '/api/tools' && req.method === 'GET') return send(res, 200, await listTools());
-    // Adds one catalog tool to fx's MCP config, the same as running `fx mcp add` by hand.
-    if (req.method === 'POST' && (m = p.match(/^\/api\/tools\/([a-z0-9-]+)\/add$/))) {
+    // Adds one catalog tool to fx's MCP config, the same as running `fx mcp add` by hand; 'signin' runs
+    // `fx mcp auth NAME --open`, which opens the provider's sign-in page and waits for it.
+    if (req.method === 'POST' && (m = p.match(/^\/api\/tools\/([a-z0-9-]+)\/(add|signin)$/))) {
       if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: 'cross-origin' });
       const tool = TOOLS.find((t) => t.id === m[1]);
       if (!tool) return send(res, 404, { error: 'unknown tool' });
-      try { await execFileP(FX_BIN, addArgs(tool), { timeout: 30000 }); }
-      catch (err) { return send(res, 500, { error: String(err.stderr || err.message).trim() }); }
+      try {
+        if (m[2] === 'add') await execFileP(FX_BIN, addArgs(tool), { timeout: 30000 });
+        else {
+          await execFileP(FX_BIN, ['mcp', 'auth', tool.name, '--open'], { timeout: 5 * 60000 });
+          const st = await loadState(); st.toolsSignedIn[tool.id] = true; await saveState(st);
+        }
+      } catch (err) { return send(res, 500, { error: String(err.stderr || err.message).trim() }); }
       return send(res, 200, await listTools());
     }
     if (p === '/api/models' && req.method === 'GET') return send(res, 200, await getModels());
