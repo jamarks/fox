@@ -282,6 +282,7 @@ function attachTab(t, { user = false, activate = true } = {}) {
 function connectTab(tab) {
   if (!tab || tab.ws || tab.closed) return;
   const { term, wrap } = tab;
+  if (term.cols < 20 || term.rows < 5) { setTimeout(() => { safeFit(tab); connectTab(tab); }, 100); return; } // wait for a real layout
   const ws = new WebSocket(`ws://${location.host}/pty?name=${encodeURIComponent(tab.name)}&cols=${term.cols}&rows=${term.rows}`);
   ws.binaryType = 'arraybuffer';
   tab.ws = ws;
@@ -364,7 +365,9 @@ function syncTabsWithTerminals() {
 function safeFit(t) {
   if (!t || t.closed || !t.wrap.classList.contains('active')) return;
   const dims = t.fit.proposeDimensions();
-  if (!dims) return;
+  // Tiny proposals mean the box has no real layout yet (hidden column, mid-render): never apply them,
+  // they would shrink the shared tmux window for every attached client.
+  if (!dims || dims.cols < 20 || dims.rows < 5) return;
   // Same proposal as last time means the box has not changed: nothing to do (avoids a resize loop).
   if (t.settled && t.settled.cols === dims.cols && t.settled.rows === dims.rows) return;
   if (dims.cols !== t.term.cols || dims.rows !== t.term.rows) t.fit.fit();
