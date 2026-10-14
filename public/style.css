@@ -121,3 +121,17 @@ label.toggle { font-weight: 400; color: var(--muted); font-size: 11px; display: 
 .agent-label { margin-top: 6px; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .agent-label + .agent-result { margin-top: 2px; border-top: 0; padding-top: 0; color: var(--text); }
 .body-heading { font-size: 11px; color: var(--muted); margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px dashed var(--border); }
+
+/* right column: single view */
+#transcript-title { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crumb { color: var(--accent); text-decoration: none; } .crumb:hover { text-decoration: underline; }
+.crumb-sep { color: var(--muted); margin: 0 6px; }
+.section-title { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 14px 0 6px; }
+.section-title:first-child { margin-top: 0; }
+.answer { border: 1px solid var(--ok); border-radius: 8px; padding: 8px 10px; background: var(--panel-2); }
+.answer .section-title { margin: 0 0 4px; color: var(--ok); }
+.answer-text { white-space: pre-wrap; font-size: 12px; }
+a.agent { display: block; text-decoration: none; color: inherit; }
+a.agent:hover { border-color: var(--accent); }
+.agent-answer { margin-top: 4px; font-size: 11px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agent-answer.muted { color: var(--muted); }

@@ -328,70 +328,8 @@ $('#bell').addEventListener('click', () => {
 try { state.sound = localStorage.getItem('fx-panel.sound') === '1'; $('#bell').classList.toggle('on', state.sound); } catch {}
 
 // ---------- transcript ----------
-let lastTranscriptKey = '';
-async function loadTranscript(id, quiet = false) {
-  const s = sessionById(id);
-  const parent = s?.parentId ? sessionById(s.parentId) : s;
-  if (parent?.children?.length && (cachedResults.id !== parent.id || parent.children.some((c) => c.phase === 'running'))) await refreshResults(parent);
-  const events = await (await fetch(`/api/sessions/${id}/events`)).json();
-  const key = id + ':' + events.length + ':' + (s?.updatedAt ?? 0) + ':' + (parent?.children ?? []).map((c) => c.phase).join(',') + ':' + Math.floor(Date.now() / 5000);
-  if (quiet && key === lastTranscriptKey) return;
-  lastTranscriptKey = key;
-  $('#transcript-title').textContent = s ? displayTitle(s) : id;
-  $('#transcript-meta').innerHTML = s ? `
-    <span>${esc(s.provider)} / ${esc(s.model)}</span>
-    ${s.usage.input + s.usage.output ? `<span>${fmtTokens(s.usage.input)} in · ${fmtTokens(s.usage.output)} out · ${fmtTokens(s.usage.cacheRead)} cache</span><span>${s.usage.cost ? '$' + s.usage.cost.toFixed(4) : 'subscription'}</span><span>${(s.usage.wallMs / 1000).toFixed(0)}s</span>` : '<span>tokens billed to parent</span>'}
-    <span title="${esc(s.workspace)}">${esc(shortPath(s.workspace))}</span>` : '';
-  $('#board').innerHTML = agentsBoard(s);
-  const html = [];
-  for (const ev of events) {
-    if (ev.kind === 'user') html.push(`<div class="msg user"><div class="who">you</div><div class="text">${esc(ev.text)}</div></div>`);
-    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant"><div class="who">fx</div><div class="text">${esc(ev.text)}</div></div>`);
-    else if (ev.kind === 'tool_call') {
-      const st = ev.result?.status ?? 'pending';
-      const isSub = ev.name === 'subagent';
-      html.push(`<details class="tool ${st}">
-        <summary><span class="dot"></span><span class="name">${isSub ? '🧵 ' : ''}${esc(ev.name)}</span><span class="brief">${esc(briefArgs(ev.args))}</span></summary>
-        <pre class="label">args</pre><pre>${esc(typeof ev.args === 'string' ? ev.args : JSON.stringify(ev.args, null, 2))}</pre>
-        ${ev.result ? `<pre class="label">result · ${st} · ${ev.result.bytes} bytes</pre><pre>${esc(ev.result.preview)}</pre>` : ''}
-      </details>`);
-    } else if (ev.kind === 'turn_completed') html.push('<hr class="turn-sep" />');
-    else if (ev.kind === 'interrupted') html.push('<div class="interrupted">■ cancelled</div>');
-    else if (ev.kind === 'raw') html.push(`<div class="msg"><div class="who">event</div><div class="text muted">${esc(ev.text)}</div></div>`);
-  }
-  const body = $('#transcript-body');
-  const heading = s?.parentId ? `<div class="body-heading">full conversation of ${esc(displayTitle(s))}: what it read, ran and wrote before answering the parent</div>` : '';
-  body.innerHTML = heading + (html.join('') || '<p class="muted">Empty session.</p>');
-  if ($('#follow').checked) body.scrollTop = body.scrollHeight;
-}
-
-// Tablero: una tarjeta por subagente del padre (o del padre del hijo seleccionado), con fase en vivo.
-function agentsBoard(s) {
-  if (!s) return '';
-  const parent = s.parentId ? sessionById(s.parentId) : s;
-  if (!parent?.children?.length) return s.parentId ? `<div class="board-note">subagent of <a href="#" data-goto="${parent?.id ?? ''}">${esc(parent ? displayTitle(parent) : s.parentId)}</a></div>` : '';
-  const results = resultsByTask(parent);
-  const cards = parent.children.map((c) => {
-    const child = sessionById(c.id);
-    const st = child?.state ?? 'done';
-    const elapsed = c.phase === 'running' && c.startedAt ? Math.round((Date.now() - c.startedAt) / 1000) + 's' : child?.usage.wallMs ? Math.round(child.usage.wallMs / 1000) + 's' : '';
-    const res = results.get(c.task ?? child?.firstPrompt ?? '');
-    const open = expandedAgents.has(c.id) || c.id === s.id;
-    return `<div class="agent ${st} ${c.id === s.id ? 'selected' : ''} ${open ? 'open' : ''}" data-agent="${c.id}">
-      <div class="agent-head"><span class="st ${st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 80))}</span><span class="agent-elapsed">${elapsed}</span></div>
-      ${open ? `
-        ${c.name ? `<div class="agent-task">${esc(c.task ?? child?.firstPrompt ?? '')}</div>` : ''}
-        ${res ? `<div class="agent-label">answer returned to parent</div><div class="agent-result">${esc(res)}</div>` : c.phase === 'running' ? '<div class="agent-label">still working, no answer yet</div>' : ''}
-        ${c.failure ? `<div class="agent-result err">${esc(JSON.stringify(c.failure))}</div>` : ''}
-        <div class="agent-meta">${STATE_LABEL[st] || st}${child ? ` · ${child.turns} turn${child.turns === 1 ? '' : 's'}` : ''}${child?.usage.input + child?.usage.output ? ' · ' + fmtTokens(child.usage.input + child.usage.output) + ' tok' : ''} · <a href="#" data-child="${c.id}">${c.id === s.id ? 'conversation below ↓' : 'see its full conversation'}</a></div>` : ''}
-    </div>`;
-  });
-  return `<div class="board"><div class="board-title">${esc(displayTitle(parent))} → ${parent.children.length} subagent${parent.children.length === 1 ? '' : 's'}</div>${cards.join('')}</div>`;
-}
-
-// El padre guarda el resultado de cada subagente como tool_result; lo enlazamos por el texto de la tarea.
+// The parent stores each subagent's answer as a tool_result; we link them by task text.
 let cachedResults = { id: null, map: new Map() };
-const expandedAgents = new Set();
 function resultsByTask(parent) {
   return cachedResults.id === parent.id ? cachedResults.map : new Map();
 }
@@ -409,12 +347,89 @@ async function refreshResults(parent) {
   cachedResults = { id: parent.id, map };
 }
 
-$('#board').addEventListener('click', (e) => {
-  const goto = e.target.closest('[data-goto]'); if (goto) { e.preventDefault(); return selectSession(goto.dataset.goto); }
-  const link = e.target.closest('a[data-child]'); if (link) { e.preventDefault(); return selectSession(link.dataset.child); }
-  const card = e.target.closest('.agent[data-agent]');
-  if (card) { const id = card.dataset.agent; expandedAgents.has(id) ? expandedAgents.delete(id) : expandedAgents.add(id); lastTranscriptKey = ''; loadTranscript(state.selected); }
+// Board: shown only when a parent is selected. One compact row per subagent; click goes to that subagent's view.
+function agentsBoard(parent) {
+  if (!parent?.children?.length) return '';
+  const results = resultsByTask(parent);
+  const rows = parent.children.map((c) => {
+    const child = sessionById(c.id);
+    const st = child?.state ?? 'done';
+    const elapsed = c.phase === 'running' && c.startedAt ? Math.round((Date.now() - c.startedAt) / 1000) + 's' : child?.usage.wallMs ? Math.round(child.usage.wallMs / 1000) + 's' : '';
+    const res = results.get(c.task ?? child?.firstPrompt ?? '');
+    return `<a class="agent ${st}" href="#" data-child="${c.id}">
+      <div class="agent-head"><span class="st ${st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 90))}</span><span class="agent-elapsed">${elapsed}</span></div>
+      ${res ? `<div class="agent-answer">${esc(res.slice(0, 160))}${res.length > 160 ? '…' : ''}</div>` : c.phase === 'running' ? '<div class="agent-answer muted">working, no answer yet</div>' : ''}
+    </a>`;
+  });
+  return `<div class="board"><div class="board-title">${parent.children.length} subagent${parent.children.length === 1 ? '' : 's'} · click one to see its answer and conversation</div>${rows.join('')}</div>`;
+}
+
+$('#transcript').addEventListener('click', (e) => {
+  const link = e.target.closest('a[data-child], a[data-goto]');
+  if (!link) return;
+  e.preventDefault();
+  selectSession(link.dataset.child ?? link.dataset.goto);
 });
+
+let lastTranscriptKey = '';
+let lastEventCount = { id: null, n: 0 };
+async function loadTranscript(id, quiet = false) {
+  const s = sessionById(id);
+  if (!s) return;
+  const parent = s.parentId ? sessionById(s.parentId) : s;
+  const isChild = Boolean(s.parentId);
+  if (parent?.children?.length && (cachedResults.id !== parent.id || parent.children.some((c) => c.phase === 'running'))) await refreshResults(parent);
+  const events = await (await fetch(`/api/sessions/${id}/events`)).json();
+  const key = id + ':' + events.length + ':' + (s.updatedAt ?? 0) + ':' + (parent?.children ?? []).map((c) => c.phase).join(',') + ':' + Math.floor(Date.now() / 5000);
+  if (quiet && key === lastTranscriptKey) return;
+  lastTranscriptKey = key;
+
+  // Header: breadcrumb for subagents so you always know where you are and how to go back.
+  $('#transcript-title').innerHTML = isChild
+    ? `<a href="#" class="crumb" data-goto="${parent.id}">${esc(displayTitle(parent))}</a><span class="crumb-sep">›</span>${esc(displayTitle(s))}`
+    : esc(displayTitle(s));
+  $('#transcript-meta').innerHTML = `
+    <span>${esc(s.provider)} / ${esc(s.model)}</span>
+    ${s.usage.input + s.usage.output ? `<span>${fmtTokens(s.usage.input)} in · ${fmtTokens(s.usage.output)} out · ${fmtTokens(s.usage.cacheRead)} cache</span><span>${s.usage.cost ? '$' + s.usage.cost.toFixed(4) : 'subscription'}</span><span>${(s.usage.wallMs / 1000).toFixed(0)}s</span>` : '<span>tokens billed to parent</span>'}
+    <span title="${esc(s.workspace)}">${esc(shortPath(s.workspace))}</span>`;
+
+  const html = [];
+  if (isChild) {
+    // Subagent view: what it gave back to the parent first, then how it got there.
+    const c = parent.children.find((x) => x.id === id);
+    const res = resultsByTask(parent).get(c?.task ?? s.firstPrompt ?? '');
+    html.push(`<section class="answer">
+      <div class="section-title">answer returned to ${esc(displayTitle(parent))}</div>
+      ${res ? `<div class="answer-text">${esc(res)}</div>` : c?.phase === 'running' ? '<div class="muted">still working, nothing returned yet</div>' : '<div class="muted">no answer recorded</div>'}
+    </section>
+    <div class="section-title">its own conversation: what it read, ran and wrote to get there</div>`);
+  } else if (parent.children?.length) {
+    html.push(agentsBoard(parent));
+    html.push('<div class="section-title">main conversation</div>');
+  }
+  for (const ev of events) {
+    if (ev.kind === 'user') html.push(`<div class="msg user"><div class="who">${isChild ? 'task from parent' : 'you'}</div><div class="text">${esc(ev.text)}</div></div>`);
+    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant"><div class="who">${isChild ? esc(displayTitle(s)) : 'fx'}</div><div class="text">${esc(ev.text)}</div></div>`);
+    else if (ev.kind === 'tool_call') {
+      const st = ev.result?.status ?? 'pending';
+      const isSub = ev.name === 'subagent';
+      html.push(`<details class="tool ${st}">
+        <summary><span class="dot"></span><span class="name">${isSub ? '🧵 ' : ''}${esc(ev.name)}</span><span class="brief">${esc(briefArgs(ev.args))}</span></summary>
+        <pre class="label">args</pre><pre>${esc(typeof ev.args === 'string' ? ev.args : JSON.stringify(ev.args, null, 2))}</pre>
+        ${ev.result ? `<pre class="label">result · ${st} · ${ev.result.bytes} bytes</pre><pre>${esc(ev.result.preview)}</pre>` : ''}
+      </details>`);
+    } else if (ev.kind === 'turn_completed') html.push('<hr class="turn-sep" />');
+    else if (ev.kind === 'interrupted') html.push('<div class="interrupted">■ cancelled</div>');
+    else if (ev.kind === 'raw') html.push(`<div class="msg"><div class="who">event</div><div class="text muted">${esc(ev.text)}</div></div>`);
+  }
+  const body = $('#transcript-body');
+  body.innerHTML = html.join('') || '<p class="muted">Empty session.</p>';
+  // Scroll: top when you switch sessions, bottom only when new events arrive and "follow" is on.
+  const grew = lastEventCount.id === id && events.length > lastEventCount.n;
+  if (lastEventCount.id !== id) body.scrollTop = 0;
+  else if (grew && $('#follow').checked) body.scrollTop = body.scrollHeight;
+  lastEventCount = { id, n: events.length };
+}
 
 const transcriptToggle = $('#toggle-transcript');
 function setTranscript(visible) {
