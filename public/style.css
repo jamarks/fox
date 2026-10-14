@@ -210,7 +210,7 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 .kb { display: flex; gap: 12px; align-items: center; padding: 4px 0; font-size: 12px; }
 .kb kbd { font-family: var(--mono); font-size: 11px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; min-width: 64px; text-align: center; }
 #newsheet { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; }
-#newsheet .sheet { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; min-width: 360px; display: flex; flex-direction: column; gap: 8px; }
+#newsheet .sheet { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; width: min(560px, calc(100vw - 32px)); box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; }
 .ns-folder { font-family: var(--mono); font-size: 12px; }
 .ns-label { font-size: 11px; color: var(--text); }
 #ns-model { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; }
@@ -304,3 +304,10 @@ a.section-title.fold:hover { color: var(--text); }
 .agent .idx { min-width: 18px; text-align: center; box-sizing: border-box; }
 .file-dir { margin-left: 8px; color: var(--muted); font-size: 10.5px; }
 .file-act.read + .file-path .file-name { color: var(--muted); }
+/* optional tools in the new-session sheet */
+#ns-tools { margin-top: 14px; }
+.ns-tool { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; margin-top: 6px; }
+.ns-tool-text { flex: 1; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.ns-tool-text .muted { font-size: 11px; line-height: 1.4; }
+.ns-tool button { flex: none; }
+.ns-tool-done { flex: none; font-size: 11px; color: var(--ok); }

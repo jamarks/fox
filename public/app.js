@@ -1076,7 +1076,27 @@ function newSessionSheet(cwd) {
   $('#newsheet').dataset.cwd = cwd;
   $('#newsheet').classList.remove('hidden');
   loadModels().then(() => $('#ns-model').focus());
+  loadTools();
 }
+// Optional tools fx does not have yet (MCP servers from fox's catalog). Nothing is added without a click.
+async function loadTools() {
+  const box = $('#ns-tools');
+  let tools = [];
+  try { tools = await (await fetch('/api/tools')).json(); } catch {}
+  const missing = tools.filter((t) => !t.installed);
+  box.classList.toggle('hidden', !missing.length);
+  box.innerHTML = !missing.length ? '' : `<label class="ns-label">give fx more tools <span class="muted">(added to fx's own config, for every session)</span></label>` +
+    missing.map((t) => `<div class="ns-tool"><div class="ns-tool-text"><b>${esc(t.label)}</b><span class="muted">${esc(t.description)}</span></div><button type="button" data-add-tool="${t.id}">Add</button></div>`).join('');
+}
+$('#ns-tools').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-add-tool]');
+  if (!btn) return;
+  btn.disabled = true; btn.textContent = 'Adding…';
+  const r = await fetch(`/api/tools/${btn.dataset.addTool}/add`, { method: 'POST' });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { btn.disabled = false; btn.textContent = 'Add'; return alert(j.error || 'Could not add it'); }
+  btn.replaceWith(Object.assign(document.createElement('span'), { className: 'ns-tool-done', textContent: 'Added · new sessions have it' }));
+});
 function updateNsBadge() { const v = $('#ns-model').value; $('#ns-badge').innerHTML = modelBadge(v ? v.split('|')[1] : modelsCatalog?.default?.model); }
 $('#ns-model').addEventListener('change', updateNsBadge);
 $('#ns-cancel').addEventListener('click', () => $('#newsheet').classList.add('hidden'));

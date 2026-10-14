@@ -13,6 +13,7 @@ import * as pty from 'node-pty';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createSearchIndex } from './search.mjs';
+import { TOOLS, isInstalled } from './tools.mjs';
 const execFileP = promisify(execFile);
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -287,6 +288,17 @@ async function getModels() {
   return fetchModels();
 }
 
+// ---------- optional tools for fx (MCP servers) ----------
+let mcpPath = null;
+async function fxMcpConfig() {
+  mcpPath ??= (await execFileP(FX_BIN, ['mcp', 'path'], { timeout: 10000 })).stdout.trim();
+  return readJson(mcpPath, {});
+}
+async function listTools() {
+  const config = await fxMcpConfig().catch(() => ({}));
+  return TOOLS.map((t) => ({ id: t.id, label: t.label, description: t.description, installed: isInstalled(t, config) }));
+}
+
 // ---------- HTTP ----------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.map': 'application/json', '.svg': 'image/svg+xml' };
 
@@ -399,6 +411,16 @@ const server = http.createServer(async (req, res) => {
       const path = join(DROP_DIR, `${stamp}-${safe}`);
       await writeFile(path, Buffer.concat(chunks));
       return send(res, 200, { path });
+    }
+    if (p === '/api/tools' && req.method === 'GET') return send(res, 200, await listTools());
+    // Adds one catalog tool to fx's MCP config, the same as running `fx mcp add` by hand.
+    if (req.method === 'POST' && (m = p.match(/^\/api\/tools\/([a-z0-9-]+)\/add$/))) {
+      if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: 'cross-origin' });
+      const tool = TOOLS.find((t) => t.id === m[1]);
+      if (!tool) return send(res, 404, { error: 'unknown tool' });
+      try { await execFileP(FX_BIN, ['mcp', 'add', tool.name, ...tool.command], { timeout: 30000 }); }
+      catch (err) { return send(res, 500, { error: String(err.stderr || err.message).trim() }); }
+      return send(res, 200, await listTools());
     }
     if (p === '/api/models' && req.method === 'GET') return send(res, 200, await getModels());
     if (p === '/api/models/refresh' && req.method === 'POST') { try { return send(res, 200, await fetchModels()); } catch (err) { return send(res, 500, { error: String(err.stderr || err.message) }); } }

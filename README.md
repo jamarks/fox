@@ -13,6 +13,8 @@ npm install -g github:jamarks/fox && fox
 
 <p align="center"><sub>Needs Node 20+, <a href="https://fx.sh">fx</a> and tmux (<code>brew install tmux</code>). Opens http://127.0.0.1:4848. Details in <a href="#install-and-run">Install and run</a>.</sub></p>
 
+<p align="center"><sub>Optional: give fx a browser so it can check UI changes itself. fox offers it in the new-session panel, or run <code>fx mcp add playwright npx @playwright/mcp@latest</code>.</sub></p>
+
 <p align="center"><img src="docs/screenshot.png" alt="fox: three subagents on three models answering the same task, grouped for comparison in the right column, next to the real fx terminal" /></p>
 
 <p align="center"><sub>One task, three models. The right column groups the subagents by task so you compare their answers, and flags the model that printed a tool call instead of running it.</sub></p>
@@ -54,6 +56,7 @@ Do this in stages, without asking me anything. Stage 1: launch three one-off sub
 - **One terminal**: fx runs in tmux, so closing the tab or the browser never stops it; pin to keep tabs.
 - **Drop files**: drag images or files onto the terminal to attach them to your next message.
 - **Search everything**: ⌥Space searches names and messages across all sessions.
+- **Tools for fx**: one click in the new-session panel adds a browser (Playwright MCP) to fx; the catalog lives in `tools.mjs`.
 - **Archive and rename** without touching fx's files.
 - **Git at a glance**: repo, branch and uncommitted files per project.
 - **Keyboard first**: ⌥ shortcuts for sessions, tabs, search, themes and font size; ⌥? lists them.
