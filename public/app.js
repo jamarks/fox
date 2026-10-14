@@ -655,7 +655,7 @@ setTranscript(initialTranscript);
 const PALETTES = {
   dark:    { bg: '#0f1115', panel: '#161920', panel2: '#1d2129', border: '#262b36', text: '#e6e8ee', muted: '#8b93a7', accent: '#7aa2f7', ok: '#9ece6a', err: '#f7768e', warn: '#e0af68', cursor: '#7aa2f7', sel: '#2a3550' },
   light:   { bg: '#f6f6f3', panel: '#ffffff', panel2: '#efefeb', border: '#dedcd6', text: '#1d1f27', muted: '#6b7280', accent: '#2f6feb', ok: '#2e8b57', err: '#cf3a3f', warn: '#b7791f', cursor: '#2f6feb', sel: '#cfe0ff' },
-  sundown: { bg: '#190d08', panel: '#22110a', panel2: '#2e1810', border: '#4c2a19', text: '#ffeedd', muted: '#d7a383', accent: '#ff8a3d', ok: '#a8e063', err: '#ff5d5d', warn: '#ffd166', cursor: '#ff8a3d', sel: '#5a2d16' },
+  sundown: { bg: '#2b2230', panel: '#352a3b', panel2: '#413449', border: '#5f4e6a', text: '#f8f0ff', muted: '#b8a7c7', accent: '#ffb86b', ok: '#a8e6a8', err: '#ff7b94', warn: '#ffd98a', cursor: '#ffb86b', sel: '#5a4a66' },
 };
 const hex2rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 const rgb2hex = (c) => '#' + c.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
