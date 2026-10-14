@@ -400,9 +400,7 @@ function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
       ${!compact ? (res ? `<div class="agent-answer">${esc(res.slice(0, 160))}${res.length > 160 ? '…' : ''}</div>` : c.phase === 'running' ? '<div class="agent-answer muted">working, no answer yet</div>' : '') : ''}
     </a>`;
   });
-  const title = compact
-    ? `${parent.children.length} subagents · pick another, or the parent name above to go back`
-    : `${parent.children.length} subagent${parent.children.length === 1 ? '' : 's'} · click one to see its answer and conversation`;
+  const title = `${parent.children.length} subagent${parent.children.length === 1 ? '' : 's'}`;
   return `<div class="board ${compact ? 'compact' : ''}"><div class="board-title">${title}</div>${rows.join('')}</div>`;
 }
 
@@ -457,11 +455,11 @@ async function loadTranscript(id, quiet = false) {
       <div class="section-title">${rounds.length > 1 ? `${rounds.length} answers returned to the parent` : 'answer returned to the parent'}</div>
       ${rounds.length ? rounds.map((r, i) => `<div class="round"><div class="round-q">${rounds.length > 1 ? `round ${i + 1} · ` : ''}${esc(r.message.slice(0, 200))}${r.message.length > 200 ? '…' : ''}</div><div class="answer-text">${esc(r.text)}</div></div>`).join('')
         : res ? `<div class="answer-text">${esc(res)}</div>`
-        : c?.phase === 'running' ? '<div class="muted">still working, nothing returned yet</div>'
-        : parent.state === 'working' ? '<div class="muted">answered, but the parent is still in the middle of its turn. fx writes the answer to disk when that turn ends; until then it is only visible in the terminal.</div>'
+        : c?.phase === 'running' ? '<div class="muted">still working</div>'
+        : parent.state === 'working' ? '<div class="muted">available when the parent finishes its turn</div>'
         : '<div class="muted">no answer recorded</div>'}
     </section>
-    <div class="section-title">its own conversation: what it read, ran and wrote to get there</div>`);
+    <div class="section-title">its conversation</div>`);
   } else if (parent.children?.length) {
     html.push(agentsBoard(parent));
   }
@@ -471,8 +469,8 @@ async function loadTranscript(id, quiet = false) {
   const showConvo = isChild || !terminalOpen || convoShown.has(id);
   if (!isChild) {
     html.push(showConvo
-      ? `<div class="section-title">conversation${terminalOpen ? ` · <a href="#" data-hide-convo="${id}">hide, it is in the terminal</a>` : ''}</div>`
-      : `<div class="section-title">conversation is in the terminal · <a href="#" data-show-convo="${id}">show here too</a></div>`);
+      ? `<div class="section-title">conversation${terminalOpen ? ` · <a href="#" data-hide-convo="${id}">hide</a>` : ''}</div>`
+      : `<div class="section-title"><a href="#" data-show-convo="${id}">show conversation</a></div>`);
   }
   for (const ev of showConvo ? events : []) {
     if (!isChild && ev.kind === 'tool_call' && ev.name === 'subagent' && parent.children?.length) continue; // already in the board
