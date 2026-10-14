@@ -7,9 +7,15 @@ Every session, every subagent, one terminal that never dies. Nothing leaves your
 
 <p align="center"><sub>Independent project, not affiliated with Vercel. fx is <a href="https://github.com/vercel-labs/fx">vercel-labs/fx</a>, Apache-2.0.</sub></p>
 
-<p align="center"><img src="docs/screenshot.png" alt="fox: sessions grouped by project on the left, the real fx terminal in the middle, subagents on the right" /></p>
+```bash
+npm install -g github:jamarks/fox && fox
+```
 
-<p align="center"><sub>Left: sessions by project, with subagents nested under their parent. Middle: the real fx terminal, running in tmux. Right: the subagent board.</sub></p>
+<p align="center"><sub>Needs Node 20+, <a href="https://fx.sh">fx</a> and tmux (<code>brew install tmux</code>). Opens http://127.0.0.1:4848. Details in <a href="#install-and-run">Install and run</a>.</sub></p>
+
+<p align="center"><img src="docs/screenshot.png" alt="fox: three subagents on three models answering the same task, grouped for comparison in the right column, next to the real fx terminal" /></p>
+
+<p align="center"><sub>One task, three models. The right column groups the subagents by task so you compare their answers, and flags the model that printed a tool call instead of running it.</sub></p>
 
 ---
 
@@ -17,25 +23,44 @@ fx is a 7 MB coding agent that lives in your terminal. It is fast and honest abo
 
 fox fixes that. It reads what fx already writes to `~/.fx`, runs every session inside tmux so nothing dies with a browser tab, and shows the whole picture. It never talks to a model itself: it only runs the real `fx` binary, so it uses whatever provider you logged fx into, a ChatGPT subscription included.
 
+## Subagents: the part worth it
+
+fx can split a job across subagents, and each one can run on a different model, as long as it is from the parent's provider (so use the `▲ gateway` to mix Google, DeepSeek, Meta and OpenAI). In the terminal you only see "Subagent finished". fox shows what each one did:
+
+- **Grouped by task.** Same task on several models sits under one header: a side-by-side comparison.
+- **The answer each returned to the parent.** Click a row; it opens in place, with a link to that subagent's own conversation.
+- **Flags.** `didn't run tools` (printed a tool call as text), `couldn't`, `cancelled` (with what it had started to write), `failed`.
+- **Their files.** The files each subagent wrote show up at the top with its number, `#3`.
+
+Try it in a session on the Gateway:
+
+```
+Launch three one-off subagents in parallel, without asking me, each on a different model: google/gemini-2.5-flash-lite, deepseek/deepseek-v3.1 and meta/llama-4-scout. Ask all three the same thing: read calc.js and explain in three lines what bug it has.
+```
+
+Or a staged run with a named subagent that stays alive between rounds:
+
+```
+Do this in stages, without asking me anything. Stage 1: launch three one-off subagents in parallel: one counts the lines of every .js file, one looks for TODOs or FIXMEs, one reads README.md and proposes three improvements. Wait for all three. Stage 2: write a ten-line report from their answers. Stage 3: create a subagent named reviewer and ask it to critique the report in five points. Stage 4: ask reviewer for a second round on the most serious point only. Stage 5: fold the critique in and show the final report, saying what changed thanks to each subagent.
+```
+
 ## What it does
 
-- **Sessions by project.** The sidebar groups fx sessions by workspace, collapsible per folder and reorderable by dragging the project header, with the first prompt under each title so fx's auto-generated names ("Casual Greeting") make sense. Sessions are numbered and keep a stable order; a triangle in the margin marks the one that is in the terminal.
-- **Live state.** A green dot means a live session waiting for you; `working` and `needs input` get a label, read from the tmux screen every few seconds. The bar at the top counts only what needs attention. A 🔔 toggle beeps and sends a desktop notification when an agent finishes a turn or asks for input.
-- **Provider and model at a glance.** Each session shows its model and whether it runs on a subscription (`codex`) or on the pay-per-use `▲ gateway`. Pick a provider and model when you open a new session; the picker lists your subscription models and the whole Gateway catalog grouped by vendor.
-- **Subagents, visibly.** Each session counts its subagents and how many are working. Select the parent and the right column lists them; when the same task went to several models they are grouped under it, so it reads as a side-by-side comparison. Each row is one line: a vendor-colored dot, the full model id, elapsed time and a flag if something went wrong. Click it for its task, the whole answer it returned to the parent, or why there is none; open a subagent and it arrives with its row expanded, above its own conversation. Weak answers are flagged: `didn't run tools` when a model printed a tool call as text instead of making it, `couldn't` when it refused or gave up, `cancelled` when fx stopped it (with whatever it had started to write), `failed` when it never started. Subagents can run on different models than the parent, as long as they share its provider.
-- **Files the session touched.** At the top of the right column, above the subagents (both sections fold, and stay the way you left them): the files fx wrote or edited (and which subagent did it, `#3`), files it names in its answers that exist on disk, so a file made by a shell command still shows up, and, folded away, the ones it only read. Click one to preview it in place; ↗ opens it with the default app. Only files from that list can be read or opened through fox.
-- **One terminal, pinned tabs.** Clicking a session shows its terminal in the middle as a preview; clicking another replaces it. Pin the ones you want to keep as tabs. Either way fx keeps running in tmux: close the tab, reload, restart fox, `tmux attach -t fx-<id>` from a real terminal, it is all still there.
-- **Drop files on the terminal.** Drag images, text or anything else from Finder onto the terminal. Images become fx image attachments (`[Image 1]`); text files up to 200 KB are pasted inline with their name; other files are saved to `~/.config/fox/drops/` and their path is pasted so the agent can read them. Nothing is sent until you press Enter.
-- **Search across all sessions.** ⌥Space (or the ⌕ in the header) opens a palette that searches session names and messages in every project, archived ones included. Pick a hit and the session opens on that message. The index lives in memory, refreshes only the sessions whose files changed, and never includes tool output.
-- **Tokens and cost** per session, and a transcript viewer with expandable tool calls for sessions whose terminal is not open.
-- **Archive and rename** without touching fx's files. Archiving stops the session's fx process first; it asks only if fx is working or waiting for your answer.
-- **Open any folder** with the native macOS picker, or the `+` on a group for a new session in that project.
-- **Keyboard first.** Option shortcuts for new sessions, tabs, pinning, search, themes and terminal font size; ⌥? lists them.
-- **Git at a glance.** Each workspace shows its GitHub repo (linked), current branch and the number of uncommitted files.
-- **Themes.** Dark (default), *dusk*, *mauve*, *terracotta*, *copper*, *plum*, and *sky*: the dark palette with translucent panels over a slowly drifting star field drawn from real star coordinates, Orion, the Big Dipper, Cassiopeia, Scorpius, Cygnus, Lyra, Leo and friends.
-- **Resizable columns.** Drag the dividers; widths are remembered. The address bar follows the open session, so a refresh or a bookmark lands back on it.
+- **Sessions by project**: grouped by workspace, collapsible, reorderable by drag, numbered.
+- **Live state**: working, waiting or needs input, with an optional 🔔 when an agent finishes.
+- **Provider and model**: `codex` subscription or pay-per-use `▲ gateway`, picked per new session.
+- **Subagents**: grouped by task to compare models; click one for its answer; weak answers flagged.
+- **Files**: what the session wrote, edited or read; preview in place or open with ↗.
+- **One terminal**: fx runs in tmux, so closing the tab or the browser never stops it; pin to keep tabs.
+- **Drop files**: drag images or files onto the terminal to attach them to your next message.
+- **Search everything**: ⌥Space searches names and messages across all sessions.
+- **Archive and rename** without touching fx's files.
+- **Git at a glance**: repo, branch and uncommitted files per project.
+- **Keyboard first**: ⌥ shortcuts for sessions, tabs, search, themes and font size; ⌥? lists them.
+- **Themes**: dark, dusk, mauve, terracotta, copper, plum and *sky*, a slowly drifting real star map.
+- **Resizable columns** and a URL that follows the open session.
 
-## Run it
+## Install and run
 
 You need Node 20+, [fx](https://fx.sh) and tmux (`brew install tmux`).
 
@@ -94,16 +119,6 @@ Terminals are tmux sessions named `fx-<session id>`, created with `fx session re
 A browser can't hand over a dropped file's path, so fox uploads it to its own server, which writes it to `~/.config/fox/drops/` (25 MB max, same-origin only) and pastes that path into the terminal. fx recognizes a pasted image path and attaches the image, the same as dragging a file into a real terminal.
 
 fox's own state (archived ids, custom names, pins, collapsed groups) lives in `~/.config/fox/state.json` and the browser's local storage.
-
-## Try the subagents
-
-Open a session in any project and paste:
-
-```
-Do this in stages, without asking me anything. Stage 1: launch three one-off subagents in parallel: one counts the lines of every .js file, one looks for TODOs or FIXMEs, one reads README.md and proposes three improvements. Wait for all three. Stage 2: write a ten-line report from their answers. Stage 3: create a subagent named reviewer and ask it to critique the report in five points. Stage 4: ask reviewer for a second round on the most serious point only. Stage 5: fold the critique in and show the final report, saying what changed thanks to each subagent.
-```
-
-Watch the sidebar: three children appear and pulse, the parent sits in `working` without writing anything until they return, `reviewer` stays alive in green between rounds while the one-offs go grey as they finish.
 
 ## Tests
 

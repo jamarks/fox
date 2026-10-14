@@ -3,7 +3,7 @@
 
 import http from 'node:http';
 import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { createReadStream } from 'node:fs';
 import { join, resolve, extname, basename } from 'node:path';
 import { homedir } from 'node:os';
@@ -134,15 +134,16 @@ function safeSessionId(id) {
 // Files a session touched: what fx wrote, edited or read (its own tool calls and its subagents'), plus
 // paths it names in its answers that exist on disk (a file made by a shell command shows up that way).
 const FILE_RANK = { write: 3, edit: 2, mention: 1, read: 0 };
+const realPath = (p) => { try { return realpathSync(p); } catch { return p; } };
 async function sessionFiles(id) {
   const meta = await readJson(join(SESSIONS_DIR, id, 'session.json'));
-  const root = meta?.workspace_root ?? meta?.origin_workspace_root;
+  const root = realPath(meta?.workspace_root ?? meta?.origin_workspace_root ?? '');
   if (!root) return [];
   const kids = (await readJson(join(SESSIONS_DIR, id, 'subagent', 'children.json')))?.children ?? [];
   const files = new Map();
   const add = (ws, path, action, by) => {
     if (!path || typeof path !== 'string' || path.length > 400) return;
-    const abs = resolve(ws, path.replace(/^~(?=\/)/, homedir()));
+    const abs = realPath(resolve(ws, path.replace(/^~(?=\/)/, homedir()))); // one entry per file, even through symlinks
     const f = files.get(abs) ?? { path: abs, action, by: new Set() };
     if (FILE_RANK[action] > FILE_RANK[f.action]) f.action = action;
     f.by.add(by);
@@ -452,7 +453,7 @@ async function tmux(...args) {
     const { stdout } = await execFileP(TMUX, args, { env: { ...process.env, PATH: `/opt/homebrew/bin:${process.env.PATH}` } });
     return stdout;
   } catch (err) {
-    if (/no server running|no sessions/.test(err.stderr ?? '')) return '';
+    if (/no server running|no sessions|error connecting to/.test(err.stderr ?? '')) return '';
     throw err;
   }
 }
