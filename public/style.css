@@ -260,3 +260,21 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 .session.shown::before { content: ''; position: absolute; left: -1px; top: 11px; border: 5px solid transparent; border-left: 7px solid var(--accent); }
 .session.shown .idx { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 700; }
 #terminals.dropping::after { content: 'Drop to send to fx'; position: absolute; inset: 8px; display: grid; place-items: center; border: 1.5px dashed var(--accent); border-radius: 10px; background: color-mix(in srgb, var(--bg) 70%, transparent); color: var(--accent); font-size: 13px; pointer-events: none; z-index: 5; }
+/* subagents grouped by task */
+.vdot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; margin-right: 6px; vertical-align: 1px; }
+.agent-head .vdot { margin-right: 0; }
+.agroup { display: flex; flex-direction: column; gap: 4px; }
+.agroup + .agroup { margin-top: 10px; }
+.agroup-task { display: flex; gap: 8px; align-items: baseline; font-size: 11px; color: var(--muted); padding: 0 2px; }
+.agroup-task > span:first-child { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agroup-n { flex: none; font-size: 10px; }
+.board .agent { border-left-width: 1px; padding: 6px 8px; }
+.board .agent:hover { border-color: var(--accent); }
+.agent .agent-name { font-family: var(--mono); font-weight: 400; }
+.agent-head .st { flex: none; }
+.flag { flex: none; font-size: 10px; padding: 0 5px; border-radius: 3px; border: 1px solid currentColor; }
+.flag.warn { color: var(--warn); } .flag.err { color: var(--err); } .flag.muted { color: var(--muted); }
+.board .agent-answer { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.45; color: var(--muted); padding-left: 21px; }
+.board .agent.open .agent-answer { display: block; white-space: pre-wrap; color: var(--text); -webkit-line-clamp: unset; user-select: text; cursor: text; }
+.board .agent-answer.err { color: var(--err); }
+.agent-open { display: inline-block; margin: 6px 0 0 21px; font-size: 11px; color: var(--accent); text-decoration: none; }

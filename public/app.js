@@ -54,7 +54,7 @@ const ICON = {
 // Vendor badge for a model id: two letters on the vendor's color. Works for "vendor/model" ids and bare names.
 const VENDORS = [
   [/^openai\/|^gpt-|^o[1-9]/, 'OA', '#10a37f', 'OpenAI'], [/^google\/|gemini|gemma/, 'G', '#4285f4', 'Google'], [/^anthropic\/|claude/, 'A', '#d97757', 'Anthropic'],
-  [/^deepseek/, 'DS', '#4d6bfe', 'DeepSeek'], [/^meta\/|llama/, 'M', '#0668e1', 'Meta'], [/^(x|space)ai\/|grok/, 'X', '#444a57', 'xAI'],
+  [/^deepseek/, 'DS', '#a78bfa', 'DeepSeek'], [/^meta\/|llama/, 'M', '#22b8cf', 'Meta'], [/^(x|space)ai\/|grok/, 'X', '#444a57', 'xAI'],
   [/^mistral/, 'Mi', '#ff7000', 'Mistral'], [/^amazon\/|nova/, 'Am', '#ff9900', 'Amazon'], [/^alibaba\/|qwen/, 'Q', '#6b4cff', 'Alibaba'],
   [/^moonshot|kimi/, 'K', '#3b3b3b', 'Moonshot'], [/^xiaomi\/|mimo/, 'Xm', '#ff6900', 'Xiaomi'], [/^perplexity/, 'P', '#20808d', 'Perplexity'],
   [/^cohere/, 'Co', '#39594d', 'Cohere'], [/^zai\/|^z-ai|glm/, 'Z', '#2d5bff', 'Z.ai'], [/^minimax/, 'Mm', '#e0372f', 'MiniMax'],
@@ -569,26 +569,52 @@ function answerFor(parent, c) {
   return cachedResults.assigned.get(c.id) ?? null;
 }
 
-// Board: one compact row per subagent. Click goes to that subagent's view.
+// Board: subagents grouped by task, so the same task on several models reads as a comparison.
+// Click a row to read its whole answer in place; bad answers are flagged.
+const expandedAgents = new Set();
+const fmtDur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + 's' : s < 3600 ? Math.round(s / 60) + 'm' : Math.floor(s / 3600) + 'h ' + Math.round((s % 3600) / 60) + 'm'; };
+const vendorDot = (model) => { const v = vendorOf(model); return `<span class="vdot" style="background:${v?.[2] ?? 'var(--muted)'}" title="${esc(v?.[3] ?? 'unknown vendor')}"></span>`; };
+// What went wrong with an answer, if anything: weak models often print a tool call instead of making it.
+function answerFlag(c, text) {
+  if (c.failure) return ['failed', 'err'];
+  if (c.phase === 'running') return null;
+  if (!text?.trim()) return ['no answer', 'muted'];
+  if (/^\s*(?:\/\/[^\n]*\n\s*)*[a-z_][a-z0-9_.]*\(\s*[a-z_]+\s*=/i.test(text) || /^\s*\{\s*"(name|tool|function)"\s*:/.test(text)) return ["didn't run tools", 'warn'];
+  if (/^\s*(lo siento|sorry)/i.test(text) || /\b(no (?:puedo|pude|puede|es posible)|no se puede|i can(?:no|')t|i couldn't|i'm (?:not able|unable)|i am unable|unable to)\b/i.test(text.slice(0, 160))) return ["couldn't", 'err'];
+  return null;
+}
 function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
   if (!parent?.children?.length) return '';
-  const rows = parent.children.map((c, i) => {
+  const groups = new Map();
+  parent.children.forEach((c, i) => {
     const child = sessionById(c.id);
-    const st = child?.state ?? 'done';
-    const elapsed = c.phase === 'running' && c.startedAt ? Math.round((Date.now() - c.startedAt) / 1000) + 's' : child?.usage.wallMs ? Math.round(child.usage.wallMs / 1000) + 's' : '';
-    const res = answerFor(parent, c);
-    const sel = c.id === selectedId;
-    const model = child?.model ?? null;
     const task = c.task ?? child?.firstPrompt ?? '';
-    // Row: number · state · who (name, or vendor + model) · elapsed. The task itself is the tooltip.
-    const who = c.name ? `${ICON.threads} ${esc(c.name)}` : model ? `${modelBadge(model)}<span class="agent-modelname">${esc(modelShort(model))}</span>` : esc(task.slice(0, 60) || 'failed to start');
-    return `<a class="agent ${st} ${sel ? 'selected' : ''} ${compact ? 'compact' : ''}" href="#" data-child="${c.id}" title="${esc(task)}">
-      <div class="agent-head"><span class="idx">${i + 1}</span><span class="st ${c.failure ? 'needs_input' : st}"><i></i></span><span class="agent-name">${who}</span>${c.name && model && model !== parent.model ? `<span class="agent-model">${modelBadge(model)}${esc(modelShort(model))}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>
-      ${!compact ? (c.failure ? `<div class="agent-answer err">failed · ${esc(typeof c.failure === 'string' ? c.failure : (c.failure.message ?? c.failure.reason ?? JSON.stringify(c.failure))).slice(0, 140)}</div>` : res ? `<div class="agent-answer">${esc(res.slice(0, 160))}${res.length > 160 ? '…' : ''}</div>` : c.phase === 'running' ? '<div class="agent-answer muted">working, no answer yet</div>' : '') : ''}
-    </a>`;
+    const key = c.name ? 'agent:' + c.name : norm(task) || 'none:' + c.id;
+    if (!groups.has(key)) groups.set(key, { name: c.name, task, items: [] });
+    groups.get(key).items.push({ c, i, child });
   });
-  const title = `${parent.children.length} subagent${parent.children.length === 1 ? '' : 's'}`;
-  return `<div class="board ${compact ? 'compact' : ''}"><div class="board-title">${title}</div>${rows.join('')}</div>`;
+  const row = ({ c, i, child }) => {
+    const model = child?.model ?? null;
+    const res = answerFor(parent, c);
+    const flag = answerFlag(c, res);
+    const elapsed = c.phase === 'running' && c.startedAt ? fmtDur(Date.now() - c.startedAt) : child?.usage.wallMs ? fmtDur(child.usage.wallMs) : '';
+    const open = !compact && expandedAgents.has(c.id);
+    const head = `<div class="agent-head"><span class="idx">${i + 1}</span>${model ? vendorDot(model) : ''}<span class="agent-name">${model ? esc(modelShort(model)) : 'failed to start'}</span>${c.phase === 'running' ? '<span class="st working"><i></i></span>' : ''}${flag ? `<span class="flag ${flag[1]}">${flag[0]}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>`;
+    if (compact) return `<a class="agent compact ${c.id === selectedId ? 'selected' : ''}" href="#" data-child="${c.id}">${head}</a>`;
+    const failure = c.failure ? (typeof c.failure === 'string' ? c.failure : (c.failure.message ?? c.failure.reason ?? JSON.stringify(c.failure))) : '';
+    const body = failure ? `<div class="agent-answer err">${esc(failure)}</div>`
+      : res ? `<div class="agent-answer">${esc(open ? res : res.slice(0, 400))}</div>`
+      : c.phase === 'running' ? '<div class="agent-answer muted">working…</div>' : '';
+    return `<div class="agent ${open ? 'open' : ''}" data-agent="${c.id}">${head}${body}${open ? `<a class="agent-open" href="#" data-child="${c.id}">its conversation →</a>` : ''}</div>`;
+  };
+  const html = [...groups.values()].map((g) => {
+    const label = g.name ? `${ICON.threads} ${esc(g.name)}` : esc(g.task || 'no task');
+    const count = g.items.length > 1 ? `<span class="agroup-n">${g.items.length} models</span>` : '';
+    return `<div class="agroup"><div class="agroup-task" title="${esc(g.task)}"><span>${label}</span>${count}</div>${g.items.map(row).join('')}</div>`;
+  });
+  const n = parent.children.length;
+  const title = `${n} subagent${n === 1 ? '' : 's'}${groups.size > 1 && groups.size < n ? ` · ${groups.size} tasks` : ''}`;
+  return `<div class="board ${compact ? 'compact' : ''}"><div class="board-title">${title}</div>${html.join('')}</div>`;
 }
 
 const convoShown = new Set();
@@ -602,9 +628,12 @@ $('#transcript').addEventListener('click', (e) => {
     lastTranscriptKey = ''; return loadTranscript(id);
   }
   const link = e.target.closest('a[data-child], a[data-goto]');
-  if (!link) return;
-  e.preventDefault();
-  selectSession(link.dataset.child ?? link.dataset.goto);
+  if (link) { e.preventDefault(); return selectSession(link.dataset.child ?? link.dataset.goto); }
+  const row = e.target.closest('[data-agent]');
+  if (!row || getSelection().toString()) return; // selecting answer text must not collapse it
+  const id = row.dataset.agent;
+  expandedAgents.has(id) ? expandedAgents.delete(id) : expandedAgents.add(id);
+  lastTranscriptKey = ''; loadTranscript(state.selected, true);
 });
 
 // ---------- global search ----------
@@ -766,10 +795,9 @@ async function loadTranscript(id, quiet = false) {
   $('#transcript-title').innerHTML = isChild
     ? `<a href="#" class="crumb" data-goto="${parent.id}">${esc(displayTitle(parent))}</a><span class="crumb-sep">›</span>${esc(displayTitle(s))}`
     : esc(displayTitle(s));
-  $('#transcript-meta').innerHTML = `
-    <span>${modelBadge(s.model)}${esc(modelShort(s.model))} <span class="muted" title="${esc(providerLabel(s.provider))}">· ${s.provider === 'gateway' ? '▲ gateway' : esc(s.provider)}</span></span>
-    ${s.usage.input + s.usage.output ? `<span>${fmtTokens(s.usage.input)} in · ${fmtTokens(s.usage.output)} out · ${fmtTokens(s.usage.cacheRead)} cache</span><span>${s.usage.cost ? '$' + s.usage.cost.toFixed(4) : 'subscription'}</span><span>${(s.usage.wallMs / 1000).toFixed(0)}s</span>` : '<span>tokens billed to parent</span>'}
-    <span title="${esc(s.workspace)}">${esc(shortPath(s.workspace))}</span>`;
+  const u = s.usage;
+  const tokens = u.input + u.output ? `${fmtTokens(u.input)} in · ${fmtTokens(u.output)} out · ${fmtTokens(u.cacheRead)} cache` : '';
+  $('#transcript-meta').innerHTML = `<span title="${esc([tokens, s.workspace].filter(Boolean).join('\n'))}">${s.model ? vendorDot(s.model) + esc(modelShort(s.model)) : ''}${s.provider ? ` · <span title="${esc(providerLabel(s.provider))}">${s.provider === 'gateway' ? '▲ gateway' : esc(s.provider)}</span>` : ''}${u.wallMs ? ' · ' + fmtDur(u.wallMs) : ''}${isChild ? ' · billed to parent' : u.cost ? ' · $' + u.cost.toFixed(2) : ''}</span>`;
 
   const html = [];
   $('#search-row').classList.toggle('hidden', isChild); // a subagent has no terminal to jump in
