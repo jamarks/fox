@@ -150,3 +150,10 @@ a.agent:hover { border-color: var(--accent); }
 .tab.preview.active .tab-label { color: var(--text); }
 .tab .pin { opacity: .35; padding: 0 2px; cursor: pointer; } .tab .pin:hover { opacity: 1; }
 button.icon.on { opacity: 1; color: var(--accent); }
+.group h3 { gap: 6px; align-items: center; cursor: default; }
+.group h3 .caret, .group h3 .gname { cursor: pointer; }
+.group h3 .caret { flex: none; width: 10px; color: var(--muted); }
+.group h3 .gname { flex: 1; min-width: 0; }
+.group h3 .gcount { flex: none; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.group.collapsed { padding-bottom: 2px; }
+button.icon svg { display: block; }

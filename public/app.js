@@ -32,8 +32,17 @@ const sessionById = (id) => state.sessions.find((s) => s.id === id);
 const displayTitle = (s) => s.customName || (s.subagent ? (s.subagent.name ? `🧵 ${s.subagent.name}` : (s.subagent.task ?? s.firstPrompt ?? '').slice(0, 60) || s.title) : s.title);
 const post = (path, body, method = 'POST') => fetch(path, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json());
 const showArchived = { value: false };
+const collapsed = new Set();
+try { for (const g of JSON.parse(localStorage.getItem('fox.collapsed') ?? '[]')) collapsed.add(g); } catch {}
+const saveCollapsed = () => { try { localStorage.setItem('fox.collapsed', JSON.stringify([...collapsed])); } catch {} };
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
+const ICON = {
+  archive: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="3" rx=".6"/><path d="M2.5 5.5v7a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-7M6.5 8.5h3"/></svg>',
+  restore: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9"/><path d="M2.5 2.5v3h3"/></svg>',
+  pin: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2l4.5 4.5-2.3.6-2.6 2.6.3 2.9-1.7 1.7L4.6 11 2 13.6M4.6 11l-1.9-1.9 1.7-1.7 2.9.3 2.6-2.6.6-2.3"/></svg>',
+  rename: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2.5l2.5 2.5L6 12.5H3.5V10z"/></svg>',
+};
 const STATE_LABEL = { working: 'working', ready: 'waiting', needs_input: 'needs input', external: 'other terminal', done: 'done', idle: '' };
 const STATE_ORDER = { needs_input: 0, working: 1, ready: 2, external: 3, done: 4, idle: 5 };
 
@@ -86,9 +95,11 @@ function renderSessions() {
   for (const [ws, list] of ordered) {
     list.sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
     const g = document.createElement('div');
-    g.className = 'group';
-    g.innerHTML = `<h3><span title="${esc(ws)}">${esc(shortPath(ws))}</span><button class="icon" data-new="${esc(ws)}" title="New session in this folder">+</button></h3>`;
-    for (const s of list) g.appendChild(sessionCard(s));
+    const isCollapsed = collapsed.has(ws);
+    g.className = 'group' + (isCollapsed ? ' collapsed' : '');
+    const busy = list.filter((s) => s.state === 'working' || s.state === 'needs_input').length;
+    g.innerHTML = `<h3><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(ws)}">${esc(shortPath(ws))}</span><span class="gcount">${list.length}${busy ? ` <b class="st working">· ${busy} active</b>` : ''}</span><button class="icon" data-new="${esc(ws)}" title="New session in this folder">+</button></h3>`;
+    if (!isCollapsed) for (const s of list) g.appendChild(sessionCard(s));
     root.appendChild(g);
   }
   if (archived.length) {
@@ -109,9 +120,9 @@ function sessionCard(s) {
     <div class="row">
       <div class="title" title="${esc(s.title)}">${esc(displayTitle(s))}</div>
       <div class="actions">
-        ${s.terminal ? `<button class="icon ${state.pinned.has(s.terminal) ? 'on' : ''}" data-pin="${esc(s.terminal)}" title="${state.pinned.has(s.terminal) ? 'Unpin tab' : 'Pin as tab'}">📌</button><button class="icon" data-kill="${esc(s.terminal)}" title="Stop the fx process">■</button>` : ''}
-        <button class="icon" data-rename="${s.id}" title="Rename">✎</button>
-        <button class="icon" data-${s.archived ? 'unarchive' : 'archive'}="${s.id}" title="${s.archived ? 'Restore' : 'Archive'}">${s.archived ? '↩' : '⌫'}</button>
+        ${s.terminal ? `<button class="icon ${state.pinned.has(s.terminal) ? 'on' : ''}" data-pin="${esc(s.terminal)}" title="${state.pinned.has(s.terminal) ? 'Unpin tab' : 'Pin as tab'}">${ICON.pin}</button>` : ''}
+        <button class="icon" data-rename="${s.id}" title="Rename">${ICON.rename}</button>
+        <button class="icon" data-${s.archived ? 'unarchive' : 'archive'}="${s.id}" title="${s.archived ? 'Restore' : (s.terminal ? 'Archive (stops the fx process)' : 'Archive')}">${s.archived ? ICON.restore : ICON.archive}</button>
       </div>
     </div>
     ${s.firstPrompt ? `<div class="prompt">${esc(s.firstPrompt)}</div>` : ''}
@@ -148,7 +159,6 @@ $('#session-groups').addEventListener('click', async (e) => {
   if (d.new) return openTerminal({ cwd: d.new });
   if (d.pin) return setPinned(d.pin, !state.pinned.has(d.pin));
   if (d.rename) return renameInline(d.rename);
-  if (d.kill) { if (confirm('Stop this fx process? The session stays saved.')) { await post(`/api/terminals/${encodeURIComponent(d.kill)}`, null, 'DELETE'); closeTab(d.kill); await refresh(); } return; }
   if (d.archive) {
     const s = sessionById(d.archive);
     if (s?.terminal) {
@@ -162,6 +172,8 @@ $('#session-groups').addEventListener('click', async (e) => {
   }
   if (d.unarchive) { await post(`/api/sessions/${d.unarchive}/unarchive`); return refresh(); }
   if (e.target.closest('[data-toggle-archived]')) { showArchived.value = !showArchived.value; return renderSessions(); }
+  const grp = e.target.closest('[data-toggle-group]');
+  if (grp) { const ws = grp.dataset.toggleGroup; collapsed.has(ws) ? collapsed.delete(ws) : collapsed.add(ws); saveCollapsed(); return renderSessions(); }
   const child = e.target.closest('[data-child]');
   if (child) { e.stopPropagation(); setTranscript(true); return selectSession(child.dataset.child); }
   const card = e.target.closest('.session');
@@ -291,7 +303,7 @@ function renderTabs() {
     const dot = st === 'working' || st === 'needs_input' || st === 'closed' ? `<span class="st ${st}" title="${STATE_LABEL[st] || st}"><i></i></span>` : '';
     el.innerHTML = `${dot}<span class="tab-label">${esc(tabLabel(name))}</span>${pinned
       ? `<span class="close" data-close="${esc(name)}" title="Unpin and close (fx keeps running)">×</span>`
-      : `<span class="pin" data-pin="${esc(name)}" title="Pin as tab">📌</span>`}`;
+      : `<span class="pin" data-pin="${esc(name)}" title="Pin as tab">${ICON.pin}</span>`}`;
     el.addEventListener('click', (e) => {
       if (e.target.dataset.close) { state.pinned.delete(name); savePinned(); closeTab(name); renderSessions(); }
       else if (e.target.dataset.pin) setPinned(name, !state.pinned.has(name));
