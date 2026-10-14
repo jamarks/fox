@@ -786,7 +786,7 @@ async function loadTranscript(id, quiet = false) {
   }
   const body = $('#transcript-body');
   const wasAtBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
-  body.innerHTML = html.join('') || '<p class="muted">Empty session.</p>';
+  body.innerHTML = html.join('');
   // Scroll: top when you switch sessions; stay pinned to the end only if you were already there.
   const grew = lastEventCount.id === id && events.length > lastEventCount.n;
   if (lastEventCount.id !== id) body.scrollTop = 0;
