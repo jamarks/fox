@@ -19,7 +19,8 @@ fox fixes that. It reads what fx already writes to `~/.fx`, runs each session in
 - **Live state per agent**: `working`, `waiting`, `needs input`. The summary at the top tells you where you are needed. Optional beep and desktop notification when something finishes.
 - **Subagents, visibly.** Children nest under their parent, with their phase pulsing in real time. Pick the parent and you get a board: one card per subagent with its task, elapsed time, result and tokens.
 - **Terminals that survive.** Each session runs in a tmux session named `fx-<id>`. Close the tab, reload, restart the server, open it from a real terminal with `tmux attach -t fx-<id>`. It is still there.
-- **Transcript viewer** with tool calls you can expand, plus tokens and cost per session. Collapsed by default, one click away.
+- **Search the conversation.** Type in the right column, get the matching messages, click one and the real terminal jumps there (tmux copy-mode search, highlighted). ↑ walks to earlier matches, "done" leaves search mode.
+- **Transcript viewer** for sessions whose terminal is not open, with tool calls you can expand, plus tokens and cost per session. Collapsed by default, one click away.
 - **Archive and rename** without touching fx's files. fox keeps its own notes in `~/.config/fox/state.json`.
 
 fox does not talk to any model. It only ever runs the real `fx` binary, so it uses whatever provider you logged fx into, including a ChatGPT subscription.
@@ -42,7 +43,7 @@ Open http://127.0.0.1:4848. `PORT` and `FX_BIN` are the only knobs. Deep links w
 |---|---|
 | Left | Sessions from `~/.fx/sessions`, grouped by workspace. Click one to open it. `+` on a group starts a fresh session there. Hover for ✎ rename, ⌫ archive, ■ stop. |
 | Middle | The current terminal (preview, italic) plus pinned tabs. `📌` pins, `×` unpins. fx keeps running either way. |
-| Right (⇥) | Transcript of the selected session, and the subagent board when it has children. |
+| Right (⇥) | Search box, tokens and cost, the subagent board when there are children, and the transcript when the session's terminal is not open. |
 
 States come from the tmux screen rather than from fx's event log, because fx flushes that log only at the end of a turn. It is a heuristic: a spinner with seconds means working, the prompt means waiting, a yes/no question means needs input.
 
