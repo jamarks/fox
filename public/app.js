@@ -102,7 +102,8 @@ function renderSessions() {
     g.className = 'group' + (isCollapsed ? ' collapsed' : '');
     const busy = list.filter((s) => s.state === 'working' || s.state === 'needs_input').length;
     const repo = state.repos?.[ws];
-    const gitLine = repo ? `<div class="git" title="${esc(repo.remote || repo.root)}">${repo.url ? `<a href="${esc(repo.url)}" target="_blank" rel="noopener">${ICON.github}${esc(repo.repo)}</a>` : `<span>${ICON.git}${esc(shortPath(repo.root))}</span>`}${repo.branch ? `<span class="branch">${esc(repo.branch)}</span>` : ''}${repo.changed ? `<span class="changed" title="${repo.changed} changed file${repo.changed === 1 ? '' : 's'}">±${repo.changed}</span>` : ''}</div>` : '';
+    // GitHub remote: owner/repo as a link. Plain git: just the branch (and the repo root if the workspace is a subfolder).
+    const gitLine = repo ? `<div class="git" title="${esc(repo.remote || repo.root)}">${repo.url ? `<a href="${esc(repo.url)}" target="_blank" rel="noopener">${ICON.github}${esc(repo.repo)}</a>` : `<span>${ICON.git}${repo.root !== ws ? esc(shortPath(repo.root)) : 'git'}</span>`}${repo.branch ? `<span class="branch">${esc(repo.branch)}</span>` : ''}${repo.changed ? `<span class="changed" title="${repo.changed} changed file${repo.changed === 1 ? '' : 's'}">±${repo.changed}</span>` : ''}</div>` : '';
     g.innerHTML = `<h3><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(ws)}">${esc(shortPath(ws))}</span><span class="gcount">${list.length}${busy ? ` <b class="st working">· ${busy} active</b>` : ''}</span><button class="icon" data-new="${esc(ws)}" title="New session in this folder">+</button></h3>${isCollapsed ? '' : gitLine}`;
     if (!isCollapsed) for (const s of list) g.appendChild(sessionCard(s));
     root.appendChild(g);
