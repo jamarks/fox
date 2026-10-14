@@ -255,3 +255,9 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 .global-search-footer { display: flex; gap: 15px; padding: 8px 18px; border-top: 1px solid var(--border); color: var(--muted); font: 11px var(--mono); }
 .prov { margin-left: 6px; font-size: 10px; color: var(--muted); opacity: .85; }
 .prov.gw { color: var(--warn); opacity: .9; }
+/* the session whose terminal is on screen */
+.session.shown { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); padding-left: 32px; }
+.session.shown .idx { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 700; }
+.session.shown .title { color: var(--accent); }
+.shown-tag { flex: none; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 1px 5px; margin-left: 6px; }
+.session.shown .actions { opacity: 1; }

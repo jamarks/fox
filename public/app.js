@@ -148,7 +148,10 @@ function renderSessions() {
 
 function sessionCard(s, index = null) {
   const el = document.createElement('div');
-  el.className = `session state-${s.state}` + (s.id === state.selected ? ' active' : '') + (s.archived ? ' is-archived' : '');
+  // "shown": the session whose terminal is on screen right now. "active": the one the right column describes.
+  const shownTerm = state.terminals.find((x) => x.name === state.activeTab);
+  const shown = Boolean(shownTerm && shownTerm.resume === s.id && state.tabs.get(shownTerm.name) && !state.tabs.get(shownTerm.name).closed);
+  el.className = `session state-${s.state}` + (s.id === state.selected ? ' active' : '') + (shown ? ' shown' : '') + (s.archived ? ' is-archived' : '');
   el.dataset.id = s.id;
   // Sidebar state: only say something when it is not the normal case. A live session that is simply waiting
   // gets a bare green dot; working and needs-input get their label; no process, nothing.
@@ -158,6 +161,7 @@ function sessionCard(s, index = null) {
     ${index ? `<span class="idx">${index}</span>` : ''}
     <div class="row">
       <div class="title" title="${esc(s.title)}">${esc(displayTitle(s))}</div>
+      ${shown ? '<span class="shown-tag" title="this session is in the terminal">in terminal</span>' : ''}
       <div class="actions">
         ${s.terminal ? `<button class="icon ${state.pinned.has(s.terminal) ? 'on' : ''}" data-pin="${esc(s.terminal)}" title="${state.pinned.has(s.terminal) ? 'Unpin tab' : 'Pin as tab'}">${ICON.pin}</button>` : ''}
         <button class="icon" data-rename="${s.id}" title="Rename">${ICON.rename}</button>
@@ -417,7 +421,7 @@ function activateTab(name) {
   const t = state.tabs.get(name);
   if (t) { safeFit(t); connectTab(t); t.term.focus(); }
   const term = state.terminals.find((x) => x.name === name);
-  if (term?.resume) selectSession(term.resume);
+  if (term?.resume) selectSession(term.resume); else renderSessions();
   syncUrl();
 }
 
