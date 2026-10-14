@@ -470,10 +470,20 @@ $('#transcript').addEventListener('click', (e) => {
 
 // ---------- search ----------
 const terminalOpenFor = (s) => Boolean(s?.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
+// Human-visible text of a tool result: fx wraps shell/subagent output in a JSON envelope with metadata
+// (handles, replay refs, exit codes); only the output itself is worth searching.
+function toolOutput(ev) {
+  const p = ev.result?.preview ?? '';
+  try {
+    const j = JSON.parse(p);
+    if (typeof j === 'object' && j) return String(j.output ?? j.result ?? j.stdout ?? j.text ?? j.content ?? '');
+  } catch {}
+  return p;
+}
 function renderSearch(s, events, q, terminalOpen) {
   const hits = [];
   events.forEach((ev, i) => {
-    const text = ev.kind === 'user' || ev.kind === 'assistant' ? ev.text : ev.kind === 'tool_call' ? `${ev.name} ${briefArgs(ev.args)} ${ev.result?.preview ?? ''}` : '';
+    const text = ev.kind === 'user' || ev.kind === 'assistant' ? ev.text : ev.kind === 'tool_call' ? `${briefArgs(ev.args)}\n${toolOutput(ev)}` : '';
     const at = text.toLowerCase().indexOf(q);
     if (at < 0) return;
     const start = Math.max(0, at - 60);
@@ -484,7 +494,7 @@ function renderSearch(s, events, q, terminalOpen) {
   const body = $('#transcript-body');
   body.innerHTML = `<div class="section-title">${hits.length} match${hits.length === 1 ? '' : 'es'}${terminalOpen ? ' · click one to jump there in the terminal' : ''}</div>` +
     (hits.map((h) => `<div class="hit" data-hit="${h.i}"><div class="who">${esc(who(h.ev))}</div><div class="snippet">${h.snippet}</div></div>`).join('') || '<p class="muted">Nothing found.</p>');
-  body.dataset.hits = JSON.stringify(hits.map((h) => ({ i: h.i, text: (h.ev.text ?? briefArgs(h.ev.args) ?? '').toString() })));
+  body.dataset.hits = JSON.stringify(hits.map((h) => ({ i: h.i, text: h.ev.kind === 'tool_call' ? `${briefArgs(h.ev.args)}\n\n${toolOutput(h.ev)}` : String(h.ev.text ?? '') })));
 }
 async function jumpInTerminal(s, query, again = false) {
   if (!terminalOpenFor(s)) return;
