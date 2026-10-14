@@ -1,0 +1,33 @@
+{
+  "name": "fox",
+  "version": "0.1.0",
+  "description": "Local web panel for the fx coding agent: sessions, tmux-backed terminals, live states and transcripts",
+  "license": "MIT",
+  "author": "Javier Wasserman",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamarks/fox"
+  },
+  "homepage": "https://github.com/jamarks/fox",
+  "keywords": [
+    "fx",
+    "coding-agent",
+    "tmux",
+    "xterm",
+    "vercel"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "node-pty": "^1.1.0",
+    "ws": "^8.22.0"
+  }
+}

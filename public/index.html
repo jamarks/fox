@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>fox</title>
+  <link rel="icon" href="/fox.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/vendor/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <aside id="sidebar">
+    <header class="side-head">
+      <div class="brand"><span>f</span><svg class="fox" viewBox="0 0 32 32" aria-hidden="true"><path d="M4 3 L13 9 L19 9 L28 3 L27 15 C27 22 22 28 16 29 C10 28 5 22 5 15 Z" fill="currentColor"/><path d="M9 18 L16 29 L23 18 L16 21 Z" fill="var(--panel)"/><circle cx="16" cy="23.5" r="1.6" fill="currentColor"/><circle cx="11.5" cy="16" r="1.5" fill="var(--panel)"/><circle cx="20.5" cy="16" r="1.5" fill="var(--panel)"/></svg><span>x</span></div>
+      <div class="row">
+        <button id="bell" class="icon" title="Sound + desktop notification when an agent finishes or needs input">🔔</button>
+        <button id="refresh" class="icon" title="Refresh">↻</button>
+      </div>
+    </header>
+    <div id="summary"></div>
+    <form id="new-session" autocomplete="off">
+      <div class="row">
+        <input id="new-cwd" placeholder="new session in… ~/Workspace/project" />
+        <button type="submit" class="icon" title="Open new session">↵</button>
+      </div>
+      <div id="new-cwd-hint" class="hint"></div>
+    </form>
+    <div id="session-groups"></div>
+  </aside>
+
+  <main id="center">
+    <div id="tabbar"><div id="tabs"></div><button id="toggle-transcript" class="icon">⇥</button></div>
+    <div id="terminals">
+      <div id="empty-state">
+        <h2>No terminal open</h2>
+        <p>Click a session on the left, or start a new one in a folder.</p>
+      </div>
+    </div>
+  </main>
+
+  <section id="transcript">
+    <header class="side-head">
+      <div id="transcript-title">Transcript</div>
+      <label class="toggle"><input type="checkbox" id="follow" checked /> follow</label>
+    </header>
+    <div id="transcript-meta"></div>
+    <div id="transcript-body"><p class="muted">Select a session to read its conversation.</p></div>
+  </section>
+
+  <script src="/vendor/xterm/lib/xterm.js"></script>
+  <script src="/vendor/addon-fit/lib/addon-fit.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
