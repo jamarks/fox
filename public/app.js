@@ -654,7 +654,7 @@ function toolOutput(ev) {
 }
 function renderSearch(s, events, q, terminalOpen) {
   const hits = [];
-  const includeTools = $('#search-tools').checked;
+  const includeTools = false; // messages and commands only; tool output stays out
   events.forEach((ev, i) => {
     // Messages always; for tool calls the command/args, and their output only when asked.
     const text = ev.kind === 'user' || ev.kind === 'assistant' ? ev.text
@@ -668,7 +668,7 @@ function renderSearch(s, events, q, terminalOpen) {
   });
   const who = (ev) => ev.kind === 'user' ? 'you' : ev.kind === 'assistant' ? 'fx' : ev.name;
   const body = $('#transcript-body');
-  body.innerHTML = `<div class="section-title">${hits.length} match${hits.length === 1 ? '' : 'es'}${terminalOpen ? ' · click one to jump there in the terminal' : ''}</div>` +
+  body.innerHTML = `<div class="section-title">${hits.length} match${hits.length === 1 ? '' : 'es'}${terminalOpen ? ' · click to jump there in the terminal, click again for the previous one' : ''}</div>` +
     (hits.map((h) => `<div class="hit" data-hit="${h.i}"><div class="who">${esc(who(h.ev))}</div><div class="snippet">${h.snippet}</div></div>`).join('') || '<p class="muted">Nothing found.</p>');
   body.dataset.hits = JSON.stringify(hits.map((h) => ({ i: h.i, text: h.ev.kind === 'tool_call' ? `${briefArgs(h.ev.args)}\n\n${toolOutput(h.ev)}` : String(h.ev.text ?? '') })));
 }
@@ -680,22 +680,23 @@ async function jumpInTerminal(s, query, again = false) {
   return r;
 }
 $('#search').addEventListener('input', debounce(() => { lastTranscriptKey = ''; if (state.selected) loadTranscript(state.selected); }, 150));
-$('#search-tools').addEventListener('change', () => { lastTranscriptKey = ''; if (state.selected) loadTranscript(state.selected); });
 $('#search').addEventListener('keydown', (e) => { if (e.key === 'Enter') jumpInTerminal(sessionById(state.selected), $('#search').value.trim()); if (e.key === 'Escape') { $('#search').value = ''; lastTranscriptKey = ''; loadTranscript(state.selected); } });
-$('#search-prev').addEventListener('click', () => jumpInTerminal(sessionById(state.selected), $('#search').value.trim(), true));
 $('#search-done').addEventListener('click', async () => { const s = sessionById(state.selected); if (s?.terminal) await post(`/api/terminals/${encodeURIComponent(s.terminal)}/search-cancel`); $('#search-done').classList.add('hidden'); });
 $('#transcript-body').addEventListener('click', (e) => {
   const hit = e.target.closest('.hit');
   if (!hit) return;
   const s = sessionById(state.selected);
   const q = $('#search').value.trim();
+  const again = hit.dataset.jumped === '1';
+  document.querySelectorAll('.hit').forEach((h) => { if (h !== hit) delete h.dataset.jumped; });
+  hit.dataset.jumped = '1';
   hit.classList.toggle('open');
   if (hit.classList.contains('open') && !hit.querySelector('.full')) {
     const hits = JSON.parse($('#transcript-body').dataset.hits || '[]');
     const h = hits.find((x) => String(x.i) === hit.dataset.hit);
     if (h) { const d = document.createElement('div'); d.className = 'full'; d.textContent = h.text; hit.appendChild(d); }
   }
-  jumpInTerminal(s, q);
+  jumpInTerminal(s, q, again);
 });
 
 let lastTranscriptKey = '';
@@ -723,8 +724,8 @@ async function loadTranscript(id, quiet = false) {
     <span title="${esc(s.workspace)}">${esc(shortPath(s.workspace))}</span>`;
 
   const html = [];
-  $('#search-row').classList.remove('hidden');
-  const q = $('#search').value.trim().toLowerCase();
+  $('#search-row').classList.toggle('hidden', isChild); // a subagent has no terminal to jump in
+  const q = isChild ? '' : $('#search').value.trim().toLowerCase();
   if (q) {
     renderSearch(s, events, q, terminalOpenFor(s));
     return;
