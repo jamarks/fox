@@ -20,6 +20,9 @@
     "node": ">=20"
   },
   "type": "module",
+  "bin": {
+    "fox": "./bin/fox.mjs"
+  },
   "scripts": {
     "start": "node server.mjs",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper",

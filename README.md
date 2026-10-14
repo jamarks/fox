@@ -39,15 +39,20 @@ fox fixes that. It reads what fx already writes to `~/.fx`, runs every session i
 
 You need Node 20+, [fx](https://fx.sh) and tmux (`brew install tmux`).
 
+Install from GitHub and run in one command:
+
 ```bash
-git clone https://github.com/jamarks/fox && cd fox
-npm install
-npm start
+npm install -g github:jamarks/fox && fox
 ```
 
-Open http://127.0.0.1:4848. Knobs: `PORT`, `FX_BIN` (path to the fx binary), `TMUX_BIN`.
+Or run from a checkout without installing a global command:
 
-fox is a plain Node process: run `npm start` in any terminal tab and leave it there, or put it under a process manager if you want it always on. Stopping fox never stops fx: the sessions live in tmux and are picked up again on the next start.
+```bash
+git clone https://github.com/jamarks/fox && cd fox
+npm install && node bin/fox.mjs
+```
+
+`fox` starts the server and opens http://127.0.0.1:4848 in your browser. If it is already running, it just opens the existing panel. Keep the terminal open; Ctrl+C stops fox, but tmux-backed fx sessions keep running. `npm start` runs only the server, without opening a browser. Knobs: `PORT`, `FX_BIN` (path to the fx binary), `TMUX_BIN`.
 
 Deep links: `?session=<id>` selects a session, `?open=<id>` also opens its terminal.
 
