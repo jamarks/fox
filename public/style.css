@@ -135,3 +135,8 @@ a.agent { display: block; text-decoration: none; color: inherit; }
 a.agent:hover { border-color: var(--accent); }
 .agent-answer { margin-top: 4px; font-size: 11px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agent-answer.muted { color: var(--muted); }
+.board.compact { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); gap: 3px; }
+.board.compact .board-title { text-transform: none; letter-spacing: 0; }
+.agent.compact { padding: 3px 8px; border-radius: 4px; }
+.agent.compact .agent-head { font-size: 11px; }
+.agent.selected { border-color: var(--accent); background: var(--bg); }

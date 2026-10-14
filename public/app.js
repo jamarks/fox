@@ -348,7 +348,7 @@ async function refreshResults(parent) {
 }
 
 // Board: shown only when a parent is selected. One compact row per subagent; click goes to that subagent's view.
-function agentsBoard(parent) {
+function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
   if (!parent?.children?.length) return '';
   const results = resultsByTask(parent);
   const rows = parent.children.map((c) => {
@@ -356,12 +356,16 @@ function agentsBoard(parent) {
     const st = child?.state ?? 'done';
     const elapsed = c.phase === 'running' && c.startedAt ? Math.round((Date.now() - c.startedAt) / 1000) + 's' : child?.usage.wallMs ? Math.round(child.usage.wallMs / 1000) + 's' : '';
     const res = results.get(c.task ?? child?.firstPrompt ?? '');
-    return `<a class="agent ${st}" href="#" data-child="${c.id}">
+    const sel = c.id === selectedId;
+    return `<a class="agent ${st} ${sel ? 'selected' : ''} ${compact ? 'compact' : ''}" href="#" data-child="${c.id}">
       <div class="agent-head"><span class="st ${st}"><i></i></span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 90))}</span><span class="agent-elapsed">${elapsed}</span></div>
-      ${res ? `<div class="agent-answer">${esc(res.slice(0, 160))}${res.length > 160 ? '…' : ''}</div>` : c.phase === 'running' ? '<div class="agent-answer muted">working, no answer yet</div>' : ''}
+      ${!compact ? (res ? `<div class="agent-answer">${esc(res.slice(0, 160))}${res.length > 160 ? '…' : ''}</div>` : c.phase === 'running' ? '<div class="agent-answer muted">working, no answer yet</div>' : '') : ''}
     </a>`;
   });
-  return `<div class="board"><div class="board-title">${parent.children.length} subagent${parent.children.length === 1 ? '' : 's'} · click one to see its answer and conversation</div>${rows.join('')}</div>`;
+  const title = compact
+    ? `<a href="#" class="crumb" data-goto="${parent.id}">← ${esc(displayTitle(parent))}</a> · ${parent.children.length} subagents`
+    : `${parent.children.length} subagent${parent.children.length === 1 ? '' : 's'} · click one to see its answer and conversation`;
+  return `<div class="board ${compact ? 'compact' : ''}"><div class="board-title">${title}</div>${rows.join('')}</div>`;
 }
 
 $('#transcript').addEventListener('click', (e) => {
@@ -398,6 +402,7 @@ async function loadTranscript(id, quiet = false) {
     // Subagent view: what it gave back to the parent first, then how it got there.
     const c = parent.children.find((x) => x.id === id);
     const res = resultsByTask(parent).get(c?.task ?? s.firstPrompt ?? '');
+    html.push(agentsBoard(parent, { selectedId: id, compact: true }));
     html.push(`<section class="answer">
       <div class="section-title">answer returned to ${esc(displayTitle(parent))}</div>
       ${res ? `<div class="answer-text">${esc(res)}</div>` : c?.phase === 'running' ? '<div class="muted">still working, nothing returned yet</div>' : '<div class="muted">no answer recorded</div>'}
