@@ -13,17 +13,14 @@
     <header class="side-head">
       <div class="brand"><span>f</span><svg class="fox" viewBox="0 0 32 32" aria-hidden="true"><path d="M4 3 L13 9 L19 9 L28 3 L27 15 C27 22 22 28 16 29 C10 28 5 22 5 15 Z" fill="currentColor"/><path d="M9 18 L16 29 L23 18 L16 21 Z" fill="var(--panel)"/><circle cx="16" cy="23.5" r="1.6" fill="currentColor"/><circle cx="11.5" cy="16" r="1.5" fill="var(--panel)"/><circle cx="20.5" cy="16" r="1.5" fill="var(--panel)"/></svg><span>x</span></div>
       <div class="row">
+        <button type="button" id="pick-folder" class="icon" title="Open fx in a folder…"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4a1 1 0 0 1 1-1h3.2l1.5 1.5h6.3a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/><path d="M8 7v4M6 9h4"/></svg></button>
         <button id="bell" class="icon" title="Sound + desktop notification when an agent finishes or needs input">🔔</button>
         <button id="refresh" class="icon" title="Refresh">↻</button>
       </div>
     </header>
     <div id="summary"></div>
-    <form id="new-session" autocomplete="off">
+    <form id="new-session" autocomplete="off" class="hidden">
       <div class="row">
-        <button type="button" id="pick-folder" class="wide">Open folder…</button>
-        <button type="button" id="type-path" class="icon" title="Type a path instead">⌨</button>
-      </div>
-      <div class="row hidden" id="path-row">
         <input id="new-cwd" placeholder="~/path/to/repo" />
         <button type="submit" class="icon" title="Open">↵</button>
       </div>
