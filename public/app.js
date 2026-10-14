@@ -145,7 +145,10 @@ function sessionCard(s, index = null) {
   const el = document.createElement('div');
   el.className = `session state-${s.state}` + (s.id === state.selected ? ' active' : '') + (s.archived ? ' is-archived' : '');
   el.dataset.id = s.id;
-  const stateHtml = s.state !== 'idle' ? `<span class="st ${s.state}" title="${s.state === 'external' ? 'open in another terminal; fx allows one process per session' : STATE_LABEL[s.state]}"><i></i>${STATE_LABEL[s.state]}</span>` : '';
+  // Sidebar state: only say something when it is not the normal case. A live session that is simply waiting
+  // gets a bare green dot; working and needs-input get their label; no process, nothing.
+  const quiet = s.state === 'ready';
+  const stateHtml = s.state !== 'idle' ? `<span class="st ${s.state}" title="${s.state === 'external' ? 'open in another terminal; fx allows one process per session' : STATE_LABEL[s.state]}"><i></i>${quiet ? '' : STATE_LABEL[s.state]}</span>` : '';
   el.innerHTML = `
     ${index ? `<span class="idx">${index}</span>` : ''}
     <div class="row">
@@ -159,7 +162,7 @@ function sessionCard(s, index = null) {
     ${s.firstPrompt ? `<div class="prompt">${esc(s.firstPrompt)}</div>` : ''}
     <div class="sub">
       ${stateHtml}
-      <span class="model">${modelBadge(s.model)}${esc(modelShort(s.model))}</span>
+      <span class="model mono" title="${esc(s.model ?? '')}">${esc(modelShort(s.model))}</span>
       <span>${fmtTime(s.updatedAt)}</span>
     </div>
     ${childrenHtml(s)}`;
