@@ -56,7 +56,7 @@ Do this in stages, without asking me anything. Stage 1: launch three one-off sub
 - **One terminal**: fx runs in tmux, so closing the tab or the browser never stops it; pin to keep tabs.
 - **Drop files**: drag images or files onto the terminal to attach them to your next message.
 - **Search everything**: ⌥Space searches names and messages across all sessions.
-- **Tools for fx**: one click in the new-session panel adds a browser (Playwright MCP) to fx; the catalog lives in `tools.mjs`.
+- **Tools for fx**: one click in the new-session panel gives fx a browser, Chrome DevTools, current library docs (Context7) or your Vercel account; the catalog lives in `tools.mjs`.
 - **Archive and rename** without touching fx's files.
 - **Git at a glance**: repo, branch and uncommitted files per project.
 - **Keyboard first**: ⌥ shortcuts for sessions, tabs, search, themes and font size; ⌥? lists them.

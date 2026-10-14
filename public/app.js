@@ -1083,19 +1083,24 @@ async function loadTools() {
   const box = $('#ns-tools');
   let tools = [];
   try { tools = await (await fetch('/api/tools')).json(); } catch {}
-  const missing = tools.filter((t) => !t.installed);
-  box.classList.toggle('hidden', !missing.length);
-  box.innerHTML = !missing.length ? '' : `<label class="ns-label">give fx more tools <span class="muted">(added to fx's own config, for every session)</span></label>` +
-    missing.map((t) => `<div class="ns-tool"><div class="ns-tool-text"><b>${esc(t.label)}</b><span class="muted">${esc(t.description)}</span></div><button type="button" data-add-tool="${t.id}">Add</button></div>`).join('');
+  const todo = tools.filter((t) => !t.installed || t.needsSignIn);
+  box.classList.toggle('hidden', !todo.length);
+  box.innerHTML = !todo.length ? '' : `<label class="ns-label">give fx more tools <span class="muted">(added to fx's own config, for every session)</span></label>` +
+    todo.map((t) => `<div class="ns-tool"><div class="ns-tool-text"><b>${esc(t.label)}</b><span class="muted">${esc(t.description)}</span></div>${t.installed ? signInButton(t.id) : `<button type="button" data-add-tool="${t.id}">Add</button>`}</div>`).join('');
 }
+const signInButton = (id) => `<button type="button" data-signin-tool="${id}" title="Opens the sign-in page in your browser">Sign in</button>`;
 $('#ns-tools').addEventListener('click', async (e) => {
-  const btn = e.target.closest('[data-add-tool]');
+  const btn = e.target.closest('[data-add-tool], [data-signin-tool]');
   if (!btn) return;
-  btn.disabled = true; btn.textContent = 'Adding…';
-  const r = await fetch(`/api/tools/${btn.dataset.addTool}/add`, { method: 'POST' });
+  const id = btn.dataset.addTool ?? btn.dataset.signinTool, adding = Boolean(btn.dataset.addTool);
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = adding ? 'Adding…' : 'Waiting for sign-in…';
+  const r = await fetch(`/api/tools/${id}/${adding ? 'add' : 'signin'}`, { method: 'POST' });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) { btn.disabled = false; btn.textContent = 'Add'; return alert(j.error || 'Could not add it'); }
-  btn.replaceWith(Object.assign(document.createElement('span'), { className: 'ns-tool-done', textContent: 'Added · new sessions have it' }));
+  if (!r.ok) { btn.disabled = false; btn.textContent = label; return alert(j.error || (adding ? 'Could not add it' : 'Sign-in did not finish')); }
+  const tool = Array.isArray(j) ? j.find((t) => t.id === id) : null;
+  if (tool?.needsSignIn) { btn.outerHTML = signInButton(id); return; } // added; one more step
+  btn.replaceWith(Object.assign(document.createElement('span'), { className: 'ns-tool-done', textContent: adding ? 'Added · new sessions have it' : 'Signed in' }));
 });
 function updateNsBadge() { const v = $('#ns-model').value; $('#ns-badge').innerHTML = modelBadge(v ? v.split('|')[1] : modelsCatalog?.default?.model); }
 $('#ns-model').addEventListener('change', updateNsBadge);
