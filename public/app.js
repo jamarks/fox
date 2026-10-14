@@ -237,17 +237,27 @@ function attachTab(t, { user = false } = {}) {
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(wrap);
-  const ws = new WebSocket(`ws://${location.host}/pty?name=${encodeURIComponent(t.name)}`);
-  ws.binaryType = 'arraybuffer';
-  ws.onmessage = (ev) => term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data));
-  ws.onclose = () => { const tab = state.tabs.get(t.name); if (tab) { tab.closed = true; renderTabs(); } };
-  const sendResize = () => ws.readyState === 1 && ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-  ws.onopen = () => { requestAnimationFrame(() => { safeFit(state.tabs.get(t.name)); sendResize(); }); };
-  term.onData((data) => ws.readyState === 1 && ws.send(JSON.stringify({ type: 'input', data })));
-  term.onResize(sendResize);
-  state.tabs.set(t.name, { term, fit, ws, wrap, closed: false });
+  const tab = { term, fit, ws: null, wrap, closed: false, ready: false };
+  state.tabs.set(t.name, tab);
   renderTabs();
   activateTab(t.name);
+  // Measure first, then connect with the real size: tmux draws once, at the right size, instead of three times.
+  wrap.classList.add('warming');
+  requestAnimationFrame(() => {
+    safeFit(tab);
+    const ws = new WebSocket(`ws://${location.host}/pty?name=${encodeURIComponent(t.name)}&cols=${term.cols}&rows=${term.rows}`);
+    ws.binaryType = 'arraybuffer';
+    tab.ws = ws;
+    let reveal = null;
+    ws.onmessage = (ev) => {
+      term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data));
+      if (!tab.ready) { clearTimeout(reveal); reveal = setTimeout(() => { tab.ready = true; wrap.classList.remove('warming'); }, 120); }
+    };
+    ws.onclose = () => { tab.closed = true; wrap.classList.remove('warming'); renderTabs(); };
+    const sendResize = () => ws.readyState === 1 && ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+    term.onData((data) => ws.readyState === 1 && ws.send(JSON.stringify({ type: 'input', data })));
+    term.onResize(sendResize);
+  });
 }
 
 function tabLabel(name) {
@@ -306,8 +316,10 @@ function syncTabsWithTerminals() {
 
 // Fit, then verify: if xterm's screen is taller than the box (rounding, font metrics), drop rows until it fits.
 function safeFit(t) {
-  if (!t || t.closed) return;
-  t.fit.fit();
+  if (!t || t.closed || !t.wrap.classList.contains('active')) return;
+  const dims = t.fit.proposeDimensions();
+  if (!dims) return;
+  if (dims.cols !== t.term.cols || dims.rows !== t.term.rows) t.fit.fit();
   const screen = t.wrap.querySelector('.xterm-screen');
   const cs = getComputedStyle(t.wrap);
   const avail = t.wrap.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);

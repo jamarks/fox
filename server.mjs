@@ -356,11 +356,14 @@ wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://localhost');
   const name = url.searchParams.get('name') ?? '';
   if (!name.startsWith(TMUX_PREFIX)) { ws.close(); return; }
+  // The browser measures its terminal before connecting, so the first tmux draw is already the right size.
+  const cols = Math.min(500, Math.max(20, Number(url.searchParams.get('cols')) || 140));
+  const rows = Math.min(200, Math.max(5, Number(url.searchParams.get('rows')) || 40));
 
   let proc;
   try {
     proc = pty.spawn(TMUX, ['attach-session', '-t', name], {
-      name: 'xterm-256color', cols: 140, rows: 40, cwd: homedir(),
+      name: 'xterm-256color', cols, rows, cwd: homedir(),
       env: { ...process.env, PATH: `/opt/homebrew/bin:${process.env.PATH}`, TERM: 'xterm-256color', COLORTERM: 'truecolor', LANG: process.env.LANG ?? 'en_US.UTF-8' },
     });
   } catch (err) {
