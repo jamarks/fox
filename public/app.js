@@ -470,6 +470,49 @@ const fitActive = debounce(() => safeFit(state.tabs.get(state.activeTab)), 50);
 window.addEventListener('resize', fitActive);
 new ResizeObserver(fitActive).observe($('#terminals'));
 
+// ---------- drop files on the terminal ----------
+// Small text files are pasted inline; anything else is saved by the server and its path is pasted
+// (fx turns a pasted image path into an image attachment).
+const TEXT_EXT = /\.(txt|md|markdown|json|jsonl|ya?ml|toml|ini|env|csv|tsv|log|xml|html?|css|scss|[cm]?[jt]sx?|py|rb|go|rs|zig|java|kt|swift|c|h|cc|cpp|hpp|cs|php|sh|zsh|bash|sql|graphql|diff|patch|lua|ex|exs|vue|svelte)$/i;
+const TEXT_INLINE_MAX = 200 * 1024;
+const isInlineText = (f) => f.size <= TEXT_INLINE_MAX && (f.type.startsWith('text/') || /json|xml|javascript|yaml/.test(f.type) || TEXT_EXT.test(f.name));
+
+async function dropFiles(files) {
+  const tab = state.tabs.get(state.activeTab);
+  if (!tab?.ws || tab.ws.readyState !== 1) return;
+  const parts = [];
+  for (const f of files) {
+    if (isInlineText(f)) {
+      const text = await f.text();
+      if (!text.includes('\u0000')) { parts.push(`${f.name}:\n${text}`); continue; }
+    }
+    const r = await fetch(`/api/drop?name=${encodeURIComponent(f.name)}`, { method: 'POST', body: f });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.path) parts.push(j.path); else alert(`${f.name}: ${j.error || 'upload failed'}`);
+  }
+  if (!parts.length) return;
+  tab.term.paste(parts.join(' ') + ' ');
+  tab.term.focus();
+}
+
+{
+  const zone = $('#terminals');
+  let depth = 0;
+  const hasFiles = (e) => [...(e.dataTransfer?.types ?? [])].includes('Files');
+  zone.addEventListener('dragenter', (e) => { if (!hasFiles(e)) return; depth++; zone.classList.add('dropping'); });
+  zone.addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; zone.classList.remove('dropping'); } });
+  zone.addEventListener('dragover', (e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+  zone.addEventListener('drop', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    depth = 0; zone.classList.remove('dropping');
+    dropFiles([...e.dataTransfer.files]);
+  });
+}
+// A file dropped anywhere else must not make the browser navigate to it.
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => e.preventDefault());
+
 // ---------- notifications ----------
 function notify(title, body) {
   if (state.sound) beep();

@@ -24,9 +24,9 @@ fox fixes that. It reads what fx already writes to `~/.fx`, runs every session i
 - **Provider and model at a glance.** Each session shows its model and whether it runs on a subscription (`codex`) or on the pay-per-use `▲ gateway`. Pick a provider and model when you open a new session; the picker lists your subscription models and the whole Gateway catalog grouped by vendor.
 - **Subagents, visibly.** Each session counts its subagents and how many are working. Select the parent and the right column lists them, numbered, with state, vendor, model, elapsed time and the answer each returned. Select one and you see exactly what it gave back to the parent, every round for named agents, and its own conversation underneath. Subagents can run on different models than the parent, as long as they share its provider.
 - **One terminal, pinned tabs.** Clicking a session shows its terminal in the middle as a preview; clicking another replaces it. Pin the ones you want to keep as tabs. Either way fx keeps running in tmux: close the tab, reload, restart fox, `tmux attach -t fx-<id>` from a real terminal, it is all still there.
+- **Drop files on the terminal.** Drag images, text or anything else from Finder onto the terminal. Images become fx image attachments (`[Image 1]`); text files up to 200 KB are pasted inline with their name; other files are saved to `~/.config/fox/drops/` and their path is pasted so the agent can read them. Nothing is sent until you press Enter.
 - **Search the conversation.** Type in the right column, get the matching messages, click one and the terminal jumps to that text (tmux copy-mode search, highlighted); click it again for the previous occurrence, `done` leaves search mode. Messages and commands only, never tool output.
 - **Search across all sessions.** ⌥Space (or the ⌕ in the header) opens a palette that searches session names and messages in every project, archived ones included. Pick a hit and the session opens on that message. The index lives in memory, refreshes only the sessions whose files changed, and never includes tool output.
-- **Search everywhere.** Click ⌕ or press ⌥Space for a Spotlight-style search across session names and user/assistant messages, including archived sessions and subagents. Arrow keys select a result, Enter opens it in the transcript, Esc closes the palette. The search index stays in memory and never searches tool output.
 - **Tokens and cost** per session, and a transcript viewer with expandable tool calls for sessions whose terminal is not open.
 - **Archive and rename** without touching fx's files. Archiving a running session stops its process first, after asking.
 - **Open any folder** with the native macOS picker, or the `+` on a group for a new session in that project.
@@ -87,6 +87,8 @@ fx keeps everything on disk and fox only reads it:
 - `usage-v2.json`: tokens, cost, wall time. Subagents bill to their parent.
 
 Terminals are tmux sessions named `fx-<session id>`, created with `fx session resume <id>` in the session's workspace. The browser attaches over a WebSocket through node-pty and detaches when the tab closes. tmux is told to size the window to the most recent active client, so a second browser or a real terminal can attach without fighting.
+
+A browser can't hand over a dropped file's path, so fox uploads it to its own server, which writes it to `~/.config/fox/drops/` (25 MB max, same-origin only) and pastes that path into the terminal. fx recognizes a pasted image path and attaches the image, the same as dragging a file into a real terminal.
 
 fox's own state (archived ids, custom names, pins, collapsed groups) lives in `~/.config/fox/state.json` and the browser's local storage.
 

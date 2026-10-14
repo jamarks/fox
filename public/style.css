@@ -259,3 +259,4 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 .session.shown { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .session.shown::before { content: ''; position: absolute; left: -1px; top: 11px; border: 5px solid transparent; border-left: 7px solid var(--accent); }
 .session.shown .idx { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 700; }
+#terminals.dropping::after { content: 'Drop to send to fx'; position: absolute; inset: 8px; display: grid; place-items: center; border: 1.5px dashed var(--accent); border-radius: 10px; background: color-mix(in srgb, var(--bg) 70%, transparent); color: var(--accent); font-size: 13px; pointer-events: none; z-index: 5; }

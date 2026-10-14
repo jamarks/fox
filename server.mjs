@@ -21,6 +21,8 @@ const SESSIONS_DIR = join(homedir(), '.fx', 'sessions');
 const PORT = Number(process.env.PORT ?? 4848);
 const FX_BIN = process.env.FX_BIN ?? join(homedir(), '.local', 'bin', 'fx');
 const STATE_DIR = join(homedir(), '.config', 'fox');
+const DROP_DIR = join(STATE_DIR, 'drops');
+const DROP_LIMIT = 25 * 1024 * 1024;
 const STATE_FILE = join(STATE_DIR, 'state.json');
 
 // Estado del panel: qué sesiones están archivadas y nombres propios. Nunca se escribe en ~/.fx.
@@ -319,6 +321,19 @@ const server = http.createServer(async (req, res) => {
       await saveState(st);
       return send(res, 200, { ok: true });
     }
+    // A file dropped on a terminal: saved under ~/.config/fox/drops so fx can read or attach it by path.
+    if (p === '/api/drop' && req.method === 'POST') {
+      if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: 'cross-origin upload' });
+      const raw = basename(String(url.searchParams.get('name') ?? 'file'));
+      const safe = raw.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+/, '').slice(-80) || 'file';
+      const chunks = []; let size = 0;
+      for await (const c of req) { size += c.length; if (size > DROP_LIMIT) return send(res, 413, { error: 'file too large (max 25 MB)' }); chunks.push(c); }
+      await mkdir(DROP_DIR, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[-:.]/g, '').replace('T', '-').slice(0, 18);
+      const path = join(DROP_DIR, `${stamp}-${safe}`);
+      await writeFile(path, Buffer.concat(chunks));
+      return send(res, 200, { path });
+    }
     if (p === '/api/models' && req.method === 'GET') return send(res, 200, await getModels());
     if (p === '/api/models/refresh' && req.method === 'POST') { try { return send(res, 200, await fetchModels()); } catch (err) { return send(res, 500, { error: String(err.stderr || err.message) }); } }
     if (p === '/api/terminals' && req.method === 'GET') return send(res, 200, await listTerminals());
@@ -409,10 +424,10 @@ async function terminalActivity(name) {
 }
 
 async function listTerminals() {
-  const raw = await tmux('list-sessions', '-F', '#{session_name}\t#{session_created}\t#{session_attached}');
+  const raw = await tmux('list-sessions', '-F', '#{session_name}|#{session_created}|#{session_attached}');
   const out = [];
   for (const line of raw.split('\n')) {
-    const [name, created, attached] = line.split('\t');
+    const [name, created, attached] = line.split('|');
     if (!name?.startsWith(TMUX_PREFIX)) continue;
     let resume = await tmuxOption(name, '@fx_resume');
     const cwd = await tmuxOption(name, '@fx_cwd');
