@@ -161,7 +161,6 @@ function sessionCard(s, index = null) {
     ${index ? `<span class="idx">${index}</span>` : ''}
     <div class="row">
       <div class="title" title="${esc(s.title)}">${esc(displayTitle(s))}</div>
-      ${shown ? '<span class="shown-tag" title="this session is in the terminal">in terminal</span>' : ''}
       <div class="actions">
         ${s.terminal ? `<button class="icon ${state.pinned.has(s.terminal) ? 'on' : ''}" data-pin="${esc(s.terminal)}" title="${state.pinned.has(s.terminal) ? 'Unpin tab' : 'Pin as tab'}">${ICON.pin}</button>` : ''}
         <button class="icon" data-rename="${s.id}" title="Rename">${ICON.rename}</button>

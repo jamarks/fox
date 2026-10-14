@@ -19,9 +19,10 @@ fox fixes that. It reads what fx already writes to `~/.fx`, runs every session i
 
 ## What it does
 
-- **Sessions by project.** The sidebar groups fx sessions by workspace, collapsible per folder, with the first prompt under each title so fx's auto-generated names ("Casual Greeting") make sense. Groups with running agents sort first.
-- **Live state.** Each running session shows `working`, `waiting` or `needs input`, read from the tmux screen every few seconds. The summary at the top counts them. A 🔔 toggle beeps and sends a desktop notification when an agent finishes a turn or asks for input.
-- **Subagents, visibly.** Children nest under their parent and pulse while they run. Select the parent and you get one row per subagent with its state, elapsed time and the answer it returned. Select a child and you see exactly what it gave back to the parent, every round for named agents, and its own conversation underneath.
+- **Sessions by project.** The sidebar groups fx sessions by workspace, collapsible per folder and reorderable by dragging the project header, with the first prompt under each title so fx's auto-generated names ("Casual Greeting") make sense. Sessions are numbered and keep a stable order; a triangle in the margin marks the one that is in the terminal.
+- **Live state.** A green dot means a live session waiting for you; `working` and `needs input` get a label, read from the tmux screen every few seconds. The bar at the top counts only what needs attention. A 🔔 toggle beeps and sends a desktop notification when an agent finishes a turn or asks for input.
+- **Provider and model at a glance.** Each session shows its model and whether it runs on a subscription (`codex`) or on the pay-per-use `▲ gateway`. Pick a provider and model when you open a new session; the picker lists your subscription models and the whole Gateway catalog grouped by vendor.
+- **Subagents, visibly.** Each session counts its subagents and how many are working. Select the parent and the right column lists them, numbered, with state, vendor, model, elapsed time and the answer each returned. Select one and you see exactly what it gave back to the parent, every round for named agents, and its own conversation underneath. Subagents can run on different models than the parent, as long as they share its provider.
 - **One terminal, pinned tabs.** Clicking a session shows its terminal in the middle as a preview; clicking another replaces it. Pin the ones you want to keep as tabs. Either way fx keeps running in tmux: close the tab, reload, restart fox, `tmux attach -t fx-<id>` from a real terminal, it is all still there.
 - **Search the conversation.** Type in the right column, get the matching messages, click one and the terminal jumps to that text (tmux copy-mode search, highlighted); click it again for the previous occurrence, `done` leaves search mode. Messages and commands only, never tool output.
 - **Search across all sessions.** ⌥Space (or the ⌕ in the header) opens a palette that searches session names and messages in every project, archived ones included. Pick a hit and the session opens on that message. The index lives in memory, refreshes only the sessions whose files changed, and never includes tool output.
@@ -29,9 +30,10 @@ fox fixes that. It reads what fx already writes to `~/.fx`, runs every session i
 - **Tokens and cost** per session, and a transcript viewer with expandable tool calls for sessions whose terminal is not open.
 - **Archive and rename** without touching fx's files. Archiving a running session stops its process first, after asking.
 - **Open any folder** with the native macOS picker, or the `+` on a group for a new session in that project.
+- **Keyboard first.** Option shortcuts for new sessions, tabs, pinning, search, themes and terminal font size; ⌥? lists them.
 - **Git at a glance.** Each workspace shows its GitHub repo (linked), current branch and the number of uncommitted files.
 - **Themes.** Dark (default), *dusk*, *mauve*, *terracotta*, *copper*, *plum*, and *sky*: the dark palette with translucent panels over a slowly drifting star field drawn from real star coordinates, Orion, the Big Dipper, Cassiopeia, Scorpius, Cygnus, Lyra, Leo and friends.
-- **Resizable columns.** Drag the dividers; widths are remembered.
+- **Resizable columns.** Drag the dividers; widths are remembered. The address bar follows the open session, so a refresh or a bookmark lands back on it.
 
 ## Run it
 
