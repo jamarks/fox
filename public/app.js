@@ -313,6 +313,8 @@ function safeFit(t) {
   const avail = t.wrap.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
   let guard = 3;
   while (screen && screen.offsetHeight > avail && t.term.rows > 5 && guard-- > 0) t.term.resize(t.term.cols, t.term.rows - 1);
+  // A resize can leave the viewport scrolled one line above the end; keep the prompt in view.
+  t.term.scrollToBottom();
 }
 const fitActive = debounce(() => safeFit(state.tabs.get(state.activeTab)), 50);
 window.addEventListener('resize', fitActive);
