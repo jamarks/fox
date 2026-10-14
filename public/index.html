@@ -38,6 +38,15 @@
     <div id="session-groups"></div>
   </aside>
 
+  <div id="newsheet" class="hidden">
+    <form class="sheet" id="newform">
+      <div class="section-title">new session</div>
+      <div class="ns-folder" id="ns-folder"></div>
+      <label class="ns-label">model <span class="muted">(optional, fx default otherwise)</span></label>
+      <select id="ns-model"><option value="">fx default</option></select>
+      <div class="row ns-actions"><button type="button" id="ns-cancel">Cancel</button><button type="submit" class="primary">Open</button><span class="muted ns-hint">Enter to open · Esc to cancel</span></div>
+    </form>
+  </div>
   <div class="resizer" id="rs-left" title="Drag to resize"></div>
   <main id="center">
     <div id="tabbar"><div id="tabs"></div><button id="toggle-transcript" class="icon">⇥</button></div>

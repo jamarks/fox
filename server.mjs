@@ -198,6 +198,46 @@ async function gitInfo(ws) {
   return info;
 }
 
+// ---------- catálogo de modelos ----------
+// `fx models` only lists the active provider, so we switch provider, list, and switch back. Cached on disk.
+const MODELS_FILE = join(STATE_DIR, 'models.json');
+let modelsCache = null;
+async function fxJson(args, env = {}) {
+  const { stdout } = await execFileP(FX_BIN, args, { timeout: 20000, env: { ...process.env, ...env } });
+  return stdout;
+}
+async function readFxSettings() { return (await readJson(join(homedir(), '.fx', 'settings.json'))) ?? {}; }
+async function fetchModels() {
+  const settings = await readFxSettings();
+  const original = settings.provider ?? 'codex';
+  const status = await fxJson(['status']).catch(() => '');
+  const connected = (status.match(/connected_providers=(.*)/)?.[1] ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+  const providers = [];
+  if (connected.some((c) => /codex/i.test(c))) providers.push({ id: 'codex', label: 'ChatGPT subscription' });
+  if (connected.some((c) => /gateway/i.test(c))) providers.push({ id: 'gateway', label: 'Vercel AI Gateway' });
+  const out = { fetchedAt: Date.now(), default: { provider: original, model: settings.models?.[original] ?? null }, providers: [] };
+  try {
+    for (const p of providers) {
+      await fxJson(['provider', p.id]).catch(() => {});
+      let ids = [];
+      try { ids = JSON.parse(await fxJson(['models', '--json'])).ids ?? []; } catch {}
+      out.providers.push({ ...p, models: ids, default: settings.models?.[p.id] ?? null });
+    }
+  } finally {
+    await fxJson(['provider', original]).catch(() => {});
+  }
+  modelsCache = out;
+  await mkdir(STATE_DIR, { recursive: true });
+  await writeFile(MODELS_FILE, JSON.stringify(out, null, 2));
+  return out;
+}
+async function getModels() {
+  if (modelsCache) return modelsCache;
+  const cached = await readJson(MODELS_FILE);
+  if (cached) { modelsCache = cached; return cached; }
+  return fetchModels();
+}
+
 // ---------- HTTP ----------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.map': 'application/json', '.svg': 'image/svg+xml' };
 
@@ -275,13 +315,17 @@ const server = http.createServer(async (req, res) => {
       await saveState(st);
       return send(res, 200, { ok: true });
     }
+    if (p === '/api/models' && req.method === 'GET') return send(res, 200, await getModels());
+    if (p === '/api/models/refresh' && req.method === 'POST') { try { return send(res, 200, await fetchModels()); } catch (err) { return send(res, 500, { error: String(err.stderr || err.message) }); } }
     if (p === '/api/terminals' && req.method === 'GET') return send(res, 200, await listTerminals());
     if (p === '/api/terminals' && req.method === 'POST') {
       const body = JSON.parse(await readBody(req) || '{}');
       const cwd = resolve(String(body.cwd ?? homedir()).replace(/^~/, homedir()));
       const resume = body.resume ? safeSessionId(String(body.resume)) : null;
       if (body.resume && !resume) return send(res, 400, { error: 'bad id' });
-      try { return send(res, 200, await createTerminal({ cwd, resume })); }
+      const provider = /^[a-z0-9_-]{1,32}$/i.test(String(body.provider ?? '')) ? String(body.provider) : null;
+      const model = /^[a-z0-9._\/-]{1,80}$/i.test(String(body.model ?? '')) ? String(body.model) : null;
+      try { return send(res, 200, await createTerminal({ cwd, resume, provider, model })); }
       catch (err) { return send(res, 500, { error: String(err.stderr || err.message) }); }
     }
     // Position the real terminal on a text match using tmux copy-mode search. 'again' repeats upward.
@@ -382,11 +426,13 @@ async function listTerminals() {
   return out;
 }
 
-async function createTerminal({ cwd, resume }) {
+async function createTerminal({ cwd, resume, provider = null, model = null }) {
   const name = resume ? `${TMUX_PREFIX}${resume}` : `${TMUX_PREFIX}new-${Date.now().toString(36)}`;
   const existing = (await listTerminals()).find((t) => t.name === name);
   if (existing) return existing;
-  const cmd = resume ? `${FX_BIN} session resume ${resume}` : FX_BIN;
+  // New sessions can start on a chosen provider/model; resumed ones keep what the session already has.
+  const flags = resume ? '' : `${provider ? ` --provider ${provider}` : ''}${model ? ` --model ${model}` : ''}`;
+  const cmd = resume ? `${FX_BIN} session resume ${resume}` : `${FX_BIN}${flags}`;
   await tmux('new-session', '-d', '-s', name, '-x', '140', '-y', '40', '-c', cwd, cmd);
   await tmux('set-option', '-t', name, 'status', 'off');
   await tmux('set-option', '-t', name, 'mouse', 'on');

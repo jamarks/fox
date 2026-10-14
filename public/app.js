@@ -5,6 +5,7 @@ const state = {
   sessions: [], terminals: [], selected: null,
   tabs: new Map(), // tmux name -> { term, fit, ws, wrap, label, closed }
   activeTab: null, pollTimer: null, prevStates: new Map(), sound: false,
+  renaming: null, // keep the inline editor mounted while overview polling updates the rest of the UI
   pinned: new Set(), // tmux names pinned as tabs; restored after reload. Everything else is a preview or runs unseen.
   preview: null,     // the one unpinned terminal currently shown; replaced when you click another session
 };
@@ -84,6 +85,7 @@ function renderSummary() {
 }
 
 function renderSessions() {
+  if (state.renaming) return; // replacing the sidebar would blur the input and save prematurely
   const active = state.sessions.filter((s) => !s.archived && !s.parentId);
   const archived = state.sessions.filter((s) => s.archived && !s.parentId);
   const groups = new Map();
@@ -164,7 +166,7 @@ function childrenHtml(parent) {
 $('#session-groups').addEventListener('click', async (e) => {
   const btn = e.target.closest('button');
   const d = btn?.dataset ?? {};
-  if (d.new) return openTerminal({ cwd: d.new });
+  if (d.new) return newSessionSheet(d.new);
   if (d.pin) return setPinned(d.pin, !state.pinned.has(d.pin));
   if (d.rename) return renameInline(d.rename);
   if (d.archive) {
@@ -212,14 +214,23 @@ async function renameInline(id) {
   const input = document.createElement('input');
   input.className = 'rename';
   input.value = displayTitle(s);
+  state.renaming = input;
   titleEl.replaceWith(input);
   input.focus(); input.select();
   let settled = false;
   const done = async (save) => {
     if (settled) return; settled = true;
-    if (save) await post(`/api/sessions/${id}/rename`, { name: input.value.trim() === s.title ? '' : input.value });
-    await refresh();
-    if (state.selected === id) loadTranscript(id);
+    try {
+      if (save && input.value.trim() !== displayTitle(s)) {
+        await post(`/api/sessions/${id}/rename`, { name: input.value.trim() === s.title ? '' : input.value });
+      }
+    } finally {
+      if (state.renaming === input) {
+        state.renaming = null;
+        await refresh();
+        if (state.selected === id) loadTranscript(id);
+      }
+    }
   };
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(true); if (e.key === 'Escape') done(false); });
   input.addEventListener('blur', () => done(true));
@@ -239,7 +250,7 @@ $('#new-session').addEventListener('submit', async (e) => {
   const v = $('#new-cwd').value.trim();
   if (!v) return;
   const r = await (await fetch('/api/check-dir?path=' + encodeURIComponent(v))).json();
-  if (r.ok) openTerminal({ cwd: r.path });
+  if (r.ok) newSessionSheet(r.path);
 });
 $('#refresh').addEventListener('click', refresh);
 $('#keys').addEventListener('click', () => showShortcuts());
@@ -251,14 +262,14 @@ $('#pick-folder').addEventListener('click', async (e) => {
   btn.disabled = true;
   try {
     const r = await post('/api/pick-folder');
-    if (r.path) await openTerminal({ cwd: r.path });
+    if (r.path) newSessionSheet(r.path);
     else if (r.error) { $('#new-session').classList.remove('hidden'); $('#new-cwd-hint').textContent = r.error; $('#new-cwd-hint').className = 'hint err'; }
   } finally { btn.disabled = false; }
 });
 
 // ---------- terminals (tmux attach over WebSocket) ----------
-async function openTerminal({ cwd, resume }) {
-  const t = await post('/api/terminals', { cwd, resume });
+async function openTerminal({ cwd, resume, provider, model }) {
+  const t = await post('/api/terminals', { cwd, resume, provider, model });
   if (t.error) { alert(t.error); return; }
   await refresh();
   attachTab(t);
@@ -744,8 +755,8 @@ const sky = (() => {
     const ctx = canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#070912'; ctx.fillRect(0, 0, W, H);
-    // One full turn of the sky every 40 minutes; the map is 1.6 screens wide so you see a band of ~15 hours of RA.
-    const shift = (now / 1000 / 2400) * 24;
+    // One full turn of the sky every 8 minutes: slow, but you can see it drift. The screen shows ~15 hours of RA.
+    const shift = (now / 1000 / 480) * 24;
     const span = 15; // hours of RA across the screen
     const proj = ([ra, dec]) => {
       let x = (((ra - shift) % 24) + 24) % 24; // 0..24
@@ -782,6 +793,40 @@ try { const saved = localStorage.getItem('fox.theme'); $('#theme').value = saved
 applyTheme();
 systemDark.addEventListener('change', () => { if ($('#theme').value === 'system') applyTheme(); });
 
+// ---------- new session sheet (folder + optional model) ----------
+let modelsCatalog = null;
+async function loadModels(force = false) {
+  if (modelsCatalog && !force) return modelsCatalog;
+  modelsCatalog = await (await fetch(force ? '/api/models/refresh' : '/api/models', { method: force ? 'POST' : 'GET' })).json();
+  const sel = $('#ns-model');
+  sel.innerHTML = `<option value="">fx default${modelsCatalog.default?.model ? ` (${esc(modelsCatalog.default.model)})` : ''}</option>`;
+  for (const p of modelsCatalog.providers ?? []) {
+    const g = document.createElement('optgroup'); g.label = p.label;
+    for (const id of p.models) { const o = document.createElement('option'); o.value = `${p.id}|${id}`; o.textContent = id; g.appendChild(o); }
+    sel.appendChild(g);
+  }
+  try { const last = localStorage.getItem('fox.lastModel'); if (last && [...sel.options].some((o) => o.value === last)) sel.value = last; } catch {}
+  return modelsCatalog;
+}
+function newSessionSheet(cwd) {
+  $('#ns-folder').textContent = shortPath(cwd);
+  $('#newsheet').dataset.cwd = cwd;
+  $('#newsheet').classList.remove('hidden');
+  loadModels().then(() => $('#ns-model').focus());
+}
+$('#ns-cancel').addEventListener('click', () => $('#newsheet').classList.add('hidden'));
+$('#newsheet').addEventListener('click', (e) => { if (e.target.id === 'newsheet') $('#newsheet').classList.add('hidden'); });
+$('#newform').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const cwd = $('#newsheet').dataset.cwd;
+  const v = $('#ns-model').value;
+  try { localStorage.setItem('fox.lastModel', v); } catch {}
+  const [provider, model] = v ? v.split('|') : [null, null];
+  $('#newsheet').classList.add('hidden');
+  await openTerminal({ cwd, provider, model });
+});
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#newsheet').classList.contains('hidden')) $('#newsheet').classList.add('hidden'); });
+
 // ---------- keyboard ----------
 // ⌥ as the modifier: ⌘T and ⌘W belong to the browser. Captured on window before xterm sees them.
 const SHORTCUTS = [
@@ -814,7 +859,7 @@ window.addEventListener('keydown', (e) => {
   const idx = tabs.indexOf(state.activeTab);
   const code = e.code; // physical key: Option changes e.key on macOS
   let handled = true;
-  if (code === 'KeyT' || code === 'KeyN') { const ws = currentWorkspace(); if (ws) openTerminal({ cwd: ws }); else $('#pick-folder').click(); }
+  if (code === 'KeyT' || code === 'KeyN') { const ws = currentWorkspace(); if (ws) newSessionSheet(ws); else $('#pick-folder').click(); }
   else if (code === 'KeyW') { if (state.activeTab) closeTab(state.activeTab); }
   else if (code === 'BracketRight') { if (tabs.length) activateTab(tabs[(idx + 1) % tabs.length]); }
   else if (code === 'BracketLeft') { if (tabs.length) activateTab(tabs[(idx - 1 + tabs.length) % tabs.length]); }

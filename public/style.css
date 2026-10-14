@@ -207,3 +207,11 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 #shortcuts .sheet { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; min-width: 300px; }
 .kb { display: flex; gap: 12px; align-items: center; padding: 4px 0; font-size: 12px; }
 .kb kbd { font-family: var(--mono); font-size: 11px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; min-width: 64px; text-align: center; }
+#newsheet { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; }
+#newsheet .sheet { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; min-width: 360px; display: flex; flex-direction: column; gap: 8px; }
+.ns-folder { font-family: var(--mono); font-size: 12px; }
+.ns-label { font-size: 11px; color: var(--text); }
+#ns-model { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; }
+.ns-actions { justify-content: flex-end; margin-top: 4px; } .ns-actions button { border: 1px solid var(--border); padding: 5px 10px; color: var(--text); }
+.ns-actions button.primary { background: var(--accent); color: #0b0d12; border-color: var(--accent); font-weight: 600; }
+.ns-hint { font-size: 11px; margin-right: auto; }
