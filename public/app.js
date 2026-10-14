@@ -320,19 +320,20 @@ function safeFit(t) {
   if (!t || t.closed || !t.wrap.classList.contains('active')) return;
   const dims = t.fit.proposeDimensions();
   if (!dims) return;
+  // Same proposal as last time means the box has not changed: nothing to do (avoids a resize loop).
+  if (t.settled && t.settled.cols === dims.cols && t.settled.rows === dims.rows) return;
   if (dims.cols !== t.term.cols || dims.rows !== t.term.rows) t.fit.fit();
   const screen = t.wrap.querySelector('.xterm-screen');
   const cs = getComputedStyle(t.wrap);
   const avail = t.wrap.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
   let guard = 3;
   while (screen && screen.offsetHeight > avail && t.term.rows > 5 && guard-- > 0) t.term.resize(t.term.cols, t.term.rows - 1);
-  // A resize can leave the viewport scrolled one line above the end; keep the prompt in view.
+  t.settled = { cols: dims.cols, rows: dims.rows };
   t.term.scrollToBottom();
 }
 const fitActive = debounce(() => safeFit(state.tabs.get(state.activeTab)), 50);
 window.addEventListener('resize', fitActive);
 new ResizeObserver(fitActive).observe($('#terminals'));
-setInterval(fitActive, 3000);
 
 // ---------- notifications ----------
 function notify(title, body) {
