@@ -261,7 +261,8 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 .vdot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; margin-right: 6px; vertical-align: 1px; }
 .agent-head .vdot { margin-right: 0; }
 .agroup { display: flex; flex-direction: column; gap: 4px; }
-.agroup + .agroup { margin-top: 10px; }
+.agroup + .agroup { margin-top: 6px; }
+.agroup:has(.agroup-task) { margin-top: 10px; }
 .agroup-task { display: flex; gap: 8px; align-items: baseline; font-size: 11px; color: var(--muted); padding: 0 2px; }
 .agroup-task > span:first-child { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agroup-n { flex: none; font-size: 10px; }

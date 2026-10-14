@@ -538,7 +538,9 @@ try { state.sound = localStorage.getItem('fx-panel.sound') === '1'; $('#bell').c
 // so one-off agents are matched by normalized task text *in sequence* (three identical tasks get three
 // different answers); named agents by name, keeping every round.
 const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, 140);
-let cachedResults = { id: null, runs: [], byAgent: new Map(), assigned: new Map() };
+let cachedResults = { id: null, key: '', runs: [], byAgent: new Map(), assigned: new Map() };
+// fx writes the answers into the parent when its turn ends, after the children finish: re-read on any parent change.
+const resultsKey = (parent) => `${parent.id}:${parent.updatedAt ?? 0}:${parent.turns ?? 0}:${parent.lastKind ?? ""}:${parent.children.map((c) => c.phase).join(',')}`;
 function resultsByAgent(parent) { return cachedResults.id === parent.id ? cachedResults.byAgent : new Map(); }
 async function refreshResults(parent) {
   if (!parent?.children?.length) return;
@@ -560,7 +562,7 @@ async function refreshResults(parent) {
     const r = runs.find((x) => !x.used && x.task === task);
     if (r) { r.used = true; assigned.set(c.id, r.text); }
   }
-  cachedResults = { id: parent.id, runs, byAgent, assigned };
+  cachedResults = { id: parent.id, key: resultsKey(parent), runs, byAgent, assigned };
 }
 function answerFor(parent, c) {
   if (cachedResults.id !== parent.id) return null;
@@ -574,10 +576,11 @@ const expandedAgents = new Set();
 const fmtDur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + 's' : s < 3600 ? Math.round(s / 60) + 'm' : Math.floor(s / 3600) + 'h ' + Math.round((s % 3600) / 60) + 'm'; };
 const vendorDot = (model) => { const v = vendorOf(model); return `<span class="vdot" style="background:${v?.[2] ?? 'var(--muted)'}" title="${esc(v?.[3] ?? 'unknown vendor')}"></span>`; };
 // What went wrong with an answer, if anything: weak models often print a tool call instead of making it.
-function answerFlag(c, text) {
+function answerFlag(c, text, parentBusy) {
   if (c.failure) return ['failed', 'err'];
   if (c.phase === 'running') return null;
-  if (!text?.trim()) return ['no answer', 'muted'];
+  if (!text?.trim() && c.outcome === 'cancelled') return ['cancelled', 'muted'];
+  if (!text?.trim()) return parentBusy ? null : ['no answer', 'muted']; // answers are saved when the parent's turn ends
   if (/^\s*(?:\/\/[^\n]*\n\s*)*[a-z_][a-z0-9_.]*\(\s*[a-z_]+\s*=/i.test(text) || /^\s*\{\s*"(name|tool|function)"\s*:/.test(text)) return ["didn't run tools", 'warn'];
   if (/^\s*(lo siento|sorry)/i.test(text) || /\b(no (?:puedo|pude|puede|es posible)|no se puede|i can(?:no|')t|i couldn't|i'm (?:not able|unable)|i am unable|unable to)\b/i.test(text.slice(0, 160))) return ["couldn't", 'err'];
   return null;
@@ -592,10 +595,12 @@ function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
     if (!groups.has(key)) groups.set(key, { name: c.name, task, items: [] });
     groups.get(key).items.push({ c, i, child });
   });
-  const row = ({ c, i, child }) => {
+  const parentBusy = parent.state === 'working' || parent.children.some((c) => c.phase === 'running');
+  const row = ({ c, i, child }, single) => {
     const model = child?.model ?? null;
     const res = answerFor(parent, c);
-    const flag = answerFlag(c, res);
+    const flag = answerFlag(c, res, parentBusy);
+    const task = c.task ?? child?.firstPrompt ?? '';
     const elapsed = c.phase === 'running' && c.startedAt ? fmtDur(Date.now() - c.startedAt) : child?.usage.wallMs ? fmtDur(child.usage.wallMs) : '';
     const open = !compact && expandedAgents.has(c.id);
     const head = `<div class="agent-head"><span class="idx">${i + 1}</span>${model ? vendorDot(model) : ''}<span class="agent-name">${model ? esc(modelShort(model)) : 'failed to start'}</span>${c.phase === 'running' ? '<span class="st working"><i></i></span>' : ''}${flag ? `<span class="flag ${flag[1]}">${flag[0]}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>`;
@@ -603,13 +608,17 @@ function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
     const failure = c.failure ? (typeof c.failure === 'string' ? c.failure : (c.failure.message ?? c.failure.reason ?? JSON.stringify(c.failure))) : '';
     const body = failure ? `<div class="agent-answer err">${esc(failure)}</div>`
       : res ? `<div class="agent-answer">${esc(open ? res : res.slice(0, 400))}</div>`
+      : single && task ? `<div class="agent-answer muted" title="${esc(task)}">${esc(task.slice(0, 400))}</div>`
       : c.phase === 'running' ? '<div class="agent-answer muted">working…</div>' : '';
     return `<div class="agent ${open ? 'open' : ''}" data-agent="${c.id}">${head}${body}${open ? `<a class="agent-open" href="#" data-child="${c.id}">its conversation →</a>` : ''}</div>`;
   };
+  // A header only where it says something: the same task on several models, or a named agent.
+  // A subagent with a task of its own shows that task in its row until its answer arrives.
   const html = [...groups.values()].map((g) => {
+    if (g.items.length === 1 && !g.name) return `<div class="agroup">${row(g.items[0], true)}</div>`;
     const label = g.name ? `${ICON.threads} ${esc(g.name)}` : esc(g.task || 'no task');
     const count = g.items.length > 1 ? `<span class="agroup-n">${g.items.length} models</span>` : '';
-    return `<div class="agroup"><div class="agroup-task" title="${esc(g.task)}"><span>${label}</span>${count}</div>${g.items.map(row).join('')}</div>`;
+    return `<div class="agroup"><div class="agroup-task" title="${esc(g.task)}"><span>${label}</span>${count}</div>${g.items.map((it) => row(it, false)).join('')}</div>`;
   });
   const n = parent.children.length;
   const title = `${n} subagent${n === 1 ? '' : 's'}${groups.size > 1 && groups.size < n ? ` · ${groups.size} tasks` : ''}`;
@@ -723,7 +732,7 @@ async function loadTranscript(id, quiet = false) {
   if (!s) return;
   const parent = s.parentId ? sessionById(s.parentId) : s;
   const isChild = Boolean(s.parentId);
-  if (parent?.children?.length && (cachedResults.id !== parent.id || parent.children.some((c) => c.phase === 'running'))) await refreshResults(parent);
+  if (parent?.children?.length && (cachedResults.key !== resultsKey(parent) || parent.children.some((c) => c.phase === 'running'))) await refreshResults(parent);
   const events = await (await fetch(`/api/sessions/${id}/events`)).json();
   if (state.selected !== id) return; // selection changed while we were fetching: drop this render
   const termOpenKey = Boolean(s.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
