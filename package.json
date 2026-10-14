@@ -22,7 +22,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper"
+    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper",
+    "test": "node --test tests/"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

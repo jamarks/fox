@@ -24,6 +24,7 @@ fox fixes that. It reads what fx already writes to `~/.fx`, runs every session i
 - **Subagents, visibly.** Children nest under their parent and pulse while they run. Select the parent and you get one row per subagent with its state, elapsed time and the answer it returned. Select a child and you see exactly what it gave back to the parent, every round for named agents, and its own conversation underneath.
 - **One terminal, pinned tabs.** Clicking a session shows its terminal in the middle as a preview; clicking another replaces it. Pin the ones you want to keep as tabs. Either way fx keeps running in tmux: close the tab, reload, restart fox, `tmux attach -t fx-<id>` from a real terminal, it is all still there.
 - **Search the conversation.** Type in the right column, get the matching messages, click one and the terminal jumps to that text (tmux copy-mode search, highlighted). ↑ walks to earlier matches, `done` leaves search mode. Tool output and files the agent read are searchable too, behind a checkbox.
+- **Search across all sessions.** ⌥Space (or the ⌕ in the header) opens a palette that searches session names and messages in every project, archived ones included. Pick a hit and the session opens on that message. The index lives in memory, refreshes only the sessions whose files changed, and never includes tool output.
 - **Search everywhere.** Click ⌕ or press ⌥Space for a Spotlight-style search across session names and user/assistant messages, including archived sessions and subagents. Arrow keys select a result, Enter opens it in the transcript, Esc closes the palette. The search index stays in memory and never searches tool output.
 - **Tokens and cost** per session, and a transcript viewer with expandable tool calls for sessions whose terminal is not open.
 - **Archive and rename** without touching fx's files. Archiving a running session stops its process first, after asking.
@@ -60,6 +61,7 @@ Option is the modifier, because ⌘T and ⌘W belong to the browser.
 | ⌥P | Pin / unpin the current tab |
 | ⌥F | Search this conversation |
 | ⌥Space | Search all sessions |
+| ⌥Space | Search all sessions |
 | ⌥\ | Show / hide the right column |
 | ⌥L / ⌥⇧L | Next / previous theme |
 | ⌥= / ⌥- / ⌥0 | Terminal font bigger / smaller / reset |
@@ -95,6 +97,14 @@ Do this in stages, without asking me anything. Stage 1: launch three one-off sub
 ```
 
 Watch the sidebar: three children appear and pulse, the parent sits in `working` without writing anything until they return, `reviewer` stays alive in green between rounds while the one-offs go grey as they finish.
+
+## Tests
+
+```bash
+npm test
+```
+
+Runs the search index tests with Node's built-in runner.
 
 ## Why not libfx?
 
