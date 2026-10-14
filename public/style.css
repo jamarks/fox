@@ -91,7 +91,7 @@ label.toggle { font-weight: 400; color: var(--muted); font-size: 11px; display: 
 
 
 /* states */
-#summary { padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 11px; display: flex; gap: 10px; }
+#summary { padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 11px; display: flex; gap: 10px; min-height: 27px; align-items: center; box-sizing: border-box; }
 .st { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; }
 .st i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block; }
 .st.working { color: var(--warn); } .st.working i { background: var(--warn); animation: pulse 1.2s infinite; }

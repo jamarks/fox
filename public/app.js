@@ -101,8 +101,8 @@ function renderSummary() {
   if (count('working')) parts.push(`<span class="st working">${count('working')} working</span>`);
   const subs = state.sessions.filter((s) => s.subagent?.phase === 'running').length;
   if (subs) parts.push(`<span class="st working">🧵 ${subs} subagent${subs === 1 ? '' : 's'}</span>`);
-  $('#summary').innerHTML = parts.join('');
-  $('#summary').classList.toggle('hidden', !parts.length);
+  // Always rendered, even empty, so the list below never jumps when activity starts or stops.
+  $('#summary').innerHTML = parts.join('') || '<span class="muted">quiet</span>';
 }
 
 function renderSessions() {
