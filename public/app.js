@@ -398,12 +398,20 @@ function agentsBoard(parent, { selectedId = null, compact = false } = {}) {
 }
 
 $('#transcript').addEventListener('click', (e) => {
+  const toggle = e.target.closest('a[data-show-convo], a[data-hide-convo]');
+  if (toggle) {
+    e.preventDefault();
+    const id = toggle.dataset.showConvo ?? toggle.dataset.hideConvo;
+    toggle.dataset.showConvo ? convoShown.add(id) : convoShown.delete(id);
+    lastTranscriptKey = ''; return loadTranscript(id);
+  }
   const link = e.target.closest('a[data-child], a[data-goto]');
   if (!link) return;
   e.preventDefault();
   selectSession(link.dataset.child ?? link.dataset.goto);
 });
 
+const convoShown = new Set();
 let lastTranscriptKey = '';
 let lastEventCount = { id: null, n: 0 };
 async function loadTranscript(id, quiet = false) {
@@ -413,7 +421,8 @@ async function loadTranscript(id, quiet = false) {
   const isChild = Boolean(s.parentId);
   if (parent?.children?.length && (cachedResults.id !== parent.id || parent.children.some((c) => c.phase === 'running'))) await refreshResults(parent);
   const events = await (await fetch(`/api/sessions/${id}/events`)).json();
-  const key = id + ':' + events.length + ':' + (s.updatedAt ?? 0) + ':' + (parent?.children ?? []).map((c) => c.phase).join(',') + ':' + Math.floor(Date.now() / 5000);
+  const termOpenKey = Boolean(s.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
+  const key = id + ':' + events.length + ':' + (s.updatedAt ?? 0) + ':' + (parent?.children ?? []).map((c) => c.phase).join(',') + ':' + termOpenKey + ':' + Math.floor(Date.now() / 5000);
   if (quiet && key === lastTranscriptKey) return;
   lastTranscriptKey = key;
 
@@ -442,9 +451,18 @@ async function loadTranscript(id, quiet = false) {
     <div class="section-title">its own conversation: what it read, ran and wrote to get there</div>`);
   } else if (parent.children?.length) {
     html.push(agentsBoard(parent));
-    html.push('<div class="section-title">main conversation</div>');
   }
-  for (const ev of events) {
+  // With the terminal open you are already reading the conversation there: keep this column to what the
+  // terminal does not show (subagents, tokens) unless you ask for it.
+  const terminalOpen = Boolean(s.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
+  const showConvo = isChild || !terminalOpen || convoShown.has(id);
+  if (!isChild) {
+    html.push(showConvo
+      ? `<div class="section-title">conversation${terminalOpen ? ` · <a href="#" data-hide-convo="${id}">hide, it is in the terminal</a>` : ''}</div>`
+      : `<div class="section-title">conversation is in the terminal · <a href="#" data-show-convo="${id}">show here too</a></div>`);
+  }
+  for (const ev of showConvo ? events : []) {
+    if (!isChild && ev.kind === 'tool_call' && ev.name === 'subagent' && parent.children?.length) continue; // already in the board
     if (ev.kind === 'user') html.push(`<div class="msg user"><div class="who">${isChild ? 'task from parent' : 'you'}</div><div class="text">${esc(ev.text)}</div></div>`);
     else if (ev.kind === 'assistant') html.push(`<div class="msg assistant"><div class="who">${isChild ? (s.subagent?.name ? '🧵 ' + esc(s.subagent.name) : 'subagent') : 'fx'}</div><div class="text">${esc(ev.text)}</div></div>`);
     else if (ev.kind === 'tool_call') {

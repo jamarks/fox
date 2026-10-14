@@ -142,3 +142,4 @@ a.agent:hover { border-color: var(--accent); }
 .agent.selected { border-color: var(--accent); background: var(--bg); }
 .term-wrap.warming .xterm { visibility: hidden; }
 .term-wrap:not(.active) .xterm { visibility: hidden; }
+.section-title a { color: var(--accent); text-decoration: none; text-transform: none; letter-spacing: 0; }
