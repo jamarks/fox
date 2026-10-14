@@ -12,6 +12,7 @@ import { WebSocketServer } from 'ws';
 import * as pty from 'node-pty';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createSearchIndex } from './search.mjs';
 const execFileP = promisify(execFile);
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -31,6 +32,7 @@ async function saveState(st) {
   await mkdir(STATE_DIR, { recursive: true });
   await writeFile(STATE_FILE, JSON.stringify(st, null, 2));
 }
+const searchSessions = createSearchIndex(SESSIONS_DIR, loadState);
 
 // ---------- sesiones ----------
 async function readJson(path, fallback = null) {
@@ -267,6 +269,7 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
   try {
     if (p === '/api/sessions') return send(res, 200, await listSessions());
+    if (p === '/api/search') return send(res, 200, await searchSessions(url.searchParams.get('q')));
     if (p === '/api/overview') {
       const [sessions, terminals] = await Promise.all([listSessions(), listTerminals()]);
       const repos = {};

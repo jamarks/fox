@@ -115,11 +115,12 @@ function renderSessions() {
   }
   const root = $('#session-groups');
   root.innerHTML = '';
-  // Manual order (drag the project header) wins; groups you never dragged go after, busiest first.
+  // Stable order: manual order (drag the project header) first, then alphabetical. Never by activity,
+  // so nothing jumps around when you pick a session; the state dots say what is busy.
   const rank = (ws) => { const i = groupOrder.indexOf(ws); return i < 0 ? Infinity : i; };
-  const ordered = [...groups.entries()].sort((a, b) => (rank(a[0]) - rank(b[0])) || (Math.min(...a[1].map((s) => STATE_ORDER[s.state])) - Math.min(...b[1].map((s) => STATE_ORDER[s.state]))));
+  const ordered = [...groups.entries()].sort((a, b) => (rank(a[0]) - rank(b[0])) || a[0].localeCompare(b[0]));
   for (const [ws, list] of ordered) {
-    list.sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    list.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)); // newest first, and it stays put
     const g = document.createElement('div');
     const isCollapsed = collapsed.has(ws);
     g.className = 'group' + (isCollapsed ? ' collapsed' : '');
