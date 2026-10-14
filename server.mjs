@@ -256,6 +256,22 @@ const server = http.createServer(async (req, res) => {
       try { return send(res, 200, await createTerminal({ cwd, resume })); }
       catch (err) { return send(res, 500, { error: String(err.stderr || err.message) }); }
     }
+    // Position the real terminal on a text match using tmux copy-mode search. 'again' repeats upward.
+    if (req.method === 'POST' && (m = p.match(/^\/api\/terminals\/([^/]+)\/(search|search-cancel)$/))) {
+      const name = decodeURIComponent(m[1]);
+      if (!name.startsWith(TMUX_PREFIX)) return send(res, 400, { error: 'bad name' });
+      try {
+        if (m[2] === 'search-cancel') { await tmux('send-keys', '-t', name, '-X', 'cancel').catch(() => {}); return send(res, 200, { ok: true }); }
+        const body = JSON.parse(await readBody(req) || '{}');
+        const q = String(body.query ?? '').slice(0, 200);
+        if (!q) return send(res, 400, { error: 'empty query' });
+        await tmux('copy-mode', '-t', name);
+        if (body.again) await tmux('send-keys', '-t', name, '-X', 'search-again');
+        else { await tmux('send-keys', '-t', name, '-X', 'history-bottom'); await tmux('send-keys', '-t', name, '-X', 'search-backward-text', q); }
+        const pos = (await tmux('display', '-p', '-t', name, '#{scroll_position}')).trim();
+        return send(res, 200, { ok: true, scrollPosition: Number(pos) });
+      } catch (err) { return send(res, 500, { error: String(err.stderr || err.message) }); }
+    }
     if (req.method === 'DELETE' && (m = p.match(/^\/api\/terminals\/([^/]+)$/))) {
       return send(res, 200, { ok: await killTerminal(decodeURIComponent(m[1])) });
     }

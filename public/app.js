@@ -191,6 +191,7 @@ async function openSession(id) {
 }
 
 function selectSession(id) {
+  if (state.selected !== id) { $('#search').value = ''; $('#search-done').classList.add('hidden'); }
   state.selected = id;
   renderSessions();
   loadTranscript(id);
@@ -462,6 +463,49 @@ $('#transcript').addEventListener('click', (e) => {
   selectSession(link.dataset.child ?? link.dataset.goto);
 });
 
+// ---------- search ----------
+const terminalOpenFor = (s) => Boolean(s?.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
+function renderSearch(s, events, q, terminalOpen) {
+  const hits = [];
+  events.forEach((ev, i) => {
+    const text = ev.kind === 'user' || ev.kind === 'assistant' ? ev.text : ev.kind === 'tool_call' ? `${ev.name} ${briefArgs(ev.args)} ${ev.result?.preview ?? ''}` : '';
+    const at = text.toLowerCase().indexOf(q);
+    if (at < 0) return;
+    const start = Math.max(0, at - 60);
+    const snippet = (start > 0 ? '…' : '') + text.slice(start, at) + '<mark>' + esc(text.slice(at, at + q.length)) + '</mark>' + esc(text.slice(at + q.length, at + q.length + 90)) + (text.length > at + q.length + 90 ? '…' : '');
+    hits.push({ i, ev, snippet: esc(text.slice(start, at)) + snippet.slice(esc(text.slice(start, at)).length) });
+  });
+  const who = (ev) => ev.kind === 'user' ? 'you' : ev.kind === 'assistant' ? 'fx' : ev.name;
+  const body = $('#transcript-body');
+  body.innerHTML = `<div class="section-title">${hits.length} match${hits.length === 1 ? '' : 'es'}${terminalOpen ? ' · click one to jump there in the terminal' : ''}</div>` +
+    (hits.map((h) => `<div class="hit" data-hit="${h.i}"><div class="who">${esc(who(h.ev))}</div><div class="snippet">${h.snippet}</div></div>`).join('') || '<p class="muted">Nothing found.</p>');
+  body.dataset.hits = JSON.stringify(hits.map((h) => ({ i: h.i, text: (h.ev.text ?? briefArgs(h.ev.args) ?? '').toString() })));
+}
+async function jumpInTerminal(s, query, again = false) {
+  if (!terminalOpenFor(s)) return;
+  const r = await post(`/api/terminals/${encodeURIComponent(s.terminal)}/search`, { query, again });
+  $('#search-done').classList.remove('hidden');
+  const t = state.tabs.get(s.terminal); if (t) t.term.focus();
+  return r;
+}
+$('#search').addEventListener('input', debounce(() => { lastTranscriptKey = ''; if (state.selected) loadTranscript(state.selected); }, 150));
+$('#search').addEventListener('keydown', (e) => { if (e.key === 'Enter') jumpInTerminal(sessionById(state.selected), $('#search').value.trim()); if (e.key === 'Escape') { $('#search').value = ''; lastTranscriptKey = ''; loadTranscript(state.selected); } });
+$('#search-prev').addEventListener('click', () => jumpInTerminal(sessionById(state.selected), $('#search').value.trim(), true));
+$('#search-done').addEventListener('click', async () => { const s = sessionById(state.selected); if (s?.terminal) await post(`/api/terminals/${encodeURIComponent(s.terminal)}/search-cancel`); $('#search-done').classList.add('hidden'); });
+$('#transcript-body').addEventListener('click', (e) => {
+  const hit = e.target.closest('.hit');
+  if (!hit) return;
+  const s = sessionById(state.selected);
+  const q = $('#search').value.trim();
+  hit.classList.toggle('open');
+  if (hit.classList.contains('open') && !hit.querySelector('.full')) {
+    const hits = JSON.parse($('#transcript-body').dataset.hits || '[]');
+    const h = hits.find((x) => String(x.i) === hit.dataset.hit);
+    if (h) { const d = document.createElement('div'); d.className = 'full'; d.textContent = h.text; hit.appendChild(d); }
+  }
+  jumpInTerminal(s, q);
+});
+
 let lastTranscriptKey = '';
 let lastEventCount = { id: null, n: 0 };
 async function loadTranscript(id, quiet = false) {
@@ -487,6 +531,12 @@ async function loadTranscript(id, quiet = false) {
     <span title="${esc(s.workspace)}">${esc(shortPath(s.workspace))}</span>`;
 
   const html = [];
+  $('#search-row').classList.remove('hidden');
+  const q = $('#search').value.trim().toLowerCase();
+  if (q) {
+    renderSearch(s, events, q, terminalOpenFor(s));
+    return;
+  }
   if (isChild) {
     // Subagent view: what it gave back to the parent first, then how it got there.
     const c = parent.children.find((x) => x.id === id);
