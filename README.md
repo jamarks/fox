@@ -2,8 +2,10 @@
 
 <h1 align="center">fox</h1>
 
-<p align="center"><b>A tiny local cockpit for the <a href="https://fx.sh">fx</a> coding agent.</b><br/>
+<p align="center"><b>A tiny local cockpit for <a href="https://fx.sh">▲ <i>ƒ</i>x</a>, the coding agent from Vercel Labs.</b><br/>
 Every session, every subagent, one terminal that never dies. Nothing leaves your machine.</p>
+
+<p align="center"><sub>Independent project, not affiliated with Vercel. fx is <a href="https://github.com/vercel-labs/fx">vercel-labs/fx</a>, Apache-2.0.</sub></p>
 
 <p align="center"><img src="docs/screenshot.png" alt="fox: sessions grouped by project on the left, the real fx terminal in the middle, subagents and search on the right" /></p>
 
