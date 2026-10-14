@@ -170,3 +170,9 @@ button.wide:disabled { opacity: .6; cursor: wait; }
 .hit .snippet { font-size: 12px; } .hit mark { background: rgba(224, 175, 104, .35); color: var(--text); border-radius: 2px; }
 .hit .full { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); white-space: pre-wrap; font-size: 12px; color: var(--text); }
 #search-row label.toggle { flex: none; white-space: nowrap; }
+.group .git { display: flex; align-items: center; gap: 8px; padding: 0 12px 6px 28px; font-size: 11px; color: var(--muted); }
+.group .git a, .group .git > span { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); text-decoration: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group .git a:hover { color: var(--accent); }
+.group .git .branch { font-family: var(--mono); color: var(--text); opacity: .8; }
+.group .git .branch::before { content: ''; }
+.group .git .changed { color: var(--warn); font-family: var(--mono); }

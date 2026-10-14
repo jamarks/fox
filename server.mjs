@@ -172,6 +172,32 @@ async function readArtifact(id, name) {
   try { return await readFile(join(SESSIONS_DIR, id, 'tool-results', name), 'utf8'); } catch { return null; }
 }
 
+// ---------- git info por workspace (cacheado) ----------
+const gitCache = new Map(); // ws -> { at, info }
+async function gitInfo(ws) {
+  const hit = gitCache.get(ws);
+  if (hit && Date.now() - hit.at < 20000) return hit.info;
+  let info = null;
+  try {
+    const run = (args) => execFileP('git', ['-C', ws, ...args], { timeout: 4000 }).then((r) => r.stdout.trim());
+    const top = await run(['rev-parse', '--show-toplevel']).catch(() => null);
+    if (top) {
+      const [branch, remote, status] = await Promise.all([
+        run(['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => ''),
+        run(['remote', 'get-url', 'origin']).catch(() => ''),
+        run(['status', '--porcelain']).catch(() => ''),
+      ]);
+      let url = null, repo = null;
+      const m = remote.match(/github\.com[:/]([^/]+\/[^/.]+)(\.git)?$/);
+      if (m) { repo = m[1]; url = `https://github.com/${m[1]}`; }
+      else if (/^https?:\/\//.test(remote)) { url = remote.replace(/\.git$/, ''); repo = url.replace(/^https?:\/\//, ''); }
+      info = { root: top, branch, remote, repo, url, changed: status ? status.split('\n').filter(Boolean).length : 0 };
+    }
+  } catch {}
+  gitCache.set(ws, { at: Date.now(), info });
+  return info;
+}
+
 // ---------- HTTP ----------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.map': 'application/json', '.svg': 'image/svg+xml' };
 
@@ -202,6 +228,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/sessions') return send(res, 200, await listSessions());
     if (p === '/api/overview') {
       const [sessions, terminals] = await Promise.all([listSessions(), listTerminals()]);
+      const repos = {};
+      await Promise.all([...new Set(sessions.map((s) => s.workspace))].map(async (ws) => { repos[ws] = await gitInfo(ws); }));
       const byResume = new Map(terminals.filter((t) => t.resume).map((t) => [t.resume, t]));
       const byId = new Map(sessions.map((s) => [s.id, s]));
       for (const s of sessions) {
@@ -219,7 +247,7 @@ const server = http.createServer(async (req, res) => {
           if (!child.firstPrompt && c.task) child.firstPrompt = c.task;
         }
       }
-      return send(res, 200, { sessions, terminals });
+      return send(res, 200, { sessions, terminals, repos });
     }
     let m;
     if ((m = p.match(/^\/api\/sessions\/([^/]+)\/events$/))) {
