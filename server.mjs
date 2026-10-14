@@ -13,6 +13,7 @@ import * as pty from 'node-pty';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createSearchIndex } from './search.mjs';
+import { latestCompletedReply } from './inbox.mjs';
 import { TOOLS, isInstalled, addArgs } from './tools.mjs';
 const execFileP = promisify(execFile);
 
@@ -29,8 +30,7 @@ const STATE_FILE = join(STATE_DIR, 'state.json');
 // Estado del panel: qué sesiones están archivadas y nombres propios. Nunca se escribe en ~/.fx.
 async function loadState() {
   const st = await readJson(STATE_FILE, {});
-  const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
-  return { archived: Array.isArray(st.archived) ? st.archived : [], names: obj(st.names), toolsSignedIn: obj(st.toolsSignedIn) };
+  return { archived: Array.isArray(st.archived) ? st.archived : [], names: st.names && typeof st.names === 'object' ? st.names : {} };
 }
 async function saveState(st) {
   await mkdir(STATE_DIR, { recursive: true });
@@ -57,8 +57,10 @@ async function listSessions() {
     const snap = usage?.snapshot ?? {};
     let turns = 0;
     let firstPrompt = '';
+    let latestReply = null;
     try {
       const raw = await readFile(join(dir, 'events.jsonl'), 'utf8');
+      latestReply = latestCompletedReply(raw);
       for (const l of raw.split('\n')) {
         if (!l.includes('"user"')) continue;
         turns += 1;
@@ -101,6 +103,7 @@ async function listSessions() {
       customName: st.names[id] ?? null,
       archived: st.archived.includes(id),
       firstPrompt: firstPrompt.replace(/\s+/g, ' ').slice(0, 160),
+      latestReply,
       workspace: meta.workspace_root ?? meta.origin_workspace_root ?? '?',
       provider: meta.provider,
       model: meta.model,
@@ -297,12 +300,7 @@ async function fxMcpConfig() {
 }
 async function listTools() {
   const config = await fxMcpConfig().catch(() => ({}));
-  const st = await loadState();
-  return TOOLS.map((t) => {
-    const installed = isInstalled(t, config);
-    // fx keeps OAuth tokens to itself; fox only remembers that a sign-in it started went through.
-    return { id: t.id, label: t.label, description: t.description, installed, needsSignIn: installed && t.auth === 'oauth' && !st.toolsSignedIn[t.id] };
-  });
+  return TOOLS.map((t) => ({ id: t.id, label: t.label, description: t.description, installed: isInstalled(t, config) }));
 }
 
 // ---------- HTTP ----------
@@ -419,19 +417,13 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { path });
     }
     if (p === '/api/tools' && req.method === 'GET') return send(res, 200, await listTools());
-    // Adds one catalog tool to fx's MCP config, the same as running `fx mcp add` by hand; 'signin' runs
-    // `fx mcp auth NAME --open`, which opens the provider's sign-in page and waits for it.
-    if (req.method === 'POST' && (m = p.match(/^\/api\/tools\/([a-z0-9-]+)\/(add|signin)$/))) {
+    // Adds one catalog tool to fx's MCP config, the same as running `fx mcp add` by hand.
+    if (req.method === 'POST' && (m = p.match(/^\/api\/tools\/([a-z0-9-]+)\/add$/))) {
       if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: 'cross-origin' });
       const tool = TOOLS.find((t) => t.id === m[1]);
       if (!tool) return send(res, 404, { error: 'unknown tool' });
-      try {
-        if (m[2] === 'add') await execFileP(FX_BIN, addArgs(tool), { timeout: 30000 });
-        else {
-          await execFileP(FX_BIN, ['mcp', 'auth', tool.name, '--open'], { timeout: 5 * 60000 });
-          const st = await loadState(); st.toolsSignedIn[tool.id] = true; await saveState(st);
-        }
-      } catch (err) { return send(res, 500, { error: String(err.stderr || err.message).trim() }); }
+      try { await execFileP(FX_BIN, addArgs(tool), { timeout: 30000 }); }
+      catch (err) { return send(res, 500, { error: String(err.stderr || err.message).trim() }); }
       return send(res, 200, await listTools());
     }
     if (p === '/api/models' && req.method === 'GET') return send(res, 200, await getModels());

@@ -50,13 +50,14 @@ Do this in stages, without asking me anything. Stage 1: launch three one-off sub
 
 - **Sessions by project**: grouped by workspace, collapsible, reorderable by drag, numbered.
 - **Live state**: working, waiting or needs input, with an optional 🔔 when an agent finishes.
+- **New replies**: a compact inbox above the projects shows completed answers you have not opened yet; click one to jump to the answer. Existing history starts as read, and read state is saved in this browser.
 - **Provider and model**: `codex` subscription or pay-per-use `▲ gateway`, picked per new session.
 - **Subagents**: grouped by task to compare models; click one for its answer; weak answers flagged.
 - **Files**: what the session wrote, edited or read; preview in place or open with ↗.
 - **One terminal**: fx runs in tmux, so closing the tab or the browser never stops it; pin to keep tabs.
 - **Drop files**: drag images or files onto the terminal to attach them to your next message.
 - **Search everything**: ⌥Space searches names and messages across all sessions.
-- **Tools for fx**: one click in the new-session panel gives fx a browser, Chrome DevTools, current library docs (Context7) or your Vercel account; the catalog lives in `tools.mjs`.
+- **Tools for fx**: one click in the new-session panel gives fx a browser, Chrome DevTools or current library docs (Context7); the catalog lives in `tools.mjs`.
 - **Archive and rename** without touching fx's files.
 - **Git at a glance**: repo, branch and uncommitted files per project.
 - **Keyboard first**: ⌥ shortcuts for sessions, tabs, search, themes and font size; ⌥? lists them.

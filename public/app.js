@@ -83,6 +83,7 @@ async function refresh() {
   detectTransitions();
   renderSessions();
   renderSummary();
+  renderReplyInbox();
   syncTabsWithTerminals();
 }
 
@@ -95,6 +96,53 @@ function detectTransitions() {
     state.prevStates.set(s.id, s.state);
   }
 }
+
+// ---------- unread replies ----------
+let inboxSeen = null;
+function renderReplyInbox() {
+  if (!inboxSeen) {
+    try { inboxSeen = JSON.parse(localStorage.getItem('fox.inbox.seen')); } catch {}
+    if (!inboxSeen || typeof inboxSeen !== 'object' || Array.isArray(inboxSeen)) {
+      // First visit: don't flood the inbox with all the old conversations.
+      inboxSeen = Object.fromEntries(state.sessions.filter((s) => s.latestReply).map((s) => [s.id, s.latestReply.turn]));
+      saveInboxSeen();
+    }
+  }
+  const unread = state.sessions.filter((s) => !s.parentId && !s.archived && s.latestReply && s.latestReply.turn > (inboxSeen[s.id] ?? 0))
+    .sort((a, b) => (b.latestReply.at ?? b.updatedAt ?? 0) - (a.latestReply.at ?? a.updatedAt ?? 0));
+  const root = $('#reply-inbox'), list = $('#reply-inbox-list'), toggle = $('#reply-inbox-toggle');
+  root.classList.toggle('hidden', !unread.length);
+  if (!unread.length) { list.classList.add('hidden'); toggle.setAttribute('aria-expanded', 'false'); return; }
+  $('#reply-inbox-count').textContent = unread.length;
+  $('#reply-inbox-label').textContent = unread.length === 1 ? 'new reply' : 'new replies';
+  list.innerHTML = unread.map((s) => `<button type="button" class="reply-inbox-item" data-reply="${esc(s.id)}">
+    <span class="inbox-title">${esc(displayTitle(s))}<small>${esc(shortPath(s.workspace))} · ${esc(fmtTime(s.latestReply.at))}</small></span>
+    <span class="inbox-excerpt">${esc(s.latestReply.text)}</span>
+  </button>`).join('');
+}
+function saveInboxSeen() { try { localStorage.setItem('fox.inbox.seen', JSON.stringify(inboxSeen)); } catch {} }
+function markReplyRead(id) {
+  const turn = sessionById(id)?.latestReply?.turn;
+  if (!turn || !inboxSeen || turn <= (inboxSeen[id] ?? 0)) return;
+  inboxSeen[id] = turn;
+  saveInboxSeen();
+  renderReplyInbox();
+}
+$('#reply-inbox-toggle').addEventListener('click', () => {
+  const list = $('#reply-inbox-list');
+  list.classList.toggle('hidden');
+  $('#reply-inbox-toggle').setAttribute('aria-expanded', String(!list.classList.contains('hidden')));
+});
+$('#reply-inbox-list').addEventListener('click', (e) => {
+  const item = e.target.closest('[data-reply]');
+  if (!item) return;
+  const s = sessionById(item.dataset.reply);
+  if (!s?.latestReply) return;
+  globalMessage = { id: s.id, index: s.latestReply.messageIndex };
+  convoShown.add(s.id);
+  setTranscript(true);
+  selectSession(s.id); // selecting the result marks it read, without starting fx
+});
 
 // ---------- sidebar ----------
 function renderSummary() {
@@ -259,6 +307,7 @@ async function openSession(id) {
 
 function selectSession(id) {
   state.selected = id;
+  markReplyRead(id);
   renderSessions();
   loadTranscript(id);
   syncUrl();
@@ -1083,24 +1132,19 @@ async function loadTools() {
   const box = $('#ns-tools');
   let tools = [];
   try { tools = await (await fetch('/api/tools')).json(); } catch {}
-  const todo = tools.filter((t) => !t.installed || t.needsSignIn);
-  box.classList.toggle('hidden', !todo.length);
-  box.innerHTML = !todo.length ? '' : `<label class="ns-label">give fx more tools <span class="muted">(added to fx's own config, for every session)</span></label>` +
-    todo.map((t) => `<div class="ns-tool"><div class="ns-tool-text"><b>${esc(t.label)}</b><span class="muted">${esc(t.description)}</span></div>${t.installed ? signInButton(t.id) : `<button type="button" data-add-tool="${t.id}">Add</button>`}</div>`).join('');
+  const missing = tools.filter((t) => !t.installed);
+  box.classList.toggle('hidden', !missing.length);
+  box.innerHTML = !missing.length ? '' : `<label class="ns-label">give fx more tools <span class="muted">(added to fx's own config, for every session)</span></label>` +
+    missing.map((t) => `<div class="ns-tool"><div class="ns-tool-text"><b>${esc(t.label)}</b><span class="muted">${esc(t.description)}</span></div><button type="button" data-add-tool="${t.id}">Add</button></div>`).join('');
 }
-const signInButton = (id) => `<button type="button" data-signin-tool="${id}" title="Opens the sign-in page in your browser">Sign in</button>`;
 $('#ns-tools').addEventListener('click', async (e) => {
-  const btn = e.target.closest('[data-add-tool], [data-signin-tool]');
+  const btn = e.target.closest('[data-add-tool]');
   if (!btn) return;
-  const id = btn.dataset.addTool ?? btn.dataset.signinTool, adding = Boolean(btn.dataset.addTool);
-  const label = btn.textContent;
-  btn.disabled = true; btn.textContent = adding ? 'Adding…' : 'Waiting for sign-in…';
-  const r = await fetch(`/api/tools/${id}/${adding ? 'add' : 'signin'}`, { method: 'POST' });
+  btn.disabled = true; btn.textContent = 'Adding…';
+  const r = await fetch(`/api/tools/${btn.dataset.addTool}/add`, { method: 'POST' });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) { btn.disabled = false; btn.textContent = label; return alert(j.error || (adding ? 'Could not add it' : 'Sign-in did not finish')); }
-  const tool = Array.isArray(j) ? j.find((t) => t.id === id) : null;
-  if (tool?.needsSignIn) { btn.outerHTML = signInButton(id); return; } // added; one more step
-  btn.replaceWith(Object.assign(document.createElement('span'), { className: 'ns-tool-done', textContent: adding ? 'Added · new sessions have it' : 'Signed in' }));
+  if (!r.ok) { btn.disabled = false; btn.textContent = 'Add'; return alert(j.error || 'Could not add it'); }
+  btn.replaceWith(Object.assign(document.createElement('span'), { className: 'ns-tool-done', textContent: 'Added · new sessions have it' }));
 });
 function updateNsBadge() { const v = $('#ns-model').value; $('#ns-badge').innerHTML = modelBadge(v ? v.split('|')[1] : modelsCatalog?.default?.model); }
 $('#ns-model').addEventListener('change', updateNsBadge);

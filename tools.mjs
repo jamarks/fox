@@ -1,5 +1,5 @@
 // Optional tools fox can give fx: MCP servers added to fx's own config with `fx mcp add`, only when the
-// user clicks. Add an entry here to offer another one. `auth: 'oauth'` adds a "Sign in" step.
+// user clicks. Add an entry here to offer another one.
 export const TOOLS = [
   {
     id: 'browser',
@@ -24,15 +24,6 @@ export const TOOLS = [
     description: 'Current docs and examples for libraries and frameworks (Context7), so fx does not guess APIs. No account needed.',
     url: 'https://mcp.context7.com/mcp',
     match: /context7/,
-  },
-  {
-    id: 'vercel',
-    name: 'vercel',
-    label: 'Vercel',
-    description: 'Your Vercel projects, deployments and build logs. Needs a sign-in with your Vercel account.',
-    url: 'https://mcp.vercel.com',
-    auth: 'oauth',
-    match: /mcp\.vercel\.com/,
   },
 ];
 
