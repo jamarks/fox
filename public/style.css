@@ -111,7 +111,7 @@ label.toggle { font-weight: 400; color: var(--muted); font-size: 11px; display: 
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 .session.state-needs_input { border-left-color: var(--err); }
 .session.state-ready.active, .session.state-working.active { border-left-color: var(--accent); }
-#bell { opacity: .4; } #bell.on { opacity: 1; }
+#bell { color: var(--muted); } #bell .bell-on, #bell.on .bell-off { display: none; } #bell.on .bell-on { display: block; }
 
 /* subagents */
 .children { margin: 6px 0 0 6px; border-left: 1px solid var(--border); padding-left: 8px; display: flex; flex-direction: column; gap: 3px; }

@@ -49,7 +49,7 @@ Do this in stages, without asking me anything. Stage 1: launch three one-off sub
 ## What it does
 
 - **Sessions by project**: grouped by workspace, collapsible, reorderable by drag, numbered.
-- **Live state**: working, waiting or needs input, with an optional 🔔 when an agent finishes.
+- **Live state**: working, waiting or needs input, with an optional bell (sound + notification) when an agent finishes.
 - **New replies**: a compact inbox above the projects shows completed answers you have not opened yet; click one to jump to the answer. Existing history starts as read, and read state is saved in this browser.
 - **Provider and model**: `codex` subscription or pay-per-use `▲ gateway`, picked per new session.
 - **Subagents**: grouped by task to compare models; click one for its answer; weak answers flagged.
