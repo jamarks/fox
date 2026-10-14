@@ -95,3 +95,23 @@ label.toggle { font-weight: 400; color: var(--muted); font-size: 11px; display: 
 .session.state-needs_input { border-left-color: var(--err); }
 .session.state-ready.active, .session.state-working.active { border-left-color: var(--accent); }
 #bell { opacity: .4; } #bell.on { opacity: 1; }
+
+/* subagents */
+.children { margin: 6px 0 0 6px; border-left: 1px solid var(--border); padding-left: 8px; display: flex; flex-direction: column; gap: 3px; }
+.child { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+.child:hover, .child.active { background: var(--panel-2); color: var(--text); }
+.child .clabel { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.child .cmeta { flex: none; display: flex; gap: 6px; } .child .err, .agent-result.err { color: var(--err); }
+.st.done i { background: var(--border); } .st.done { color: var(--muted); }
+#board:not(:empty) { padding: 10px 12px; border-bottom: 1px solid var(--border); max-height: 45%; overflow-y: auto; }
+.board { display: flex; flex-direction: column; gap: 6px; }
+.board-title, .board-note { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 2px; }
+.board-note a { color: var(--accent); text-decoration: none; text-transform: none; letter-spacing: 0; }
+.agent { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--panel-2); cursor: pointer; border-left-width: 3px; }
+.agent.working { border-left-color: var(--warn); } .agent.ready { border-left-color: var(--ok); } .agent.done { border-left-color: var(--border); }
+.agent.selected { outline: 1px solid var(--accent); }
+.agent-head { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.agent-name { font-weight: 600; color: var(--text); } .agent-elapsed { margin-left: auto; color: var(--muted); font-family: var(--mono); }
+.agent-task { margin-top: 4px; font-size: 12px; }
+.agent-result { margin-top: 6px; font-size: 11px; color: var(--muted); white-space: pre-wrap; max-height: 120px; overflow: auto; border-top: 1px dashed var(--border); padding-top: 6px; }
+.agent-meta { margin-top: 4px; font-size: 10px; color: var(--muted); font-family: var(--mono); }

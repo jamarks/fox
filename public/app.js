@@ -21,13 +21,13 @@ const briefArgs = (args) => {
   return typeof v === 'string' ? v : JSON.stringify(v);
 };
 const sessionById = (id) => state.sessions.find((s) => s.id === id);
-const displayTitle = (s) => s.customName || s.title;
+const displayTitle = (s) => s.customName || (s.subagent ? (s.subagent.name ? `🧵 ${s.subagent.name}` : (s.subagent.task ?? s.firstPrompt ?? '').slice(0, 60) || s.title) : s.title);
 const post = (path, body, method = 'POST') => fetch(path, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json());
 const showArchived = { value: false };
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
-const STATE_LABEL = { working: 'working', ready: 'waiting', needs_input: 'needs input', external: 'other terminal', idle: '' };
-const STATE_ORDER = { needs_input: 0, ready: 1, working: 2, external: 3, idle: 4 };
+const STATE_LABEL = { working: 'working', ready: 'waiting', needs_input: 'needs input', external: 'other terminal', done: 'done', idle: '' };
+const STATE_ORDER = { needs_input: 0, ready: 1, working: 2, external: 3, done: 4, idle: 5 };
 
 // ---------- data ----------
 async function refresh() {
@@ -58,12 +58,14 @@ function renderSummary() {
   if (count('needs_input')) parts.push(`<span class="st needs_input">${count('needs_input')} need input</span>`);
   if (count('ready')) parts.push(`<span class="st ready">${count('ready')} waiting</span>`);
   if (count('working')) parts.push(`<span class="st working">${count('working')} working</span>`);
+  const subs = state.sessions.filter((s) => s.subagent?.phase === 'running').length;
+  if (subs) parts.push(`<span class="st working">🧵 ${subs} subagent${subs === 1 ? '' : 's'}</span>`);
   $('#summary').innerHTML = parts.join('') || '<span class="muted">no agents running</span>';
 }
 
 function renderSessions() {
-  const active = state.sessions.filter((s) => !s.archived);
-  const archived = state.sessions.filter((s) => s.archived);
+  const active = state.sessions.filter((s) => !s.archived && !s.parentId);
+  const archived = state.sessions.filter((s) => s.archived && !s.parentId);
   const groups = new Map();
   for (const s of active) {
     if (!groups.has(s.workspace)) groups.set(s.workspace, []);
@@ -112,9 +114,24 @@ function sessionCard(s) {
       <span>${fmtTokens(s.usage.input + s.usage.output)} tok</span>
       ${s.usage.cost ? `<span>$${s.usage.cost.toFixed(4)}</span>` : ''}
       <span>${fmtTime(s.updatedAt)}</span>
-      ${s.subagentChild ? '<span class="badge sub">subagent</span>' : ''}
-    </div>`;
+    </div>
+    ${childrenHtml(s)}`;
   return el;
+}
+
+function childrenHtml(parent) {
+  if (!parent.children?.length) return '';
+  const rows = parent.children.map((c) => {
+    const child = sessionById(c.id);
+    const st = child?.state ?? (c.phase === 'running' ? 'working' : c.phase === 'idle' ? 'ready' : 'done');
+    const label = c.name ? `<b>${esc(c.name)}</b>` : esc((c.task ?? child?.firstPrompt ?? c.id).slice(0, 70));
+    const tokN = child ? child.usage.input + child.usage.output : 0;
+    const tok = tokN ? fmtTokens(tokN) + ' tok' : '';
+    return `<div class="child ${c.id === state.selected ? 'active' : ''}" data-child="${c.id}" title="${esc(c.task ?? '')}">
+      <span class="st ${st}"><i></i></span><span class="clabel">${label}</span><span class="cmeta">${c.failure ? '<span class="err">failed</span>' : ''}${tok}</span>
+    </div>`;
+  });
+  return `<div class="children">${rows.join('')}</div>`;
 }
 
 $('#session-groups').addEventListener('click', async (e) => {
@@ -136,6 +153,8 @@ $('#session-groups').addEventListener('click', async (e) => {
   }
   if (d.unarchive) { await post(`/api/sessions/${d.unarchive}/unarchive`); return refresh(); }
   if (e.target.closest('[data-toggle-archived]')) { showArchived.value = !showArchived.value; return renderSessions(); }
+  const child = e.target.closest('[data-child]');
+  if (child) { e.stopPropagation(); setTranscript(true); return selectSession(child.dataset.child); }
   const card = e.target.closest('.session');
   if (card) openSession(card.dataset.id);
 });
@@ -310,17 +329,18 @@ try { state.sound = localStorage.getItem('fx-panel.sound') === '1'; $('#bell').c
 let lastTranscriptKey = '';
 async function loadTranscript(id, quiet = false) {
   const s = sessionById(id);
+  const parent = s?.parentId ? sessionById(s.parentId) : s;
+  if (parent?.children?.length && (cachedResults.id !== parent.id || parent.children.some((c) => c.phase === 'running'))) await refreshResults(parent);
   const events = await (await fetch(`/api/sessions/${id}/events`)).json();
-  const key = id + ':' + events.length + ':' + (s?.updatedAt ?? 0);
+  const key = id + ':' + events.length + ':' + (s?.updatedAt ?? 0) + ':' + (parent?.children ?? []).map((c) => c.phase).join(',') + ':' + Math.floor(Date.now() / 5000);
   if (quiet && key === lastTranscriptKey) return;
   lastTranscriptKey = key;
   $('#transcript-title').textContent = s ? displayTitle(s) : id;
   $('#transcript-meta').innerHTML = s ? `
     <span>${esc(s.provider)} / ${esc(s.model)}</span>
-    <span>${fmtTokens(s.usage.input)} in · ${fmtTokens(s.usage.output)} out · ${fmtTokens(s.usage.cacheRead)} cache</span>
-    <span>${s.usage.cost ? '$' + s.usage.cost.toFixed(4) : 'subscription'}</span>
-    <span>${(s.usage.wallMs / 1000).toFixed(0)}s</span>
+    ${s.usage.input + s.usage.output ? `<span>${fmtTokens(s.usage.input)} in · ${fmtTokens(s.usage.output)} out · ${fmtTokens(s.usage.cacheRead)} cache</span><span>${s.usage.cost ? '$' + s.usage.cost.toFixed(4) : 'subscription'}</span><span>${(s.usage.wallMs / 1000).toFixed(0)}s</span>` : '<span>tokens billed to parent</span>'}
     <span title="${esc(s.workspace)}">${esc(shortPath(s.workspace))}</span>` : '';
+  $('#board').innerHTML = agentsBoard(s);
   const html = [];
   for (const ev of events) {
     if (ev.kind === 'user') html.push(`<div class="msg user"><div class="who">you</div><div class="text">${esc(ev.text)}</div></div>`);
@@ -341,6 +361,52 @@ async function loadTranscript(id, quiet = false) {
   body.innerHTML = html.join('') || '<p class="muted">Empty session.</p>';
   if ($('#follow').checked) body.scrollTop = body.scrollHeight;
 }
+
+// Tablero: una tarjeta por subagente del padre (o del padre del hijo seleccionado), con fase en vivo.
+function agentsBoard(s) {
+  if (!s) return '';
+  const parent = s.parentId ? sessionById(s.parentId) : s;
+  if (!parent?.children?.length) return s.parentId ? `<div class="board-note">subagent of <a href="#" data-goto="${parent?.id ?? ''}">${esc(parent ? displayTitle(parent) : s.parentId)}</a></div>` : '';
+  const results = resultsByTask(parent);
+  const cards = parent.children.map((c) => {
+    const child = sessionById(c.id);
+    const st = child?.state ?? 'done';
+    const elapsed = c.phase === 'running' && c.startedAt ? Math.round((Date.now() - c.startedAt) / 1000) + 's' : child ? Math.round(child.usage.wallMs / 1000) + 's' : '';
+    const res = results.get(c.task ?? child?.firstPrompt ?? '');
+    return `<div class="agent ${st} ${c.id === s.id ? 'selected' : ''}" data-child="${c.id}">
+      <div class="agent-head"><span class="st ${st}"><i></i>${STATE_LABEL[st] || st}</span><span class="agent-name">${c.name ? '🧵 ' + esc(c.name) : 'one-off'}</span><span class="agent-elapsed">${elapsed}</span></div>
+      <div class="agent-task">${esc(c.task ?? child?.firstPrompt ?? '')}</div>
+      ${res ? `<div class="agent-result">${esc(res)}</div>` : ''}
+      ${c.failure ? `<div class="agent-result err">${esc(JSON.stringify(c.failure))}</div>` : ''}
+      ${child ? `<div class="agent-meta">${child.turns} turn${child.turns === 1 ? '' : 's'}${child.usage.input + child.usage.output ? ' · ' + fmtTokens(child.usage.input + child.usage.output) + ' tok' : ''}</div>` : ''}
+    </div>`;
+  });
+  return `<div class="board"><div class="board-title">${esc(displayTitle(parent))} → ${parent.children.length} subagent${parent.children.length === 1 ? '' : 's'}</div>${cards.join('')}</div>`;
+}
+
+// El padre guarda el resultado de cada subagente como tool_result; lo enlazamos por el texto de la tarea.
+let cachedResults = { id: null, map: new Map() };
+function resultsByTask(parent) {
+  return cachedResults.id === parent.id ? cachedResults.map : new Map();
+}
+async function refreshResults(parent) {
+  if (!parent?.children?.length) return;
+  const events = await (await fetch(`/api/sessions/${parent.id}/events`)).json();
+  const map = new Map();
+  for (const ev of events) {
+    if (ev.kind !== 'tool_call' || ev.name !== 'subagent' || !ev.result) continue;
+    const task = ev.args?.request?.task ?? ev.args?.request?.message ?? '';
+    let text = ev.result.preview;
+    try { const j = JSON.parse(text); text = j.result ?? text; } catch {}
+    if (task) map.set(task, text);
+  }
+  cachedResults = { id: parent.id, map };
+}
+
+$('#board').addEventListener('click', (e) => {
+  const goto = e.target.closest('[data-goto]'); if (goto) { e.preventDefault(); return selectSession(goto.dataset.goto); }
+  const card = e.target.closest('.agent[data-child]'); if (card) selectSession(card.dataset.child);
+});
 
 const transcriptToggle = $('#toggle-transcript');
 function setTranscript(visible) {

@@ -59,6 +59,19 @@ async function listSessions() {
         if (!firstPrompt) { try { firstPrompt = JSON.parse(l).event?.user?.text ?? ''; } catch {} }
       }
     } catch {}
+    // Subagentes: el padre lista hijos en subagent/children.json; el hijo apunta al padre en subagent/owner.json.
+    const owner = await readJson(join(dir, 'subagent', 'owner.json'));
+    const childrenFile = await readJson(join(dir, 'subagent', 'children.json'));
+    const children = (childrenFile?.children ?? []).map((c) => ({
+      id: c.id,
+      kind: c.kind,
+      name: c.persistent?.agent ?? null,
+      phase: c.phase, // running | idle | finished
+      task: c.active?.message ?? null,
+      startedAt: c.active?.created_at_ms ?? null,
+      outcome: c.last_outcome ?? null,
+      failure: c.last_failure ?? null,
+    }));
     let lastKind = null;
     try {
       const raw = await readFile(join(dir, 'events.jsonl'), 'utf8');
@@ -68,6 +81,8 @@ async function listSessions() {
     sessions.push({
       id,
       lastKind,
+      parentId: owner?.parent_id ?? null,
+      children,
       title: meta.title ?? '(untitled)',
       customName: st.names[id] ?? null,
       archived: st.archived.includes(id),
@@ -188,10 +203,21 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/overview') {
       const [sessions, terminals] = await Promise.all([listSessions(), listTerminals()]);
       const byResume = new Map(terminals.filter((t) => t.resume).map((t) => [t.resume, t]));
+      const byId = new Map(sessions.map((s) => [s.id, s]));
       for (const s of sessions) {
         const t = byResume.get(s.id);
         s.terminal = t ? t.name : null;
         s.state = t ? t.activity : (s.live ? 'external' : 'idle');
+      }
+      // Los hijos no tienen terminal propia: su estado sale de children.json del padre.
+      for (const s of sessions) {
+        for (const c of s.children) {
+          const child = byId.get(c.id);
+          if (!child) continue;
+          child.subagent = { ...c, parentId: s.id };
+          child.state = c.phase === 'running' ? 'working' : c.phase === 'idle' ? 'ready' : 'done';
+          if (!child.firstPrompt && c.task) child.firstPrompt = c.task;
+        }
       }
       return send(res, 200, { sessions, terminals });
     }
