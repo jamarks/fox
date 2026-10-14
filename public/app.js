@@ -819,7 +819,7 @@ async function loadModels(force = false) {
   sel.innerHTML = `<option value="">fx default${modelsCatalog.default?.model ? ` (${esc(modelsCatalog.default.model)})` : ''}</option>`;
   for (const p of modelsCatalog.providers ?? []) {
     const g = document.createElement('optgroup'); g.label = p.label;
-    for (const id of p.models) { const o = document.createElement('option'); o.value = `${p.id}|${id}`; o.textContent = id; g.appendChild(o); }
+    for (const id of [...p.models].sort((x, y) => x.localeCompare(y, 'en', { numeric: true }))) { const o = document.createElement('option'); o.value = `${p.id}|${id}`; o.textContent = id; g.appendChild(o); }
     sel.appendChild(g);
   }
   try { const last = localStorage.getItem('fox.lastModel'); if (last && [...sel.options].some((o) => o.value === last)) sel.value = last; } catch {}
