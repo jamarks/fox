@@ -296,3 +296,9 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 .agent-note { margin-top: 4px; padding-left: 21px; font-size: 11px; color: var(--muted); font-style: italic; }
 .board .agent.selected { border-color: var(--accent); }
 .files + .board { margin-top: 18px; }
+a.section-title.fold { display: block; text-decoration: none; cursor: pointer; }
+a.section-title.fold::before { content: '▾'; display: inline-block; width: 12px; transition: transform .15s; }
+a.section-title.fold.closed::before { transform: rotate(-90deg); }
+a.section-title.fold:hover { color: var(--text); }
+.fold-n { margin-left: 4px; opacity: .8; }
+.section-title.fold.closed + .board { margin-top: 14px; }

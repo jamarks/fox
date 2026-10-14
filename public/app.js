@@ -641,6 +641,8 @@ const convoShown = new Set();
 
 // ---------- files the session touched ----------
 const expandedFiles = new Set(), readsShown = new Set(), fileCache = new Map();
+let filesCollapsed = false;
+try { filesCollapsed = localStorage.getItem('fox.filesCollapsed') === '1'; } catch {}
 const FILE_LABEL = { write: 'wrote', edit: 'edited', mention: 'mentioned', read: 'read' };
 function fileRow(f) {
   const open = expandedFiles.has(f.path);
@@ -657,7 +659,9 @@ function filesSection(id, files) {
   if (!files?.length) return '';
   const main = files.filter((f) => f.action !== 'read'), reads = files.filter((f) => f.action === 'read');
   const showReads = readsShown.has(id) || !main.length;
-  return `<div class="section-title">files</div><div class="files">${main.map(fileRow).join('')}
+  const head = `<a href="#" class="section-title fold ${filesCollapsed ? 'closed' : ''}" data-toggle-files>files <span class="fold-n">${files.length}</span></a>`;
+  if (filesCollapsed) return head;
+  return `${head}<div class="files">${main.map(fileRow).join('')}
     ${reads.length ? (showReads ? reads.map(fileRow).join('') + (main.length ? `<a href="#" class="files-more" data-toggle-reads="${id}">hide read files</a>` : '') : `<a href="#" class="files-more" data-toggle-reads="${id}">${reads.length} read</a>`) : ''}</div>`;
 }
 async function toggleFile(path) {
@@ -674,6 +678,11 @@ async function toggleFile(path) {
 $('#transcript').addEventListener('click', (e) => {
   const opener = e.target.closest('[data-open-file]');
   if (opener) { e.preventDefault(); return post(`/api/sessions/${state.selected}/open-file`, { path: opener.dataset.openFile }); }
+  if (e.target.closest('[data-toggle-files]')) {
+    e.preventDefault(); filesCollapsed = !filesCollapsed;
+    try { localStorage.setItem('fox.filesCollapsed', filesCollapsed ? '1' : '0'); } catch {}
+    lastTranscriptKey = ''; return loadTranscript(state.selected, true);
+  }
   const reads = e.target.closest('[data-toggle-reads]');
   if (reads) { e.preventDefault(); const id = reads.dataset.toggleReads; readsShown.has(id) ? readsShown.delete(id) : readsShown.add(id); lastTranscriptKey = ''; return loadTranscript(id, true); }
   const file = e.target.closest('[data-file]');
