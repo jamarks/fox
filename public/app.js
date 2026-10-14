@@ -817,10 +817,21 @@ async function loadModels(force = false) {
   modelsCatalog = await (await fetch(force ? '/api/models/refresh' : '/api/models', { method: force ? 'POST' : 'GET' })).json();
   const sel = $('#ns-model');
   sel.innerHTML = `<option value="">fx default${modelsCatalog.default?.model ? ` (${esc(modelsCatalog.default.model)})` : ''}</option>`;
+  // One group per provider; inside the Gateway, one sub-group per vendor so Grok sits under xAI, not under "s" for spacexai.
+  const cmp = (x, y) => x.localeCompare(y, 'en', { numeric: true });
   for (const p of modelsCatalog.providers ?? []) {
-    const g = document.createElement('optgroup'); g.label = p.label;
-    for (const id of [...p.models].sort((x, y) => x.localeCompare(y, 'en', { numeric: true }))) { const o = document.createElement('option'); o.value = `${p.id}|${id}`; o.textContent = id; g.appendChild(o); }
-    sel.appendChild(g);
+    const byVendor = new Map();
+    for (const id of p.models) {
+      const v = vendorOf(id);
+      const key = p.id === 'gateway' ? (v ? v[3] : (id.split('/')[0] || 'other')) : p.label;
+      if (!byVendor.has(key)) byVendor.set(key, []);
+      byVendor.get(key).push(id);
+    }
+    for (const [vendor, ids] of [...byVendor.entries()].sort((a, b) => cmp(a[0], b[0]))) {
+      const g = document.createElement('optgroup'); g.label = p.id === 'gateway' ? `${p.label} · ${vendor}` : p.label;
+      for (const id of ids.sort(cmp)) { const o = document.createElement('option'); o.value = `${p.id}|${id}`; o.textContent = p.id === 'gateway' ? modelShort(id) : id; g.appendChild(o); }
+      sel.appendChild(g);
+    }
   }
   try { const last = localStorage.getItem('fox.lastModel'); if (last && [...sel.options].some((o) => o.value === last)) sel.value = last; } catch {}
   updateNsBadge();
