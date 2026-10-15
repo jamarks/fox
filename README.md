@@ -8,10 +8,10 @@ Every session, every subagent, one terminal that never dies. Nothing leaves your
 <p align="center"><sub>Independent project, not affiliated with Vercel. fx is <a href="https://github.com/vercel-labs/fx">vercel-labs/fx</a>, Apache-2.0.</sub></p>
 
 ```bash
-npm install -g github:jamarks/fox && fox
+curl -fsSL https://raw.githubusercontent.com/jamarks/fox/main/setup.sh | bash
 ```
 
-<p align="center"><sub>Needs Node 20+, <a href="https://fx.sh">fx</a> and tmux (<code>brew install tmux</code>). Opens http://127.0.0.1:4848. Details in <a href="#install-and-run">Install and run</a>.</sub></p>
+<p align="center"><sub>Checks Node 20+, tmux and <a href="https://fx.sh">fx</a> (offers to install the last two), installs fox and opens http://127.0.0.1:4848. Details in <a href="#install-and-run">Install and run</a>.</sub></p>
 
 <p align="center"><sub>Optional: give fx more tools (a browser, Chrome DevTools, library docs, Vercel) with one click from the new-session panel. See <a href="#tools-for-fx">Tools for fx</a>.</sub></p>
 
@@ -81,7 +81,13 @@ To offer another one, add an entry to `tools.mjs`.
 
 You need Node 20+, [fx](https://fx.sh) and tmux (`brew install tmux`).
 
-Install from GitHub and run in one command:
+One command checks what is missing, installs fox and starts it ([setup.sh](setup.sh); `FOX_NO_START=1` only installs):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jamarks/fox/main/setup.sh | bash
+```
+
+Or with npm, if Node, tmux and fx are already there:
 
 ```bash
 npm install -g github:jamarks/fox && fox

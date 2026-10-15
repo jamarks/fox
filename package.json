@@ -25,7 +25,7 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper",
+    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",
     "test": "node --test 'tests/**/*.test.mjs'"
   },
   "dependencies": {
