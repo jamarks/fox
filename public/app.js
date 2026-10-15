@@ -31,6 +31,11 @@ const briefArgs = (args) => {
 };
 const sessionById = (id) => state.sessions.find((s) => s.id === id);
 const displayTitle = (s) => s.customName || (s.subagent ? (s.subagent.name ? s.subagent.name : (s.subagent.task ?? s.firstPrompt ?? '').slice(0, 60) || s.title) : s.title);
+function updatePageTitle() {
+  const viewingSession = !mobileLayout.matches || document.body.dataset.mobileView !== 'sessions';
+  const name = viewingSession && sessionById(state.selected) ? displayTitle(sessionById(state.selected))?.trim() : '';
+  document.title = name ? `${name} · fox` : 'fox';
+}
 const post = (path, body, method = 'POST') => fetch(path, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json());
 const showArchived = { value: false };
 let groupOrder = [];
@@ -80,6 +85,7 @@ async function refresh() {
   state.sessions = sessions;
   state.terminals = terminals;
   state.repos = repos ?? {};
+  updatePageTitle();
   detectTransitions();
   renderSessions();
   renderSummary();
@@ -303,12 +309,13 @@ async function openSession(id) {
   if (!s) return;
   if (s.terminal && state.tabs.has(s.terminal) && !state.tabs.get(s.terminal).closed) { activateTab(s.terminal); return selectSession(id); }
   if (s.terminal) { const t = state.terminals.find((x) => x.name === s.terminal); if (t) { attachTab(t, { user: true }); return selectSession(id); } }
-  if (s.archived || s.state === 'external') return selectSession(id);
+  if (s.archived || s.state === 'external') { selectSession(id); if (mobileLayout.matches) showMobileView('read'); return; }
   await openTerminal({ cwd: s.workspace, resume: id });
 }
 
 function selectSession(id) {
   state.selected = id;
+  updatePageTitle();
   markReplyRead(id);
   renderSessions();
   loadTranscript(id);
@@ -384,6 +391,10 @@ async function openTerminal({ cwd, resume, provider, model }) {
   if (t.resume) selectSession(t.resume);
 }
 
+function terminalFontFamily() {
+  return mobileLayout.matches ? '"Source Code Pro", ui-monospace, "SF Mono", Menlo, monospace' : 'ui-monospace, "SF Mono", Menlo, monospace';
+}
+
 function attachTab(t, { user = false, activate = true } = {}) {
   if (state.tabs.has(t.name) && !state.tabs.get(t.name).closed) { if (activate) activateTab(t.name); return; }
   // An unpinned terminal is a preview: opening another one replaces it (its fx keeps running in tmux).
@@ -395,13 +406,20 @@ function attachTab(t, { user = false, activate = true } = {}) {
   wrap.className = 'term-wrap warming';
   $('#terminals').appendChild(wrap);
   const term = new Terminal({
-    cursorBlink: true, fontSize, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', scrollback: 5000, allowTransparency: true,
+    cursorBlink: true, fontSize, fontFamily: terminalFontFamily(), scrollback: 5000, allowTransparency: true,
     theme: state.palette ? { background: state.palette.sky ? 'rgba(0,0,0,0)' : state.palette.bg, foreground: state.palette.text, cursor: state.palette.cursor, selectionBackground: state.palette.sel } : undefined,
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(wrap);
+  // On phones, a deliberate tap on the terminal opens the software keyboard via xterm's input.
+  // Do not focus on tab activation: that would pop up the keyboard just by opening a session.
+  wrap.addEventListener('click', () => { if (mobileLayout.matches) term.focus(); });
   state.tabs.set(t.name, { name: t.name, term, fit, ws: null, wrap, closed: false, ready: false });
+  if (mobileLayout.matches) document.fonts.load(`${fontSize}px "Source Code Pro"`).then(() => {
+    const tab = state.tabs.get(t.name);
+    if (tab && !tab.closed) { term.options.fontFamily = terminalFontFamily(); tab.settled = null; safeFit(tab); }
+  }).catch(() => {});
   renderTabs();
   if (activate) activateTab(t.name); // connects lazily, at the measured size
 }
@@ -411,7 +429,8 @@ function connectTab(tab) {
   if (!tab || tab.ws || tab.closed) return;
   const { term, wrap } = tab;
   if (term.cols < 20 || term.rows < 5) { setTimeout(() => { safeFit(tab); connectTab(tab); }, 100); return; } // wait for a real layout
-  const ws = new WebSocket(`ws://${location.host}/pty?name=${encodeURIComponent(tab.name)}&cols=${term.cols}&rows=${term.rows}`);
+  const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${wsProtocol}//${location.host}/pty?name=${encodeURIComponent(tab.name)}&cols=${term.cols}&rows=${term.rows}`);
   ws.binaryType = 'arraybuffer';
   tab.ws = ws;
   let reveal = null;
@@ -453,6 +472,8 @@ function renderTabs() {
     });
     root.appendChild(el);
   }
+  $('#mobile-terminal-title').textContent = state.activeTab && state.tabs.has(state.activeTab)
+    ? tabLabel(state.activeTab) : 'Terminal';
   $('#empty-state').style.display = state.tabs.size ? 'none' : 'flex';
 }
 
@@ -472,7 +493,7 @@ function activateTab(name) {
   for (const [n, t] of state.tabs) t.wrap.classList.toggle('active', n === name);
   renderTabs();
   const t = state.tabs.get(name);
-  if (t) { safeFit(t); connectTab(t); t.term.focus(); }
+  if (t) { if (mobileLayout.matches) showMobileView('terminal'); safeFit(t); connectTab(t); if (!mobileLayout.matches) t.term.focus(); }
   const term = state.terminals.find((x) => x.name === name);
   if (term?.resume) selectSession(term.resume); else renderSessions();
   syncUrl();
@@ -871,18 +892,20 @@ async function loadTranscript(id, quiet = false) {
   $('#transcript-meta').innerHTML = `<span title="${esc([tokens, s.workspace].filter(Boolean).join('\n'))}">${s.model ? vendorDot(s.model) + esc(modelShort(s.model)) : ''}${s.provider ? ` · <span title="${esc(providerLabel(s.provider))}">${s.provider === 'gateway' ? '▲ gateway' : esc(s.provider)}</span>` : ''}${u.wallMs ? ' · ' + fmtDur(u.wallMs) : ''}${isChild ? ' · billed to parent' : u.cost ? ' · $' + u.cost.toFixed(2) : ''}</span>`;
 
   const html = [];
-  // Files first, then the subagents (a subagent's answer opens in its row), then the conversation.
-  html.push(filesSection(id, files));
+  // Desktop keeps its detail-first column; phones lead with the readable conversation.
+  if (!mobileLayout.matches) html.push(filesSection(id, files));
   if (isChild) {
     if (lastChildShown !== id) { expandedAgents.add(id); lastChildShown = id; } // arrive with its answer open
-    html.push(agentsBoard(parent, { selectedId: id }), '<div class="section-title">its conversation</div>');
-  } else if (parent.children?.length) html.push(agentsBoard(parent));
+    if (!mobileLayout.matches) html.push(agentsBoard(parent, { selectedId: id }), '<div class="section-title">its conversation</div>');
+  } else if (parent.children?.length && !mobileLayout.matches) html.push(agentsBoard(parent));
   // The conversation lives in the terminal. This column shows it only for a subagent (it has no terminal)
   // or when global search or the replies inbox pointed at one message.
-  const showConvo = isChild || convoShown.has(id);
-  if (!isChild && showConvo) html.push(`<div class="section-title">conversation · <a href="#" data-hide-convo="${id}">hide</a></div>`);
+  const showConvo = isChild || convoShown.has(id) || mobileLayout.matches;
+  if (mobileLayout.matches) html.push('<div class="section-title">conversation</div>');
+  else if (!isChild && showConvo) html.push(`<div class="section-title">conversation · <a href="#" data-hide-convo="${id}">hide</a></div>`);
   let messageIndex = 0;
   for (const ev of showConvo ? events : []) {
+    if (mobileLayout.matches && ev.kind !== 'user' && ev.kind !== 'assistant') continue;
     if (!isChild && ev.kind === 'tool_call' && ev.name === 'subagent' && parent.children?.length) continue; // already in the board
     const match = globalMessage?.id === id && globalMessage.index === messageIndex;
     if (ev.kind === 'user') html.push(`<div class="msg user${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? 'task from parent' : 'you'}</div><div class="text">${esc(ev.text)}</div></div>`);
@@ -899,6 +922,10 @@ async function loadTranscript(id, quiet = false) {
     } else if (ev.kind === 'turn_completed') html.push('<hr class="turn-sep" />');
     else if (ev.kind === 'interrupted') html.push(`<div class="interrupted">■ cancelled</div>${ev.partial ? `<div class="msg assistant"><div class="text muted">${esc(ev.partial)}</div></div>` : ''}`);
     else if (ev.kind === 'raw') html.push(`<div class="msg"><div class="who">event</div><div class="text muted">${esc(ev.text)}</div></div>`);
+  }
+  if (mobileLayout.matches) {
+    if (parent.children?.length) html.push(agentsBoard(parent, isChild ? { selectedId: id } : {}));
+    html.push(filesSection(id, files));
   }
   const body = $('#transcript-body');
   const wasAtBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
@@ -922,8 +949,8 @@ function setTranscript(visible) {
   try { localStorage.setItem('fox.transcript', visible ? '1' : '0'); } catch {}
   requestAnimationFrame(() => safeFit(state.tabs.get(state.activeTab)));
 }
-transcriptToggle.addEventListener('click', () => setTranscript(document.body.classList.contains('no-transcript')));
-$('#close-transcript').addEventListener('click', () => setTranscript(false));
+transcriptToggle.addEventListener('click', () => { setTranscript(mobileLayout.matches || document.body.classList.contains('no-transcript')); if (mobileLayout.matches) showMobileView('read'); });
+$('#close-transcript').addEventListener('click', () => { setTranscript(false); if (mobileLayout.matches) showMobileView('terminal'); });
 let initialTranscript = false;
 try { initialTranscript = localStorage.getItem('fox.transcript') === '1'; } catch {}
 setTranscript(initialTranscript);
@@ -1237,6 +1264,120 @@ window.addEventListener('keydown', (e) => {
 // Escape closes the shortcuts sheet or leaves the search box.
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#shortcuts')) $('#shortcuts').remove(); });
 
+// ---------- phone layout: the same live tmux terminal, one pane at a time ----------
+const mobileLayout = matchMedia('(max-width: 1100px)');
+function showMobileView(view) {
+  if (!['sessions', 'terminal', 'read'].includes(view)) return;
+  document.body.dataset.mobileView = view;
+  updatePageTitle();
+  for (const button of document.querySelectorAll('#mobile-nav button')) {
+    if (button.dataset.mobileView === view) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  }
+  if (view === 'terminal') requestAnimationFrame(() => {
+    const tab = state.tabs.get(state.activeTab);
+    safeFit(tab);
+    if (tab) connectTab(tab);
+  });
+}
+showMobileView('sessions');
+$('#mobile-nav').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-mobile-view]');
+  if (!button) return;
+  if (button.dataset.mobileView === 'read') setTranscript(true);
+  showMobileView(button.dataset.mobileView);
+});
+function sizeMobileViewport() {
+  if (!mobileLayout.matches) { document.body.style.removeProperty('--mobile-height'); return; }
+  document.body.style.setProperty('--mobile-height', `${window.visualViewport?.height ?? window.innerHeight}px`);
+  fitActive();
+}
+sizeMobileViewport();
+window.visualViewport?.addEventListener('resize', sizeMobileViewport);
+mobileLayout.addEventListener('change', sizeMobileViewport);
+mobileLayout.addEventListener('change', updatePageTitle);
+mobileLayout.addEventListener('change', async () => {
+  if (mobileLayout.matches) { try { await document.fonts.load(`${fontSize}px "Source Code Pro"`); } catch {} }
+  for (const tab of state.tabs.values()) { tab.term.options.fontFamily = terminalFontFamily(); tab.settled = null; }
+  fitActive();
+});
+// ---------- local phone pairing ----------
+const pairDialog = $('#pair-dialog');
+let pairTimer = null, pairStarting = false;
+if (!['127.0.0.1', 'localhost'].includes(location.hostname)) $('#pair-phone').classList.add('hidden');
+const pairApi = async (path, data) => {
+  const response = await fetch(path, data === undefined ? undefined : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'Pairing failed');
+  return result;
+};
+async function showPairingState() {
+  if (!pairDialog.open) return;
+  try {
+    const { enabled, tunnelUrl, pending, devices } = await pairApi('/api/pair/state');
+    $('#pair-tunnel').textContent = tunnelUrl || (pairStarting ? 'Connecting to Cloudflare…' : 'Tunnel stopped');
+    $('#pair-create').disabled = !enabled || pairStarting;
+    $('#pair-stop').disabled = !tunnelUrl;
+    if (!enabled) $('#pair-status').textContent = 'Restart fox with FOX_SHARE_PORT=4851 to enable remote pairing.';
+    const waiting = $('#pair-pending'); waiting.replaceChildren();
+    for (const item of pending) {
+      const row = document.createElement('div'); row.className = 'pair-entry';
+      const label = document.createElement('span'); label.textContent = `${item.name} · code ${item.code}`;
+      row.append(label);
+      for (const [text, approve] of [['Accept', true], ['Reject', false]]) {
+        const button = document.createElement('button'); button.textContent = text;
+        button.addEventListener('click', async () => { try { await pairApi('/api/pair/decision', { id: item.id, approve }); await showPairingState(); } catch (error) { $('#pair-status').textContent = error.message; } });
+        row.append(button);
+      }
+      waiting.append(row);
+    }
+    if (!pending.length) waiting.textContent = 'No phone waiting.';
+    const granted = $('#pair-devices'); granted.replaceChildren();
+    for (const device of devices) {
+      const row = document.createElement('div'); row.className = 'pair-entry';
+      const label = document.createElement('span'); label.textContent = device.name;
+      const revoke = document.createElement('button'); revoke.textContent = 'Revoke';
+      revoke.addEventListener('click', async () => { try { await pairApi('/api/pair/revoke', { id: device.id }); await showPairingState(); } catch (error) { $('#pair-status').textContent = error.message; } });
+      row.append(label, revoke); granted.append(row);
+    }
+    if (!devices.length) granted.textContent = 'No paired devices.';
+  } catch (error) { $('#pair-status').textContent = error.message; }
+}
+async function startPhonePairing() {
+  if (pairStarting) return;
+  pairStarting = true;
+  $('#pair-status').textContent = '';
+  $('#pair-offer').hidden = true;
+  $('#pair-tunnel').textContent = 'Connecting to Cloudflare…';
+  $('#pair-create').disabled = true;
+  try {
+    const { svg, url } = await pairApi('/api/pair/tunnel/start', {});
+    $('#pair-tunnel').textContent = url;
+    $('#pair-qr').src = 'data:image/svg+xml;base64,' + btoa(svg);
+    $('#pair-offer').hidden = false;
+    $('#pair-stop').disabled = false;
+    $('#pair-status').textContent = 'Compare the six-digit code on both screens before accepting.';
+  } catch (error) { $('#pair-status').textContent = error.message; }
+  finally { pairStarting = false; await showPairingState(); }
+}
+$('#pair-phone').addEventListener('click', () => {
+  pairDialog.showModal();
+  showPairingState().then(startPhonePairing);
+  pairTimer = setInterval(showPairingState, 2000);
+});
+$('#pair-close').addEventListener('click', () => pairDialog.close());
+pairDialog.addEventListener('close', () => { clearInterval(pairTimer); pairTimer = null; });
+$('#pair-create').addEventListener('click', startPhonePairing);
+$('#pair-stop').addEventListener('click', async () => {
+  try {
+    await pairApi('/api/pair/tunnel/stop', {});
+    $('#pair-offer').hidden = true;
+    $('#pair-qr').removeAttribute('src');
+    $('#pair-status').textContent = 'Sharing stopped. Paired devices must be approved again next time.';
+    await showPairingState();
+  } catch (error) { $('#pair-status').textContent = error.message; }
+});
+
 // ---------- boot ----------
 // Deep links: ?session=<id> selects a session and shows its transcript; ?open=<id> also opens its terminal tab.
 (async () => {
@@ -1251,7 +1392,7 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#shortc
   if (restore && !openId) activateTab(restore.name);
   if (openId && sessionById(openId)) await openSession(openId);
   // Respect the saved column state on refresh; only an explicit ?session= that differs from the open tab opens it.
-  if (selId && sessionById(selId)) { if (q.get('session') && selId !== openId) setTranscript(true); selectSession(selId); }
+  if (selId && sessionById(selId)) { if (q.get('session') && selId !== openId) setTranscript(true); selectSession(selId); if (mobileLayout.matches && q.get('session') && !openId) showMobileView('read'); }
   state.pollTimer = setInterval(async () => {
     await refresh();
     if (state.selected) loadTranscript(state.selected, true);

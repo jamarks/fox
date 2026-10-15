@@ -1,0 +1,34 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createPairing } from '../pairing.mjs';
+
+test('phone offer is one-use, local approval gates a revocable device credential', () => {
+  let time = 1000;
+  const p = createPairing({ now: () => time });
+  assert.throws(() => p.offer('http://example.com'), /HTTPS/);
+  const { link } = p.offer('https://random.trycloudflare.com/path?unused=yes');
+  const url = new URL(link);
+  assert.equal(url.pathname, '/'); assert.equal(url.search, '');
+  const token = url.hash.slice('#pair='.length);
+  assert.ok(token.length > 32);
+  assert.equal(p.request('wrong', 'Phone'), null);
+  const pending = p.request(token, 'Javier iPhone');
+  assert.equal(p.request(token, 'Another'), null);
+  assert.match(pending.code, /^\d{6}$/);
+  assert.deepEqual(p.pending().map((v) => v.id), [pending.id]);
+  assert.equal(p.poll(pending.id, 'wrong'), null);
+  assert.equal(p.poll(pending.id, pending.claim).status, 'pending');
+  assert.equal(p.approve(pending.id, true), true);
+  const grant = p.poll(pending.id, pending.claim);
+  assert.equal(grant.status, 'approved');
+  assert.equal(p.poll(pending.id, pending.claim), null);
+  assert.equal(p.authorized('wrong'), null);
+  const id = p.authorized(grant.token);
+  assert.ok(id);
+  assert.equal(p.devices()[0].name, 'Javier iPhone');
+  assert.equal(p.revoke(id), true);
+  assert.equal(p.authorized(grant.token), null);
+  const expired = new URL(p.offer('https://random.trycloudflare.com').link).hash.slice(6);
+  time += 5 * 60 * 1000;
+  assert.equal(p.request(expired, 'Expired'), null);
+});

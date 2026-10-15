@@ -7,6 +7,8 @@ import { existsSync, realpathSync } from 'node:fs';
 import { createReadStream } from 'node:fs';
 import { join, resolve, extname, basename } from 'node:path';
 import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { createShareBridge } from './share.mjs';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import * as pty from 'node-pty';
@@ -338,7 +340,7 @@ async function listTools() {
 }
 
 // ---------- HTTP ----------
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.map': 'application/json', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.map': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 
 function readBody(req) {
   return new Promise((resolve) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => resolve(b)); });
@@ -361,10 +363,21 @@ async function serveStatic(res, root, rel) {
   createReadStream(path).pipe(res);
 }
 
-const server = http.createServer(async (req, res) => {
+// Tailscale Serve terminates HTTPS and forwards to this loopback HTTP listener.
+// Browsers send the public Origin, so compare it with Host rather than the internal protocol.
+function sameOrigin(req) {
+  if (!req.headers.origin || !req.headers.host) return false;
+  try {
+    const origin = new URL(req.headers.origin);
+    return origin.host === req.headers.host && (origin.protocol === 'http:' || origin.protocol === 'https:') && origin.origin === req.headers.origin;
+  } catch { return false; }
+}
+
+async function handlePanelRequest(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const p = url.pathname;
   try {
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !sameOrigin(req)) return send(res, 403, { error: 'same-origin request required' });
     if (p === '/api/sessions') return send(res, 200, await listSessions());
     if (p === '/api/search') return send(res, 200, await searchSessions(url.searchParams.get('q')));
     if (p === '/api/overview') {
@@ -407,7 +420,6 @@ const server = http.createServer(async (req, res) => {
       if (!f) return send(res, 404, { error: 'not a file of this session' });
       if (m[2] === 'open-file') {
         if (req.method !== 'POST') return send(res, 405, { error: 'POST' });
-        if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: 'cross-origin' });
         if (process.platform !== 'darwin') return send(res, 501, { error: 'only on macOS' });
         await execFileP('open', [f.path]);
         return send(res, 200, { ok: true });
@@ -439,7 +451,6 @@ const server = http.createServer(async (req, res) => {
     }
     // A file dropped on a terminal: saved under ~/.config/fox/drops so fx can read or attach it by path.
     if (p === '/api/drop' && req.method === 'POST') {
-      if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: 'cross-origin upload' });
       const raw = basename(String(url.searchParams.get('name') ?? 'file'));
       const safe = raw.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+/, '').slice(-80) || 'file';
       const chunks = []; let size = 0;
@@ -459,7 +470,6 @@ const server = http.createServer(async (req, res) => {
     // Adds one catalog tool to fx's MCP config, the same as running `fx mcp add` by hand; 'signin' starts
     // `fx mcp auth NAME` and answers with the authorize URL to open.
     if (req.method === 'POST' && (m = p.match(/^\/api\/tools\/([a-z0-9-]+)\/(add|signin)$/))) {
-      if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: 'cross-origin' });
       const tool = TOOLS.find((t) => t.id === m[1]);
       if (!tool) return send(res, 404, { error: 'unknown tool' });
       if (m[2] === 'signin') {
@@ -506,10 +516,18 @@ const server = http.createServer(async (req, res) => {
     }
     if (p.startsWith('/vendor/xterm/')) return serveStatic(res, join(__dirname, 'node_modules/@xterm/xterm'), p.slice('/vendor/xterm'.length));
     if (p.startsWith('/vendor/addon-fit/')) return serveStatic(res, join(__dirname, 'node_modules/@xterm/addon-fit'), p.slice('/vendor/addon-fit'.length));
+    if (p.startsWith('/vendor/font/')) return serveStatic(res, join(__dirname, 'node_modules/@fontsource/source-code-pro'), p.slice('/vendor/font'.length));
     return serveStatic(res, PUBLIC, p === '/' ? '/index.html' : p);
   } catch (err) {
     send(res, 500, { error: String(err) });
   }
+}
+
+const localHost = (host) => host === `127.0.0.1:${PORT}` || host === `localhost:${PORT}`;
+const server = http.createServer(async (req, res) => {
+  if (process.env.FOX_SHARE_PORT !== undefined && !localHost(req.headers.host)) return send(res, 403, { error: 'use the paired gateway for remote access' });
+  if (new URL(req.url, 'http://localhost').pathname.startsWith('/api/pair/')) return bridge.handleLocalPairing(req, res);
+  return handlePanelRequest(req, res);
 });
 
 // ---------- terminales persistentes con tmux ----------
@@ -590,7 +608,26 @@ async function killTerminal(name) {
   return true;
 }
 
-const wss = new WebSocketServer({ server, path: '/pty' });
+const wss = new WebSocketServer({ noServer: true });
+function upgrade(req, socket, head, deviceId = null, remoteSockets = null) {
+  if (new URL(req.url, 'http://localhost').pathname !== '/pty' || !sameOrigin(req)) {
+    socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return;
+  }
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    if (deviceId) {
+      if (!remoteSockets.has(deviceId)) remoteSockets.set(deviceId, new Set());
+      remoteSockets.get(deviceId).add(ws);
+      ws.once('close', () => remoteSockets.get(deviceId)?.delete(ws));
+    }
+    wss.emit('connection', ws, req);
+  });
+}
+server.on('upgrade', (req, socket, head) => {
+  if (process.env.FOX_SHARE_PORT !== undefined && !localHost(req.headers.host)) {
+    socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return;
+  }
+  upgrade(req, socket, head);
+});
 
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, 'http://localhost');
@@ -628,6 +665,107 @@ wss.on('connection', (ws, req) => {
   // Cerrar la pestaña solo desconecta al cliente; la sesión de tmux y fx siguen vivos.
   ws.on('close', () => { try { proc.kill(); } catch {} });
 });
+
+// Paste a mobile message into exactly one fx tmux session. No shell or terminal socket is exposed.
+async function sendMobileMessage(id, text) {
+  const session = (await listSessions()).find((s) => s.id === id && !s.subagentChild);
+  if (!session) return { status: 404, body: { error: 'Session not found' } };
+  let terminal = (await listTerminals()).find((t) => t.resume === id);
+  if (!terminal) {
+    if (session.live) return { status: 409, body: { error: 'Session is open outside fox; use that terminal to reply.' } };
+    try {
+      terminal = await createTerminal({ cwd: session.workspace, resume: id });
+      let prompt = false;
+      for (let attempt = 0; attempt < 50; attempt++) {
+        const screen = await tmux('capture-pane', '-p', '-t', terminal.name);
+        if (/^\s*┃\s*$/m.test(screen)) { prompt = true; break; }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      if (!prompt) return { status: 409, body: { error: 'fx did not become ready. Open the desktop terminal and check the session.' } };
+    } catch (error) { return { status: 409, body: { error: `Could not resume session: ${error.message}` } }; }
+  }
+  const activity = await terminalActivity(terminal.name);
+  if (activity === 'working' || activity === 'needs_input') {
+    return { status: 409, body: { error: activity === 'working' ? 'fx is still working. Wait for its reply.' : 'fx needs terminal input; use the desktop panel for this prompt.' } };
+  }
+  // A named, unique tmux buffer and bracketed paste preserve newlines and prevent key-name interpretation.
+  const buffer = `fox-mobile-${randomUUID()}`;
+  try {
+    await tmux('set-buffer', '-b', buffer, '--', text);
+    await tmux('paste-buffer', '-p', '-d', '-b', buffer, '-t', terminal.name);
+    await tmux('send-keys', '-t', terminal.name, 'Enter');
+  } catch (error) {
+    await tmux('delete-buffer', '-b', buffer).catch(() => {});
+    return { status: 500, body: { error: `Could not send message: ${error.message}` } };
+  }
+  return { status: 202, body: { ok: true } };
+}
+
+// The local mobile page and the isolated tailnet listener use the same scoped reply path.
+async function handleMobileReply(req, res, rawId) {
+  let source;
+  try { source = new URL(req.headers.origin); } catch { return send(res, 403, { error: 'Same-origin request required' }); }
+  if (source.host !== req.headers.host || (source.protocol !== 'https:' && !(source.protocol === 'http:' && /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(source.host)))) {
+    return send(res, 403, { error: 'Same-origin request required' });
+  }
+  const id = safeSessionId(rawId);
+  if (!id) return send(res, 400, { error: 'Invalid session' });
+  let raw = '';
+  for await (const chunk of req) {
+    raw += chunk;
+    if (Buffer.byteLength(raw) > 12000) return send(res, 413, { error: 'Message too long' });
+  }
+  let text;
+  try { text = JSON.parse(raw).text; } catch { return send(res, 400, { error: 'Invalid message' }); }
+  if (typeof text !== 'string' || !text.trim() || text.length > 8000 || /[\x00-\x08\x0b-\x1f\x7f]/.test(text)) {
+    return send(res, 400, { error: 'Enter a message of up to 8000 characters' });
+  }
+  const result = await sendMobileMessage(id, text.replace(/\r\n?/g, '\n'));
+  return send(res, result.status, result.body);
+}
+
+// Separate, opt-in mobile surface for Tailscale Serve. Never proxy the full panel.
+const mobilePort = process.env.FOX_MOBILE_PORT;
+if (mobilePort !== undefined) {
+  const port = Number(mobilePort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535 || port === PORT) throw new Error('FOX_MOBILE_PORT must be a distinct port from 1 to 65535');
+  const mobile = http.createServer(async (req, res) => {
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'");
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    const url = new URL(req.url, 'http://localhost');
+    const p = url.pathname;
+    try {
+      const reply = p.match(/^\/api\/sessions\/([^/]+)\/reply$/);
+      if (req.method === 'POST' && reply) return handleMobileReply(req, res, reply[1]);
+      if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
+      if (p === '/api/overview') {
+        const sessions = (await listSessions()).map(({ id, title, customName, workspace, updatedAt, archived, parentId, latestReply }) =>
+          ({ id, title, customName, workspace, updatedAt, archived, parentId, latestReply }));
+        return send(res, 200, { sessions });
+      }
+      if (p === '/api/search') return send(res, 200, await searchSessions(url.searchParams.get('q')));
+      const m = p.match(/^\/api\/sessions\/([^/]+)\/events$/);
+      if (m) {
+        const id = safeSessionId(m[1]);
+        if (!id) return send(res, 400, { error: 'bad id' });
+        const events = (await readEvents(id)).filter((ev) => (ev.kind === 'user' || ev.kind === 'assistant') && typeof ev.text === 'string')
+          .map(({ kind, ts, text }) => ({ kind, ts, text }));
+        return send(res, 200, events);
+      }
+      if (p === '/' || p === '/mobile.css' || p === '/mobile.js') {
+        return serveStatic(res, PUBLIC, p === '/' ? '/mobile.html' : p);
+      }
+      return send(res, 404, { error: 'not available in mobile view' });
+    } catch (error) { return send(res, 500, { error: String(error) }); }
+  });
+  mobile.listen(port, '127.0.0.1', () => console.log(`fox mobile → http://127.0.0.1:${port}`));
+}
+
+const bridge = createShareBridge({
+  port: process.env.FOX_SHARE_PORT, panelPort: PORT, mobilePort,
+  handlePanelRequest, upgrade, serveStatic, publicDir: PUBLIC, sameOrigin,
+});
+bridge.listen();
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`fox → http://127.0.0.1:${PORT}`);

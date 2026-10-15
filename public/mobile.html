@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1115">
+  <title>fox · sessions</title>
+  <link rel="stylesheet" href="/mobile.css">
+  <script src="/mobile.js" defer></script>
+</head>
+<body>
+  <header><div class="brand">fox <span> / sessions</span></div><span class="badge">tailnet</span></header>
+  <main>
+    <section id="home">
+      <div class="intro"><h1>Your sessions</h1><p>Answers from your Mac, wherever you are in your tailnet.</p></div>
+      <label for="query">Search names and messages</label>
+      <input id="query" type="search" placeholder="Search sessions…" autocomplete="off">
+      <p id="notice" role="status" aria-live="polite">Loading sessions…</p>
+      <div id="results" aria-label="Search results"></div>
+      <div id="sessions" aria-label="Sessions"></div>
+    </section>
+    <section id="detail" hidden>
+      <button id="back" type="button">← All sessions</button>
+      <h1 id="detail-title"></h1><p id="detail-project"></p>
+      <div id="messages" aria-label="Conversation"></div>
+      <form id="composer" autocomplete="off">
+        <label for="message">Message to fx</label>
+        <div class="compose-row"><textarea id="message" rows="2" maxlength="8000" placeholder="Write a message…" required></textarea><button id="send" type="submit">Send</button></div>
+        <p id="send-status" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

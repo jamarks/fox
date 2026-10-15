@@ -6,6 +6,8 @@
   <title>fox</title>
   <link rel="icon" href="/fox.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/vendor/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="/vendor/font/latin-400.css" />
+  <link rel="stylesheet" href="/vendor/font/latin-700.css" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -25,6 +27,7 @@
         </select>
         <button type="button" id="pick-folder" class="icon" title="Open fx in a folder…"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4a1 1 0 0 1 1-1h3.2l1.5 1.5h6.3a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/><path d="M8 7v4M6 9h4"/></svg></button>
         <button id="bell" class="icon" title="Sound + desktop notification when an agent finishes or needs input" aria-label="Notifications"><svg class="bell-on" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11V7a4 4 0 0 1 8 0v4l1 1.5H3z"/><path d="M6.5 14a1.5 1.5 0 0 0 3 0"/></svg><svg class="bell-off" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11V7a4 4 0 0 1 6.6-3"/><path d="M12 7v4l1 1.5H5.5"/><path d="M6.5 14a1.5 1.5 0 0 0 3 0"/><path d="M2 2l12 12"/></svg></button>
+        <button id="pair-phone" class="icon" title="Pair phone" aria-label="Pair phone">⌁</button>
         <button id="global-search-open" class="icon" title="Search all sessions (⌥Space)" aria-label="Search all sessions"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg></button>
         <button id="refresh" class="icon" title="Refresh" aria-label="Refresh"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg></button>
         <button id="keys" class="icon" title="Keyboard shortcuts (⌥?)">?</button>
@@ -64,7 +67,7 @@
   </div>
   <div class="resizer" id="rs-left" title="Drag to resize"></div>
   <main id="center">
-    <div id="tabbar"><div id="tabs"></div><button id="toggle-transcript" class="icon">⇥</button></div>
+    <div id="tabbar"><div id="tabs"></div><div id="mobile-terminal-title" role="heading" aria-level="2">Terminal</div><button id="toggle-transcript" class="icon">⇥</button></div>
     <div id="terminals">
       <div id="empty-state">
         <h2>No terminal open</h2>
@@ -82,7 +85,23 @@
     <div id="transcript-meta"></div>
     <div id="transcript-body"><p class="muted">Select a session to see its files and subagents.</p></div>
   </section>
+  <nav id="mobile-nav" aria-label="Mobile views">
+    <button type="button" data-mobile-view="sessions">Sessions</button>
+    <button type="button" data-mobile-view="terminal">Terminal</button>
+    <button type="button" data-mobile-view="read">Read</button>
+  </nav>
 
+  <dialog id="pair-dialog" aria-labelledby="pair-title">
+    <h2 id="pair-title">Pair phone</h2>
+    <p>Fox connects a private pairing gateway to a temporary Cloudflare URL. Only a phone you accept here can access your sessions.</p>
+    <p id="pair-tunnel">Starting tunnel…</p>
+    <div class="pair-row"><button id="pair-create" type="button" disabled>New QR</button><button id="pair-stop" type="button" disabled>Stop sharing</button></div>
+    <div id="pair-offer" hidden><img id="pair-qr" alt="Phone pairing QR code"><p>Scan from the phone. Expires in five minutes; one use only.</p></div>
+    <h3>Waiting for approval</h3><div id="pair-pending"></div>
+    <h3>Paired devices</h3><div id="pair-devices"></div>
+    <p id="pair-status" role="status" aria-live="polite"></p>
+    <button id="pair-close" type="button">Close</button>
+  </dialog>
   <script src="/vendor/xterm/lib/xterm.js"></script>
   <script src="/vendor/addon-fit/lib/addon-fit.js"></script>
   <script src="/app.js"></script>
