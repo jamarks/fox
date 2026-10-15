@@ -13,7 +13,7 @@ npm install -g github:jamarks/fox && fox
 
 <p align="center"><sub>Needs Node 20+, <a href="https://fx.sh">fx</a> and tmux (<code>brew install tmux</code>). Opens http://127.0.0.1:4848. Details in <a href="#install-and-run">Install and run</a>.</sub></p>
 
-<p align="center"><sub>Optional: give fx a browser so it can check UI changes itself. fox offers it in the new-session panel, or run <code>fx mcp add playwright npx @playwright/mcp@latest</code>.</sub></p>
+<p align="center"><sub>Optional: give fx more tools (a browser, Chrome DevTools, library docs, Vercel) with one click from the new-session panel. See <a href="#tools-for-fx">Tools for fx</a>.</sub></p>
 
 <p align="center"><img src="docs/screenshot.png" alt="fox: three subagents on three models answering the same task, grouped for comparison in the right column, next to the real fx terminal" /></p>
 
@@ -46,18 +46,31 @@ Or a staged run with a named subagent that stays alive between rounds:
 Do this in stages, without asking me anything. Stage 1: launch three one-off subagents in parallel: one counts the lines of every .js file, one looks for TODOs or FIXMEs, one reads README.md and proposes three improvements. Wait for all three. Stage 2: write a ten-line report from their answers. Stage 3: create a subagent named reviewer and ask it to critique the report in five points. Stage 4: ask reviewer for a second round on the most serious point only. Stage 5: fold the critique in and show the final report, saying what changed thanks to each subagent.
 ```
 
+## Tools for fx
+
+fx can use MCP servers. The new-session panel shows fox's catalog as chips: `✓` when fx already has one, `+` to add it, `sign in` when it needs an account. Adding one runs `fx mcp add`, so it lands in fx's own config and every fx session gets it, inside fox or not. Sessions that were already open pick it up on their next start.
+
+| Tool | What fx can do with it | Account |
+|---|---|---|
+| Browser ([Playwright MCP](https://github.com/microsoft/playwright-mcp)) | Open pages, click, type and take screenshots, so it can check its own UI work. Uses its own Chrome profile, not yours. | No |
+| Chrome DevTools ([chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp)) | Console errors, network requests and performance traces of a page. | No |
+| Library docs ([Context7](https://context7.com)) | Current docs and examples for libraries and frameworks, so it does not guess APIs. | No |
+| [Vercel](https://vercel.com/docs/mcp) | Your projects, deployments and build logs. Vercel asks for read and write access; pick only the team you need and keep fx in `/permissions ask` if you want to approve each action. | Sign in |
+
+To offer another one, add an entry to `tools.mjs`.
+
 ## What it does
 
 - **Sessions by project**: grouped by workspace, collapsible, reorderable by drag, numbered.
 - **Live state**: working, waiting or needs input, with an optional bell (sound + notification) when an agent finishes.
-- **New replies**: a compact inbox above the projects shows completed answers you have not opened yet; click one to jump to the answer. Existing history starts as read, and read state is saved in this browser.
+- **New replies**: an inbox above the projects lists answers you have not opened yet; click one to jump to it.
 - **Provider and model**: `codex` subscription or pay-per-use `▲ gateway`, picked per new session.
 - **Subagents**: grouped by task to compare models; click one for its answer; weak answers flagged.
 - **Files**: what the session wrote, edited or read; preview in place or open with ↗.
 - **One terminal**: fx runs in tmux, so closing the tab or the browser never stops it; pin to keep tabs.
 - **Drop files**: drag images or files onto the terminal to attach them to your next message.
 - **Search everything**: ⌥Space searches names and messages across all sessions.
-- **Tools for fx**: one click in the new-session panel gives fx a browser, Chrome DevTools, current library docs (Context7) or your Vercel projects and deploy logs (with sign-in); the catalog lives in `tools.mjs`.
+- **Tools for fx**: chips in the new-session panel add MCP servers to fx in one click.
 - **Archive and rename** without touching fx's files.
 - **Git at a glance**: repo, branch and uncommitted files per project.
 - **Keyboard first**: ⌥ shortcuts for sessions, tabs, search, themes and font size; ⌥? lists them.
@@ -105,9 +118,9 @@ Option is the modifier, because ⌘T and ⌘W belong to the browser.
 
 | Where | What |
 |---|---|
-| Left | Sessions from `~/.fx/sessions`, grouped by workspace. Click to open. Hover for pin, rename, archive. `+` on a group starts a new session there; the folder icon in the header opens any other folder. |
+| Left | New replies on top, then sessions from `~/.fx/sessions` grouped by workspace. Click to open. Hover for pin, rename, archive. `+` on a group starts a new session there (pick a model and tools); the folder icon in the header opens any other folder. |
 | Middle | The current terminal (preview, italic) plus pinned tabs. 📌 pins, × unpins. fx keeps running either way. |
-| Right (⇥) | Model, provider, duration and cost; the subagent board when there are children; a subagent's own conversation; a session's conversation only when global search or the replies inbox points at a message (the terminal has the rest). × closes it. |
+| Right (⇥) | Model, provider, duration and cost; the files the session touched; its subagents (both sections fold). A subagent's own conversation; a session's conversation only when global search or the replies inbox points at a message (the terminal has the rest). × closes it. |
 
 ## How it works
 
@@ -130,7 +143,7 @@ fox's own state (archived ids, custom names, pins, collapsed groups) lives in `~
 npm test
 ```
 
-Runs the search index tests with Node's built-in runner.
+Runs the tests (search index, replies inbox, tools catalog, launcher) with Node's built-in runner.
 
 ## Why not libfx?
 
