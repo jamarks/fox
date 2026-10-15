@@ -1141,13 +1141,27 @@ $('#ns-tools').addEventListener('click', async (e) => {
   if (!btn) return;
   const id = btn.dataset.addTool ?? btn.dataset.signinTool, adding = Boolean(btn.dataset.addTool);
   const label = btn.textContent;
-  btn.disabled = true; btn.textContent = adding ? 'Adding…' : 'Waiting for sign-in…';
+  btn.disabled = true; btn.textContent = adding ? 'Adding…' : 'Opening…';
   const r = await fetch(`/api/tools/${id}/${adding ? 'add' : 'signin'}`, { method: 'POST' });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) { btn.disabled = false; btn.textContent = label; return alert(j.error || (adding ? 'Could not add it' : 'Sign-in did not finish')); }
-  const tool = Array.isArray(j) ? j.find((t) => t.id === id) : null;
-  if (tool?.needsSignIn) { btn.outerHTML = signInButton(id); return; } // added; one more step
-  btn.replaceWith(Object.assign(document.createElement('span'), { className: 'ns-tool-done', textContent: adding ? 'Added · new sessions have it' : 'Signed in' }));
+  if (!r.ok) { btn.disabled = false; btn.textContent = label; return alert(j.error || (adding ? 'Could not add it' : 'Could not start the sign-in')); }
+  const done = (text) => btn.replaceWith(Object.assign(document.createElement('span'), { className: 'ns-tool-done', textContent: text }));
+  if (adding) {
+    const tool = Array.isArray(j) ? j.find((t) => t.id === id) : null;
+    if (tool?.needsSignIn) { btn.outerHTML = signInButton(id); return; } // added; one more step
+    return done('Added · new sessions have it');
+  }
+  // fx waits for the provider's page to call back; open it in a tab (or offer a link if popups are blocked).
+  const tab = window.open(j.url, '_blank');
+  const status = Object.assign(document.createElement('span'), { className: 'ns-tool-wait' });
+  status.innerHTML = `Waiting for sign-in…${tab ? '' : ` <a href="${esc(j.url)}" target="_blank" rel="noopener">open the page</a>`}`;
+  btn.replaceWith(status);
+  for (let i = 0; i < 150; i++) {
+    await new Promise((res) => setTimeout(res, 2000));
+    const st = await (await fetch(`/api/tools/${id}/signin`)).json().catch(() => ({}));
+    if (st.status === 'done') { status.className = 'ns-tool-done'; status.textContent = 'Signed in · new sessions have it'; return; }
+    if (st.status === 'failed') { status.outerHTML = signInButton(id); return alert(st.error || 'Sign-in did not finish'); }
+  }
 });
 function updateNsBadge() { const v = $('#ns-model').value; $('#ns-badge').innerHTML = modelBadge(v ? v.split('|')[1] : modelsCatalog?.default?.model); }
 $('#ns-model').addEventListener('change', updateNsBadge);

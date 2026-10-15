@@ -10,7 +10,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import * as pty from 'node-pty';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createSearchIndex } from './search.mjs';
 import { latestCompletedReply } from './inbox.mjs';
@@ -299,6 +299,34 @@ async function fxMcpConfig() {
   mcpPath ??= (await execFileP(FX_BIN, ['mcp', 'path'], { timeout: 10000 })).stdout.trim();
   return readJson(mcpPath, {});
 }
+// Sign-in for a remote tool: `fx mcp auth NAME` prints the provider's authorize URL and waits for the
+// browser callback. fox hands the URL to the page, which opens it, and polls until fx exits.
+const signins = new Map(); // tool id -> { status: 'waiting' | 'done' | 'failed', url, error, proc }
+function startSignIn(tool) {
+  const prev = signins.get(tool.id);
+  if (prev?.status === 'waiting') prev.proc.kill();
+  const proc = spawn(FX_BIN, ['mcp', 'auth', tool.name], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const entry = { status: 'waiting', url: null, error: '', proc };
+  signins.set(tool.id, entry);
+  let out = '';
+  const timer = setTimeout(() => proc.kill(), 5 * 60000);
+  return new Promise((resolveUrl) => {
+    const onData = (d) => {
+      out += d;
+      const m = out.match(/https:\/\/\S+/);
+      if (m && !entry.url) { entry.url = m[0]; resolveUrl(entry); }
+    };
+    proc.stdout.on('data', onData); proc.stderr.on('data', onData);
+    proc.on('exit', async (code) => {
+      clearTimeout(timer);
+      entry.status = code === 0 ? 'done' : 'failed';
+      entry.error = code === 0 ? '' : code === null ? 'The sign-in was cancelled or took longer than 5 minutes.' : out.trim().split('\n').pop() || 'The sign-in did not finish.';
+      if (code === 0) { const st = await loadState(); st.toolsSignedIn[tool.id] = true; await saveState(st); }
+      resolveUrl(entry);
+    });
+  });
+}
+
 async function listTools() {
   const config = await fxMcpConfig().catch(() => ({}));
   const st = await loadState();
@@ -423,19 +451,23 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { path });
     }
     if (p === '/api/tools' && req.method === 'GET') return send(res, 200, await listTools());
-    // Adds one catalog tool to fx's MCP config, the same as running `fx mcp add` by hand; 'signin' runs
-    // `fx mcp auth NAME --open`, which opens the provider's sign-in page and waits for it.
+    // Sign-in progress for a remote tool (see startSignIn).
+    if (req.method === 'GET' && (m = p.match(/^\/api\/tools\/([a-z0-9-]+)\/signin$/))) {
+      const e = signins.get(m[1]);
+      return send(res, 200, e ? { status: e.status, error: e.error } : { status: 'none' });
+    }
+    // Adds one catalog tool to fx's MCP config, the same as running `fx mcp add` by hand; 'signin' starts
+    // `fx mcp auth NAME` and answers with the authorize URL to open.
     if (req.method === 'POST' && (m = p.match(/^\/api\/tools\/([a-z0-9-]+)\/(add|signin)$/))) {
       if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return send(res, 403, { error: 'cross-origin' });
       const tool = TOOLS.find((t) => t.id === m[1]);
       if (!tool) return send(res, 404, { error: 'unknown tool' });
-      try {
-        if (m[2] === 'add') await execFileP(FX_BIN, addArgs(tool), { timeout: 30000 });
-        else {
-          await execFileP(FX_BIN, ['mcp', 'auth', tool.name, '--open'], { timeout: 5 * 60000 });
-          const st = await loadState(); st.toolsSignedIn[tool.id] = true; await saveState(st);
-        }
-      } catch (err) { return send(res, 500, { error: String(err.stderr || err.message).trim() }); }
+      if (m[2] === 'signin') {
+        const e = await startSignIn(tool);
+        return e.url ? send(res, 200, { url: e.url }) : send(res, 500, { error: e.error || 'fx did not give a sign-in URL' });
+      }
+      try { await execFileP(FX_BIN, addArgs(tool), { timeout: 30000 }); }
+      catch (err) { return send(res, 500, { error: String(err.stderr || err.message).trim() }); }
       return send(res, 200, await listTools());
     }
     if (p === '/api/models' && req.method === 'GET') return send(res, 200, await getModels());

@@ -320,3 +320,4 @@ a.section-title.fold:hover { color: var(--text); }
 .ns-tool-text .muted { font-size: 11px; line-height: 1.4; }
 .ns-tool button { flex: none; }
 .ns-tool-done { flex: none; font-size: 11px; color: var(--ok); }
+.ns-tool-wait { flex: none; font-size: 11px; color: var(--muted); } .ns-tool-wait a { color: var(--accent); }
