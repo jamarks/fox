@@ -382,6 +382,37 @@ $('#pick-folder').addEventListener('click', async (e) => {
 });
 
 // ---------- terminals (tmux attach over WebSocket) ----------
+const dictationButton = $('#dictation');
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const dictation = createDictationController(SpeechRecognition, {
+  language: () => navigator.language || 'en-US',
+  send: (name, text) => {
+    const tab = state.tabs.get(name);
+    if (state.activeTab !== name || !tab || tab.closed || tab.ws?.readyState !== WebSocket.OPEN) return false;
+    tab.ws.send(JSON.stringify({ type: 'input', data: text + '\r' }));
+    return true;
+  },
+  update: ({ phase, message }) => {
+    dictationButton.classList.toggle('listening', phase === 'listening' || phase === 'stopping');
+    dictationButton.setAttribute('aria-label', phase === 'listening' ? 'Stop and send dictation' : 'Start dictation');
+    dictationButton.title = phase === 'listening' ? 'Stop and send dictation' : 'Dictate to the active terminal';
+    $('#dictation-status').textContent = message;
+    $('#dictation-status').title = message;
+  },
+});
+function updateDictationAvailability() {
+  const tab = state.tabs.get(state.activeTab);
+  dictationButton.disabled = !SpeechRecognition || !tab || tab.closed || tab.ws?.readyState !== WebSocket.OPEN;
+  if (!SpeechRecognition) {
+    dictationButton.title = 'Dictation is not supported in this browser (try Chrome)';
+    $('#dictation-status').textContent = 'Dictation unavailable — try Chrome';
+  } else if (!tab) dictationButton.title = 'Open a terminal to dictate';
+}
+dictationButton.addEventListener('click', () => {
+  if (dictation.active) dictation.stop();
+  else if (!dictationButton.disabled) dictation.start(state.activeTab);
+});
+updateDictationAvailability();
 async function openTerminal({ cwd, resume, provider, model }) {
   const t = await post('/api/terminals', { cwd, resume, provider, model });
   if (t.error) { alert(t.error); return; }
@@ -437,7 +468,8 @@ function connectTab(tab) {
     term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data));
     if (!tab.ready) { clearTimeout(reveal); reveal = setTimeout(() => { tab.ready = true; wrap.classList.remove('warming'); }, 120); }
   };
-  ws.onclose = () => { tab.closed = true; wrap.classList.remove('warming'); renderTabs(); };
+  ws.onopen = updateDictationAvailability;
+  ws.onclose = () => { if (state.activeTab === tab.name) dictation.cancel(); tab.closed = true; wrap.classList.remove('warming'); renderTabs(); };
   const sendResize = () => ws.readyState === 1 && ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
   term.onData((data) => ws.readyState === 1 && ws.send(JSON.stringify({ type: 'input', data })));
   term.onResize(sendResize);
@@ -474,6 +506,7 @@ function renderTabs() {
   $('#mobile-terminal-title').textContent = state.activeTab && state.tabs.has(state.activeTab)
     ? tabLabel(state.activeTab) : 'Terminal';
   $('#empty-state').style.display = state.tabs.size ? 'none' : 'flex';
+  updateDictationAvailability();
 }
 
 // Keep the address bar in sync so a refresh (or a bookmark) lands on the same session.
@@ -487,6 +520,7 @@ function syncUrl() {
   if (location.search !== (q.toString() ? `?${q}` : '')) history.replaceState(null, '', url);
 }
 function activateTab(name) {
+  if (state.activeTab !== name) dictation.cancel();
   state.activeTab = name;
   try { localStorage.setItem('fox.active', name); } catch {}
   for (const [n, t] of state.tabs) t.wrap.classList.toggle('active', n === name);
@@ -499,6 +533,7 @@ function activateTab(name) {
 }
 
 function closeTab(name) {
+  if (state.activeTab === name) dictation.cancel();
   if (state.preview === name) state.preview = null;
   const t = state.tabs.get(name);
   if (!t) return;
@@ -1239,6 +1274,7 @@ const SHORTCUTS = [
   ['⌥] / ⌥[', 'next / previous tab'],
   ['⌥1…9', 'jump to tab'],
   ['⌥P', 'pin / unpin the current tab'],
+  ['hold ⌥D', 'dictate; release to send to the active terminal'],
   ['⌥Space', 'search all sessions'],
   ['⌥\\', 'show / hide the right column'],
   ['⌥L / ⌥⇧L', 'next / previous theme'],
@@ -1260,8 +1296,32 @@ function showShortcuts() {
   el.addEventListener('click', () => el.remove());
   document.body.appendChild(el);
 }
+let pushToTalkHeld = false;
+window.addEventListener('keyup', (e) => {
+  if (e.code !== 'KeyD' || !pushToTalkHeld) return;
+  pushToTalkHeld = false;
+  e.preventDefault();
+  e.stopPropagation();
+  dictation.stop();
+}, true);
+window.addEventListener('blur', () => {
+  if (pushToTalkHeld) { pushToTalkHeld = false; dictation.cancel(); }
+});
 window.addEventListener('keydown', (e) => {
   if (!e.altKey || e.metaKey || e.ctrlKey) return;
+  if (e.code === 'KeyD') {
+    // Never hijack typed text or dialogs; xterm's helper textarea is the terminal itself.
+    if ((e.target instanceof Element && e.target.closest('input, select, textarea:not(.xterm-helper-textarea), [contenteditable]')) ||
+        document.querySelector('dialog[open], #newsheet:not(.hidden), #global-search:not(.hidden), #shortcuts')) return;
+    if (dictationButton.disabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.repeat && !pushToTalkHeld && !dictation.active) {
+      pushToTalkHeld = true;
+      dictation.start(state.activeTab, { pushToTalk: true });
+    }
+    return;
+  }
   const tabs = [...state.tabs.keys()];
   const idx = tabs.indexOf(state.activeTab);
   const code = e.code; // physical key: Option changes e.key on macOS

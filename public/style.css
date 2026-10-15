@@ -57,6 +57,10 @@ button:disabled { opacity: .3; cursor: not-allowed; }
 #center { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 #tabbar { display: flex; align-items: flex-end; background: var(--panel); border-bottom: 1px solid var(--border); padding-right: 6px; }
 #tabbar > button { margin-bottom: 4px; }
+#dictation { flex: none; width: 28px; height: 28px; }
+#dictation.listening { color: var(--err); background: var(--panel-2); animation: pulse 1.2s infinite; }
+#dictation-status { color: var(--muted); font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#dictation-status:empty { display: none; }
 #tabs { display: flex; gap: 2px; padding: 6px 8px 0; overflow-x: auto; flex: 1; }
 body.no-transcript { grid-template-columns: var(--left) 1fr; }
 body.no-transcript #rs-right { display: none; }
@@ -385,9 +389,11 @@ a.section-title.fold:hover { color: var(--text); }
   .session .actions .icon { width: 44px; height: 44px; }
   #reply-inbox-toggle { min-height: 44px; }
   .reply-inbox-item { min-height: 56px; }
-  #tabbar { min-height: 48px; align-items: center; padding: 0 16px; }
+  #tabbar { min-height: 48px; align-items: center; flex-wrap: wrap; padding: 0 16px; }
   #tabs, #toggle-transcript { display: none; }
-  #mobile-terminal-title { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 600; }
+  #mobile-terminal-title { display: block; flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 600; }
+  #dictation { width: 44px; height: 44px; margin: 0 0 0 8px; }
+  #dictation-status { order: 3; flex-basis: 100%; max-width: none; white-space: normal; overflow: visible; padding-bottom: 6px; font-size: 12px; }
   .term-wrap { padding: 8px 5px 5px; }
   #empty-state { padding: 24px; text-align: center; }
   #transcript .side-head { min-height: 52px; padding: 10px 16px; font-size: 15px; }

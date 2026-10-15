@@ -1,0 +1,7 @@
+# Dictado en el terminal de fox
+
+Diseño aprobado: usar `SpeechRecognition`/`webkitSpeechRecognition` del navegador, con Chrome como objetivo inicial, tanto en escritorio como en la vista de terminal del teléfono. Un botón de micrófono junto a las pestañas inicia la escucha; al detenerse (botón o fin de reconocimiento), fox envía una sola vez el resultado final al terminal de la sesión donde empezó y pulsa Enter. No envía resultados parciales. El botón refleja escucha, falta de sesión y falta de soporte; los errores de micrófono o red se explican en un estado visible. Si la pestaña cambia o se cierra, se cancela sin enviar a otra sesión. Sin captura de audio ni servicio de transcripción en el servidor de fox: el navegador puede procesar el audio con su propio servicio. No se almacenan transcripciones en fox fuera de lo que fx guarde normalmente en su sesión.
+
+Extensión aprobada: ⌥D se mantiene para hablar y se suelta para enviar, únicamente en el panel del terminal y no en campos editables ni diálogos. El reconocimiento puede terminar por sí solo antes de soltar la tecla; en ese caso se retiene el resultado y se envía recién al soltarla. Perder el foco del navegador cancela sin enviar. El botón de micrófono sigue funcionando como antes.
+
+Verificación: probar estado, resultados finales, cancelación, errores y envío único mediante un reconocedor simulado; probar sintaxis y controles responsivos. Probar manualmente permiso de micrófono y reconocimiento real en Chrome de escritorio y Android conectado por HTTPS.
