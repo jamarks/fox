@@ -386,7 +386,8 @@ const dictationButton = $('#dictation');
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const pill = $('#dictation-pill');
 let pillTimer = null;
-// Live level bars: a second, silent look at the mic (Chrome shares the permission with speech recognition).
+// Voice level for the mic orb: a second, silent look at the mic (Chrome shares the permission with speech
+// recognition). Sets --lvl (0..1) on the button; its rings grow with your voice.
 const meter = { stream: null, ctx: null, raf: 0 };
 async function startMeter() {
   if (meter.stream || !navigator.mediaDevices?.getUserMedia) return;
@@ -397,24 +398,27 @@ async function startMeter() {
     const analyser = meter.ctx.createAnalyser();
     analyser.fftSize = 512;
     meter.ctx.createMediaStreamSource(meter.stream).connect(analyser);
-    const data = new Uint8Array(analyser.fftSize), bars = [...pill.querySelectorAll('.dict-bars i')], shape = [0.45, 0.8, 1, 0.75, 0.5];
+    const data = new Uint8Array(analyser.fftSize);
+    let smooth = 0;
     const tick = () => {
       analyser.getByteTimeDomainData(data);
       let sum = 0; for (const v of data) sum += ((v - 128) / 128) ** 2;
       const level = Math.min(1, Math.sqrt(sum / data.length) * 6);
-      bars.forEach((b, i) => { b.style.height = `${3 + Math.round(level * shape[i] * 11)}px`; });
+      smooth = smooth * 0.7 + level * 0.3;
+      dictationButton.style.setProperty('--lvl', smooth.toFixed(3));
       meter.raf = requestAnimationFrame(tick);
     };
-    pill.classList.add('metered');
+    dictationButton.classList.add('metered');
     tick();
-  } catch { stopMeter(); } // no meter is fine: the bars keep their idle animation
+  } catch { stopMeter(); } // no meter is fine: the orb keeps breathing on its own
 }
 function stopMeter() {
   cancelAnimationFrame(meter.raf);
   meter.stream?.getTracks().forEach((t) => t.stop());
   meter.ctx?.close().catch(() => {});
   meter.stream = meter.ctx = null;
-  pill.classList.remove('metered');
+  dictationButton.classList.remove('metered');
+  dictationButton.style.removeProperty('--lvl');
 }
 // The pill floats over the terminal while you speak: what Chrome hears, final words bright, the rest muted.
 function showPill({ phase, message, live, pushToTalk }) {
@@ -431,14 +435,16 @@ function showPill({ phase, message, live, pushToTalk }) {
   }
   if (!listening) return;
   if (live) {
-    // Keep the latest words in view: when it gets long, show its end.
-    const room = Math.min(680, $('#terminals').clientWidth - 32) - 140; // bars, hint and padding
-    const MAX = Math.max(16, Math.floor(room / 7.4)), total = live.final.length + live.interim.length;
-    const cut = Math.max(0, total - MAX);
-    const final = cut ? '…' + live.final.slice(Math.min(cut, live.final.length)) : live.final;
-    const interim = cut > live.final.length ? (final === '…' ? '' : '…') + live.interim.slice(cut - live.final.length) : live.interim;
-    pill.querySelector('.dict-final').textContent = final === '…' ? '' : final;
-    pill.querySelector('.dict-interim').textContent = interim;
+    // Keep the latest words in view: if it does not fit, trim from the start until it does.
+    const finalEl = pill.querySelector('.dict-final'), interimEl = pill.querySelector('.dict-interim'), box = pill.querySelector('.dict-text');
+    const render = (cut) => {
+      const f = live.final.slice(Math.min(cut, live.final.length)), i = live.interim.slice(Math.max(0, cut - live.final.length));
+      finalEl.textContent = cut && f ? '…' + f : f;
+      interimEl.textContent = cut && !f ? '…' + i : i;
+    };
+    let cut = 0;
+    render(0);
+    while (box.scrollWidth > box.clientWidth + 1 && cut < live.final.length + live.interim.length) { cut += 3; render(cut); }
     pill.dataset.live = '1';
   } else if (!pill.dataset.live) { // nothing heard yet
     pill.querySelector('.dict-final').textContent = '';
