@@ -429,3 +429,23 @@ a.section-title.fold:hover { color: var(--text); }
 #dictation-pill.error { border-color: color-mix(in srgb, var(--err) 50%, var(--border)); }
 #dictation-pill.error #dictation-pill.error .dict-final { color: var(--err); }
 @media (max-width: 1100px) { .dict-hint { display: none; } #dictation-pill { bottom: 72px; } } /* on a phone, tap the mic again to stop */
+/* previews of what fx made: a tab next to the terminal, and a card in the right column */
+.view-wrap { padding: 0; background: #fff; }
+.view-wrap iframe { width: 100%; height: 100%; border: 0; display: block; background: #fff; }
+.tab.view .view-icon { color: #f0883e; margin-right: 2px; }
+#artifact-slot { padding: 12px 16px 2px; }
+#artifact-slot.hidden { display: none; }
+.art-card { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; cursor: pointer; background: var(--panel-2); transition: border-color .15s; }
+.art-card:hover { border-color: #f0883e; }
+.art-thumb { position: relative; height: 132px; overflow: hidden; background: #fff; }
+.art-thumb iframe { position: absolute; top: 0; left: 0; width: 400%; height: 400%; border: 0; transform: scale(.25); transform-origin: 0 0; pointer-events: none; background: #fff; }
+.art-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.art-meta { display: flex; align-items: center; gap: 8px; padding: 7px 10px; font-size: 12px; }
+.art-name { font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.art-new { color: #f0883e; margin-right: 5px; font-size: 9px; vertical-align: 1px; }
+.art-dir, .art-ago { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.art-dir { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.art-ago { margin-left: auto; }
+.art-full { color: var(--muted); text-decoration: none; padding: 0 2px; }
+.art-full:hover { color: var(--accent); }
+.file.viewable .file-name { color: var(--text); text-decoration: underline; text-decoration-color: color-mix(in srgb, #f0883e 55%, transparent); text-underline-offset: 3px; }

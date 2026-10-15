@@ -142,6 +142,7 @@ function safeSessionId(id) {
 // Files a session touched: what fx wrote, edited or read (its own tool calls and its subagents'), plus
 // paths it names in its answers that exist on disk (a file made by a shell command shows up that way).
 const FILE_RANK = { write: 3, edit: 2, mention: 1, read: 0 };
+const PREVIEW_TYPES = { '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
 const realPath = (p) => { try { return realpathSync(p); } catch { return p; } };
 async function sessionFiles(id) {
   const meta = await readJson(join(SESSIONS_DIR, id, 'session.json'));
@@ -171,7 +172,7 @@ async function sessionFiles(id) {
     let st = null;
     try { st = await stat(f.path); } catch {}
     if (f.action === 'mention' && !st?.isFile()) continue; // only real files count as mentions
-    out.push({ path: f.path, rel: f.path.startsWith(root + '/') ? f.path.slice(root.length + 1) : f.path.replace(homedir(), '~'), action: f.action, by: [...f.by].sort((a, b) => a - b), exists: Boolean(st?.isFile()), size: st?.size ?? 0 });
+    out.push({ path: f.path, rel: f.path.startsWith(root + '/') ? f.path.slice(root.length + 1) : f.path.replace(homedir(), '~'), action: f.action, by: [...f.by].sort((a, b) => a - b), exists: Boolean(st?.isFile()), size: st?.size ?? 0, mtime: st?.mtimeMs ?? 0 });
   }
   return out.sort((a, b) => FILE_RANK[b.action] - FILE_RANK[a.action] || a.rel.localeCompare(b.rel));
 }
@@ -409,13 +410,13 @@ async function handlePanelRequest(req, res) {
       if (!id) return send(res, 400, { error: 'bad id' });
       return send(res, 200, await readEvents(id));
     }
-    // Files the session touched; content and "open" only for paths in that list.
-    if ((m = p.match(/^\/api\/sessions\/([^/]+)\/(files|file|open-file)$/))) {
+    // Files the session touched; content, preview and "open" only for paths in that list.
+    if ((m = p.match(/^\/api\/sessions\/([^/]+)\/(files|file|open-file|preview)$/))) {
       const id = safeSessionId(m[1]);
       if (!id) return send(res, 400, { error: 'bad id' });
       const files = await sessionFiles(id);
       if (m[2] === 'files') return send(res, 200, files);
-      const path = m[2] === 'file' ? url.searchParams.get('path') : JSON.parse(await readBody(req) || '{}').path;
+      const path = m[2] === 'open-file' ? JSON.parse(await readBody(req) || '{}').path : url.searchParams.get('path');
       const f = files.find((x) => x.path === path && x.exists);
       if (!f) return send(res, 404, { error: 'not a file of this session' });
       if (m[2] === 'open-file') {
@@ -423,6 +424,19 @@ async function handlePanelRequest(req, res) {
         if (process.platform !== 'darwin') return send(res, 501, { error: 'only on macOS' });
         await execFileP('open', [f.path]);
         return send(res, 200, { ok: true });
+      }
+      // The file itself, to render in a preview tab. An agent wrote it, so it runs sandboxed (CSP sandbox
+      // without allow-same-origin: an opaque origin that cannot read fox's API or reach its terminals),
+      // even when opened full screen in its own browser tab. HEAD answers the ETag for live reload.
+      if (m[2] === 'preview') {
+        const type = PREVIEW_TYPES[extname(f.path).toLowerCase()];
+        if (!type) return send(res, 415, { error: 'no preview for this file type' });
+        if (f.size > 20 * 1024 * 1024) return send(res, 413, { error: 'file too large to preview' });
+        res.writeHead(200, {
+          'content-type': type, 'cache-control': 'no-store', etag: `"${Math.round(f.mtime)}-${f.size}"`,
+          'x-content-type-options': 'nosniff', 'content-security-policy': 'sandbox allow-scripts allow-forms allow-popups allow-modals',
+        });
+        return res.end(req.method === 'HEAD' ? undefined : await readFile(f.path));
       }
       if (f.size > 512 * 1024) return send(res, 200, { tooLarge: true, size: f.size });
       const buf = await readFile(f.path);

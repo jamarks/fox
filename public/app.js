@@ -525,7 +525,7 @@ function attachTab(t, { user = false, activate = true } = {}) {
 
 // Connect a tab's WebSocket once it is visible and measured, so tmux draws once at the right size.
 function connectTab(tab) {
-  if (!tab || tab.ws || tab.closed) return;
+  if (!tab?.term || tab.ws || tab.closed) return; // preview tabs have no terminal
   const { term, wrap } = tab;
   if (term.cols < 20 || term.rows < 5) { setTimeout(() => { safeFit(tab); connectTab(tab); }, 100); return; } // wait for a real layout
   const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -554,6 +554,7 @@ function renderTabs() {
   const root = $('#tabs');
   root.innerHTML = '';
   for (const [name, tab] of state.tabs) {
+    if (tab.kind === 'view') { root.appendChild(viewTabEl(name, tab)); continue; }
     const t = state.terminals.find((x) => x.name === name);
     const s = t?.resume ? sessionById(t.resume) : null;
     const st = tab.closed ? 'closed' : (s?.state ?? 'working');
@@ -572,8 +573,8 @@ function renderTabs() {
     });
     root.appendChild(el);
   }
-  $('#mobile-terminal-title').textContent = state.activeTab && state.tabs.has(state.activeTab)
-    ? tabLabel(state.activeTab) : 'Terminal';
+  const active = state.tabs.get(state.activeTab);
+  $('#mobile-terminal-title').textContent = !active ? 'Terminal' : active.kind === 'view' ? active.label : tabLabel(state.activeTab);
   $('#empty-state').style.display = state.tabs.size ? 'none' : 'flex';
   updateDictationAvailability();
 }
@@ -595,9 +596,10 @@ function activateTab(name) {
   for (const [n, t] of state.tabs) t.wrap.classList.toggle('active', n === name);
   renderTabs();
   const t = state.tabs.get(name);
-  if (t) { if (mobileLayout.matches) showMobileView('terminal'); safeFit(t); connectTab(t); if (!mobileLayout.matches) t.term.focus(); }
+  if (t) { if (mobileLayout.matches) showMobileView('terminal'); safeFit(t); connectTab(t); if (!mobileLayout.matches) t.term?.focus(); }
   const term = state.terminals.find((x) => x.name === name);
-  if (term?.resume) selectSession(term.resume); else renderSessions();
+  if (t?.kind === 'view') { checkView(t); if (state.selected !== t.sessionId) selectSession(t.sessionId); }
+  else if (term?.resume) selectSession(term.resume); else renderSessions();
   syncUrl();
 }
 
@@ -606,8 +608,8 @@ function closeTab(name) {
   if (state.preview === name) state.preview = null;
   const t = state.tabs.get(name);
   if (!t) return;
-  try { t.ws.close(); } catch {}
-  t.term.dispose();
+  try { t.ws?.close(); } catch {}
+  t.term?.dispose();
   t.wrap.remove();
   state.tabs.delete(name);
   if (state.activeTab === name) state.activeTab = [...state.tabs.keys()].pop() ?? null;
@@ -626,7 +628,7 @@ function syncTabsWithTerminals() {
 
 // Fit, then verify: if xterm's screen is taller than the box (rounding, font metrics), drop rows until it fits.
 function safeFit(t) {
-  if (!t || t.closed || !t.wrap.classList.contains('active')) return;
+  if (!t?.term || t.closed || !t.wrap.classList.contains('active')) return;
   const dims = t.fit.proposeDimensions();
   // Tiny proposals mean the box has no real layout yet (hidden column, mid-render): never apply them,
   // they would shrink the shared tmux window for every attached client.
@@ -818,6 +820,72 @@ function agentsBoard(parent, { selectedId = null } = {}) {
 
 const convoShown = new Set();
 
+// ---------- previews: what fx made, rendered (fx's terminal cannot show it) ----------
+// HTML, SVG and images open as a tab next to the terminal, sandboxed by the server, and reload when fx
+// rewrites the file. The newest one also gets a card with a live thumbnail at the top of the right column.
+const VIEWABLE = /\.(html?|svg|png|jpe?g|gif|webp)$/i;
+const canView = (f) => f.exists && VIEWABLE.test(f.path);
+const viewUrl = (id, path) => `/api/sessions/${encodeURIComponent(id)}/preview?path=${encodeURIComponent(path)}`;
+const SANDBOX = 'allow-scripts allow-forms allow-popups allow-modals';
+function openView(sessionId, path) {
+  const name = 'view:' + path;
+  if (!state.tabs.has(name)) {
+    const wrap = document.createElement('div');
+    wrap.className = 'term-wrap view-wrap';
+    const frame = document.createElement('iframe');
+    frame.setAttribute('sandbox', SANDBOX);
+    frame.title = path.split('/').pop();
+    frame.src = viewUrl(sessionId, path);
+    wrap.appendChild(frame);
+    $('#terminals').appendChild(wrap);
+    state.tabs.set(name, { name, kind: 'view', sessionId, path, label: path.split('/').pop(), wrap, frame, closed: false, etag: null });
+  }
+  activateTab(name);
+}
+function viewTabEl(name, tab) {
+  const el = document.createElement('div');
+  el.className = 'tab view' + (name === state.activeTab ? ' active' : '');
+  el.title = tab.path;
+  el.innerHTML = `<span class="view-icon">◫</span><span class="tab-label">${esc(tab.label)}</span><span class="close" data-close="1" title="Close preview">×</span>`;
+  el.addEventListener('click', (e) => { if (e.target.dataset.close) closeTab(name); else activateTab(name); });
+  return el;
+}
+// Live reload: the active preview asks for the file's ETag (mtime + size) and reloads when it changes.
+async function checkView(tab) {
+  if (!tab || tab.kind !== 'view' || document.hidden) return;
+  try {
+    const r = await fetch(viewUrl(tab.sessionId, tab.path), { method: 'HEAD' });
+    const etag = r.ok ? r.headers.get('etag') : null;
+    if (tab.etag && etag && etag !== tab.etag) tab.frame.src = viewUrl(tab.sessionId, tab.path);
+    if (etag) tab.etag = etag;
+  } catch {}
+}
+setInterval(() => checkView(state.tabs.get(state.activeTab)), 1500);
+
+// The card lives outside the re-rendered body so its thumbnail is not reloaded on every poll.
+let artifactKey = '';
+const fmtAgo = (ms) => { const s = Math.max(0, (Date.now() - ms) / 1000); return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + 'm ago' : s < 86400 ? Math.round(s / 3600) + 'h ago' : fmtTime(ms); };
+function renderArtifactCard(id, files) {
+  const slot = $('#artifact-slot');
+  // Only what fx created (write_file): an edited or mentioned page is usually part of an app, not a result.
+  const f = (files ?? []).filter((x) => x.action === 'write' && canView(x)).sort((a, b) => b.mtime - a.mtime)[0];
+  const key = f ? `${id}:${f.path}:${f.mtime}` : '';
+  if (!f) { slot.classList.add('hidden'); slot.innerHTML = ''; artifactKey = ''; return; }
+  slot.classList.remove('hidden');
+  const fresh = Date.now() - f.mtime < 10 * 60000;
+  const name = f.rel.split('/').pop(), dir = f.rel.slice(0, f.rel.length - name.length).replace(/\/$/, '');
+  if (key !== artifactKey) {
+    artifactKey = key;
+    const isImage = !/\.html?$/i.test(f.path);
+    slot.innerHTML = `<div class="art-card" data-view-file="${esc(f.path)}" title="Open as a tab next to the terminal">
+      <div class="art-thumb">${isImage ? `<img src="${viewUrl(id, f.path)}" alt="">` : `<iframe sandbox="${SANDBOX}" tabindex="-1" aria-hidden="true" src="${viewUrl(id, f.path)}"></iframe>`}</div>
+      <div class="art-meta"><span class="art-name">${fresh ? '<span class="art-new">●</span>' : ''}${esc(name)}</span>${dir ? `<span class="art-dir">${esc(dir)}</span>` : ''}<span class="art-ago" data-mtime="${f.mtime}"></span><a href="#" class="art-full" data-full-view="${esc(f.path)}" title="Full screen in a new browser tab">↗</a></div>
+    </div>`;
+  }
+  slot.querySelector('.art-ago').textContent = fmtAgo(f.mtime);
+  slot.querySelector('.art-new')?.classList.toggle('hidden', !fresh);
+}
+
 // ---------- files the session touched ----------
 const expandedFiles = new Set(), readsShown = new Set(), fileCache = new Map();
 let filesCollapsed = false;
@@ -833,7 +901,8 @@ function fileRow(f) {
   const preview = !open ? '' : !c ? '<div class="file-note">loading…</div>'
     : c.text !== undefined ? `<pre class="file-preview">${esc(c.text)}</pre>`
     : `<div class="file-note">${c.binary ? 'binary file' : c.tooLarge ? `too large to preview (${Math.round(c.size / 1024)} KB)` : esc(c.error ?? 'not available')}</div>`;
-  return `<div class="file ${open ? 'open' : ''} ${f.exists ? '' : 'missing'}" ${f.exists ? `data-file="${esc(f.path)}"` : ''}>
+  const target = !f.exists ? '' : canView(f) ? `data-view-file="${esc(f.path)}" title="Open as a tab next to the terminal"` : `data-file="${esc(f.path)}"`;
+  return `<div class="file ${open ? 'open' : ''} ${f.exists ? '' : 'missing'} ${canView(f) ? 'viewable' : ''}" ${target}>
     <div class="file-head"><span class="file-act ${f.action}">${FILE_LABEL[f.action]}</span><span class="file-path" title="${esc(f.path)}"><span class="file-name">${esc(name)}</span>${dir ? `<span class="file-dir">${esc(dir.replace(/\/$/, ''))}</span>` : ''}</span>${subs ? `<span class="file-by" title="by subagent ${subs}">${kids[0]}${kids.length > 1 ? ' +' + (kids.length - 1) : ''}</span>` : ''}${f.exists ? `<a href="#" class="file-open" data-open-file="${esc(f.path)}" title="Open with the default app">↗</a>` : '<span class="file-by">deleted</span>'}</div>
     ${preview}</div>`;
 }
@@ -860,6 +929,10 @@ async function toggleFile(path) {
 $('#transcript').addEventListener('click', (e) => {
   const opener = e.target.closest('[data-open-file]');
   if (opener) { e.preventDefault(); return post(`/api/sessions/${state.selected}/open-file`, { path: opener.dataset.openFile }); }
+  const full = e.target.closest('[data-full-view]');
+  if (full) { e.preventDefault(); return window.open(viewUrl(state.selected, full.dataset.fullView), '_blank', 'noopener'); }
+  const viewer = e.target.closest('[data-view-file]');
+  if (viewer) { e.preventDefault(); return openView(state.selected, viewer.dataset.viewFile); }
   if (e.target.closest('[data-toggle-agents]')) {
     e.preventDefault(); agentsCollapsed = !agentsCollapsed;
     try { localStorage.setItem('fox.agentsCollapsed', agentsCollapsed ? '1' : '0'); } catch {}
@@ -1030,6 +1103,7 @@ async function loadTranscript(id, quiet = false) {
     if (parent.children?.length) html.push(agentsBoard(parent, isChild ? { selectedId: id } : {}));
     html.push(filesSection(id, files));
   }
+  renderArtifactCard(id, files);
   const body = $('#transcript-body');
   const wasAtBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
   body.innerHTML = html.join('');
@@ -1098,7 +1172,7 @@ function applyPalette(p) {
   r.setProperty('--text', p.text); r.setProperty('--muted', p.muted); r.setProperty('--accent', p.accent);
   r.setProperty('--ok', p.ok); r.setProperty('--err', p.err); r.setProperty('--warn', p.warn);
   const termBg = p.sky ? 'rgba(0,0,0,0)' : p.bg;
-  for (const t of state.tabs.values()) t.term.options.theme = { background: termBg, foreground: p.text, cursor: p.cursor, selectionBackground: p.sel };
+  for (const t of state.tabs.values()) if (t.term) t.term.options.theme = { background: termBg, foreground: p.text, cursor: p.cursor, selectionBackground: p.sel };
   state.palette = p;
   document.body.classList.toggle('night', Boolean(p.sky));
   p.sky ? sky.start() : sky.stop();
@@ -1239,7 +1313,7 @@ try { fontSize = Number(localStorage.getItem('fox.fontSize')) || 13; } catch {}
 function setFontSize(px) {
   fontSize = Math.min(24, Math.max(9, px));
   try { localStorage.setItem('fox.fontSize', String(fontSize)); } catch {}
-  for (const t of state.tabs.values()) { t.term.options.fontSize = fontSize; t.settled = null; }
+  for (const t of state.tabs.values()) { if (!t.term) continue; t.term.options.fontSize = fontSize; t.settled = null; }
   fitActive();
 }
 
@@ -1454,7 +1528,7 @@ mobileLayout.addEventListener('change', sizeMobileViewport);
 mobileLayout.addEventListener('change', updatePageTitle);
 mobileLayout.addEventListener('change', async () => {
   if (mobileLayout.matches) { try { await document.fonts.load(`${fontSize}px "Source Code Pro"`); } catch {} }
-  for (const tab of state.tabs.values()) { tab.term.options.fontFamily = terminalFontFamily(); tab.settled = null; }
+  for (const tab of state.tabs.values()) { if (!tab.term) continue; tab.term.options.fontFamily = terminalFontFamily(); tab.settled = null; }
   fitActive();
 });
 // ---------- local phone pairing ----------
