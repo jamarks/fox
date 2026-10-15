@@ -55,12 +55,11 @@
 
   <div id="newsheet" class="hidden">
     <form class="sheet" id="newform">
-      <div class="section-title">new session</div>
-      <div class="ns-folder" id="ns-folder"></div>
-      <label class="ns-label">model <span class="muted">(optional, fx default otherwise)</span></label>
-      <div class="row"><span id="ns-badge"></span><select id="ns-model" style="flex:1"><option value="">fx default</option></select></div>
+      <div class="ns-head">New session in <span class="ns-folder" id="ns-folder"></span></div>
+      <label class="ns-label" for="ns-model">Model</label>
+      <div class="row ns-model-row"><span id="ns-badge"></span><select id="ns-model"><option value="">fx default</option></select><span id="ns-prov"></span></div>
       <div id="ns-tools" class="hidden"></div>
-      <div class="row ns-actions"><button type="button" id="ns-cancel">Cancel</button><button type="submit" class="primary">Open</button><span class="muted ns-hint">Enter to open · Esc to cancel</span></div>
+      <div class="row ns-actions"><span class="muted ns-hint">↵ open · esc cancel</span><button type="button" id="ns-cancel">Cancel</button><button type="submit" class="primary">Open</button></div>
     </form>
   </div>
   <div class="resizer" id="rs-left" title="Drag to resize"></div>

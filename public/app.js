@@ -1125,45 +1125,50 @@ function newSessionSheet(cwd) {
   loadModels().then(() => $('#ns-model').focus());
   loadTools();
 }
-// Optional tools fx does not have yet (MCP servers from fox's catalog). Nothing is added without a click.
+// Tools for fx (MCP servers from fox's catalog): one chip each, ✓ when fx has it. Nothing is added without a click.
+const toolChip = (t) => !t.installed ? `<button type="button" class="ns-chip" data-add-tool="${t.id}" title="${esc(t.description)}">+ ${esc(t.label)}</button>`
+  : t.needsSignIn ? `<button type="button" class="ns-chip warn" data-signin-tool="${t.id}" title="${esc(t.description)} Opens the sign-in page in a new tab.">${esc(t.label)} · sign in</button>`
+  : `<span class="ns-chip on" title="${esc(t.description)}">✓ ${esc(t.label)}</span>`;
 async function loadTools() {
   const box = $('#ns-tools');
   let tools = [];
   try { tools = await (await fetch('/api/tools')).json(); } catch {}
-  const todo = tools.filter((t) => !t.installed || t.needsSignIn);
-  box.classList.toggle('hidden', !todo.length);
-  box.innerHTML = !todo.length ? '' : `<label class="ns-label">give fx more tools <span class="muted">(added to fx's own config, for every session)</span></label>` +
-    todo.map((t) => `<div class="ns-tool"><div class="ns-tool-text"><b>${esc(t.label)}</b><span class="muted">${esc(t.description)}</span></div>${t.installed ? signInButton(t.id) : `<button type="button" data-add-tool="${t.id}">Add</button>`}</div>`).join('');
+  box.classList.toggle('hidden', !tools.length);
+  box.innerHTML = `<label class="ns-label" title="Added to fx's own MCP config, so every fx session has them">Tools for fx</label><div class="ns-chips">${tools.map(toolChip).join('')}</div><div class="ns-tools-note muted"></div>`;
 }
-const signInButton = (id) => `<button type="button" data-signin-tool="${id}" title="Opens the sign-in page in your browser">Sign in</button>`;
 $('#ns-tools').addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-add-tool], [data-signin-tool]');
-  if (!btn) return;
+  if (!btn || btn.disabled) return;
   const id = btn.dataset.addTool ?? btn.dataset.signinTool, adding = Boolean(btn.dataset.addTool);
-  const label = btn.textContent;
+  const label = btn.textContent, note = $('#ns-tools .ns-tools-note');
   btn.disabled = true; btn.textContent = adding ? 'Adding…' : 'Opening…';
   const r = await fetch(`/api/tools/${id}/${adding ? 'add' : 'signin'}`, { method: 'POST' });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) { btn.disabled = false; btn.textContent = label; return alert(j.error || (adding ? 'Could not add it' : 'Could not start the sign-in')); }
-  const done = (text) => btn.replaceWith(Object.assign(document.createElement('span'), { className: 'ns-tool-done', textContent: text }));
+  if (!r.ok) { btn.disabled = false; btn.textContent = label; note.textContent = j.error || (adding ? 'Could not add it.' : 'Could not start the sign-in.'); return; }
   if (adding) {
     const tool = Array.isArray(j) ? j.find((t) => t.id === id) : null;
-    if (tool?.needsSignIn) { btn.outerHTML = signInButton(id); return; } // added; one more step
-    return done('Added · new sessions have it');
+    btn.outerHTML = toolChip(tool ?? { id, label: label.replace(/^\+ /, ''), description: btn.title, installed: true });
+    if (!tool?.needsSignIn) note.textContent = 'New sessions have it.';
+    return;
   }
-  // fx waits for the provider's page to call back; open it in a tab (or offer a link if popups are blocked).
+  // fx waits for the provider's page to call back: open it in a tab, or offer a link if popups are blocked.
   const tab = window.open(j.url, '_blank');
-  const status = Object.assign(document.createElement('span'), { className: 'ns-tool-wait' });
-  status.innerHTML = `Waiting for sign-in…${tab ? '' : ` <a href="${esc(j.url)}" target="_blank" rel="noopener">open the page</a>`}`;
-  btn.replaceWith(status);
+  btn.textContent = 'Waiting for sign-in…';
+  note.innerHTML = tab ? 'Finish the sign-in in the new tab.' : `Pop-up blocked: <a href="${esc(j.url)}" target="_blank" rel="noopener">open the sign-in page</a>.`;
   for (let i = 0; i < 150; i++) {
     await new Promise((res) => setTimeout(res, 2000));
     const st = await (await fetch(`/api/tools/${id}/signin`)).json().catch(() => ({}));
-    if (st.status === 'done') { status.className = 'ns-tool-done'; status.textContent = 'Signed in · new sessions have it'; return; }
-    if (st.status === 'failed') { status.outerHTML = signInButton(id); return alert(st.error || 'Sign-in did not finish'); }
+    if (st.status === 'done') { btn.outerHTML = `<span class="ns-chip on" title="${esc(btn.title)}">✓ ${esc(label.replace(/ · sign in$/, ''))}</span>`; note.textContent = 'Signed in. New sessions have it.'; return; }
+    if (st.status === 'failed') { btn.disabled = false; btn.textContent = label; note.textContent = st.error || 'The sign-in did not finish.'; return; }
   }
 });
-function updateNsBadge() { const v = $('#ns-model').value; $('#ns-badge').innerHTML = modelBadge(v ? v.split('|')[1] : modelsCatalog?.default?.model); }
+function updateNsBadge() {
+  const v = $('#ns-model').value;
+  const [provider, model] = v ? v.split('|') : [modelsCatalog?.default?.provider, modelsCatalog?.default?.model];
+  $('#ns-badge').innerHTML = modelBadge(model);
+  $('#ns-prov').innerHTML = providerTag(provider); // who pays: subscription or Gateway
+  $('#ns-prov').title = providerLabel(provider);
+}
 $('#ns-model').addEventListener('change', updateNsBadge);
 $('#ns-cancel').addEventListener('click', () => $('#newsheet').classList.add('hidden'));
 $('#newsheet').addEventListener('click', (e) => { if (e.target.id === 'newsheet') $('#newsheet').classList.add('hidden'); });
