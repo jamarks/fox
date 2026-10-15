@@ -4,7 +4,9 @@
 # FOX_NO_START=1 installs without starting fox.
 set -euo pipefail
 
-REPO="github:jamarks/fox"
+# The tarball, not "github:jamarks/fox": npm fails installing a git dependency globally when it has
+# install scripts (node-pty), with "spawn sh ENOENT".
+REPO="https://github.com/jamarks/fox/archive/refs/heads/main.tar.gz"
 bold=$'\033[1m'; dim=$'\033[2m'; red=$'\033[31m'; green=$'\033[32m'; reset=$'\033[0m'
 step() { printf '%s›%s %s\n' "$bold" "$reset" "$1"; }
 ok() { printf '  %s✓%s %s\n' "$green" "$reset" "$1"; }

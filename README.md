@@ -90,7 +90,7 @@ curl -fsSL https://raw.githubusercontent.com/jamarks/fox/main/setup.sh | bash
 Or with npm, if Node, tmux and fx are already there:
 
 ```bash
-npm install -g github:jamarks/fox && fox
+npm install -g https://github.com/jamarks/fox/archive/refs/heads/main.tar.gz && fox
 ```
 
 Or run from a checkout without installing a global command:
