@@ -367,7 +367,6 @@ $('#new-session').addEventListener('submit', async (e) => {
   const r = await (await fetch('/api/check-dir?path=' + encodeURIComponent(v))).json();
   if (r.ok) newSessionSheet(r.path);
 });
-$('#refresh').addEventListener('click', refresh);
 $('#keys').addEventListener('click', () => showShortcuts());
 // Shift-click or right-click the folder icon to type a path instead of using the native picker.
 $('#pick-folder').addEventListener('contextmenu', (e) => { e.preventDefault(); $('#new-session').classList.toggle('hidden'); $('#new-cwd').focus(); });
@@ -1099,6 +1098,28 @@ const sky = (() => {
   return { start() { if (!raf) raf = requestAnimationFrame(draw); }, stop() { if (raf) cancelAnimationFrame(raf); raf = null; } };
 })();
 $('#theme').addEventListener('change', () => { try { localStorage.setItem('fox.theme', $('#theme').value); } catch {} applyTheme(); });
+// Theme dots in the settings menu: one per palette (its panel color with its accent), the current one ringed.
+function renderThemeDots() {
+  $('#theme-dots').innerHTML = THEME_ORDER.map((t) => {
+    const p = t === 'sky' ? { panel: '#0b0d14', accent: SKY.accent } : PALETTES[t];
+    return `<button type="button" class="theme-dot ${$('#theme').value === t ? 'on' : ''}" data-theme="${t}" title="${t}" aria-label="${t} theme" style="background:conic-gradient(${p.accent} 0 50%, ${p.panel} 0)"></button>`;
+  }).join('');
+}
+$('#theme-dots').addEventListener('click', (e) => {
+  const dot = e.target.closest('[data-theme]');
+  if (!dot) return;
+  $('#theme').value = dot.dataset.theme;
+  $('#theme').dispatchEvent(new Event('change'));
+});
+$('#theme').addEventListener('change', renderThemeDots);
+// Settings menu: theme, notifications, phone pairing, shortcuts. Closes on outside click or Esc.
+const settingsMenu = $('#settings-menu');
+function setSettingsMenu(open) { settingsMenu.classList.toggle('hidden', !open); $('#settings').setAttribute('aria-expanded', String(open)); if (open) renderThemeDots(); }
+$('#settings').addEventListener('click', (e) => { e.stopPropagation(); setSettingsMenu(settingsMenu.classList.contains('hidden')); });
+document.addEventListener('click', (e) => { if (!e.target.closest('.menu-wrap')) setSettingsMenu(false); });
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') setSettingsMenu(false); });
+$('#keys').addEventListener('click', () => setSettingsMenu(false));
+$('#pair-phone').addEventListener('click', () => setSettingsMenu(false));
 const THEME_ORDER = ['dark', 'dusk', 'mauve', 'terracotta', 'copper', 'plum', 'sky'];
 try { const saved = localStorage.getItem('fox.theme'); $('#theme').value = saved === 'night' ? 'sky' : THEME_ORDER.includes(saved) ? saved : 'dark'; } catch {}
 applyTheme();
