@@ -820,43 +820,69 @@ function agentsBoard(parent, { selectedId = null } = {}) {
 
 const convoShown = new Set();
 
-// ---------- previews: what fx made, rendered (fx's terminal cannot show it) ----------
-// HTML, SVG and images open as a tab next to the terminal, sandboxed by the server, and reload when fx
-// rewrites the file. The newest one also gets a card with a live thumbnail at the top of the right column.
+// ---------- files open as tabs next to the terminal (fx's terminal cannot show them) ----------
+// One rule: click a file and it opens in the middle. Pages and images render (sandboxed by the server);
+// code and text show as source with line numbers. HTML can flip between page and source. Every file tab
+// reloads when fx changes the file. The newest page fx wrote also gets a card at the top of the right column.
 const VIEWABLE = /\.(html?|svg|png|jpe?g|gif|webp)$/i;
+const IS_HTML = /\.html?$/i;
 const canView = (f) => f.exists && VIEWABLE.test(f.path);
 const viewUrl = (id, path) => `/api/sessions/${encodeURIComponent(id)}/preview?path=${encodeURIComponent(path)}`;
 const SANDBOX = 'allow-scripts allow-forms allow-popups allow-modals';
-function openView(sessionId, path) {
+// A page fx created opens rendered; one it edited is usually part of an app (needs its server), so source.
+const defaultMode = (f) => (canView(f) && (!IS_HTML.test(f.path) || f.action === 'write') ? 'page' : 'source');
+function openView(sessionId, path, mode = 'page') {
   const name = 'view:' + path;
-  if (!state.tabs.has(name)) {
+  let tab = state.tabs.get(name);
+  if (!tab) {
     const wrap = document.createElement('div');
     wrap.className = 'term-wrap view-wrap';
-    const frame = document.createElement('iframe');
-    frame.setAttribute('sandbox', SANDBOX);
-    frame.title = path.split('/').pop();
-    frame.src = viewUrl(sessionId, path);
-    wrap.appendChild(frame);
     $('#terminals').appendChild(wrap);
-    state.tabs.set(name, { name, kind: 'view', sessionId, path, label: path.split('/').pop(), wrap, frame, closed: false, etag: null });
+    tab = { name, kind: 'view', sessionId, path, label: path.split('/').pop(), wrap, closed: false, etag: null, mode: null };
+    state.tabs.set(name, tab);
   }
+  setViewMode(tab, VIEWABLE.test(path) ? mode : 'source');
   activateTab(name);
+}
+function setViewMode(tab, mode) {
+  if (tab.mode === mode) return;
+  tab.mode = mode;
+  const toggle = IS_HTML.test(tab.path)
+    ? `<div class="view-mode">${['page', 'source'].map((m) => `<button type="button" data-view-mode="${m}" class="${m === mode ? 'on' : ''}">${m}</button>`).join('')}</div>` : '';
+  tab.wrap.classList.toggle('source', mode === 'source');
+  tab.wrap.innerHTML = toggle + (mode === 'page'
+    ? `<iframe sandbox="${SANDBOX}" title="${esc(tab.label)}" src="${viewUrl(tab.sessionId, tab.path)}"></iframe>`
+    : '<div class="code-view"><div class="code-note">loading…</div></div>');
+  tab.wrap.querySelectorAll('[data-view-mode]').forEach((b) => b.addEventListener('click', () => setViewMode(tab, b.dataset.viewMode)));
+  if (mode === 'source') loadSource(tab);
+}
+async function loadSource(tab) {
+  const box = tab.wrap.querySelector('.code-view');
+  if (!box) return;
+  const j = await fetch(`/api/sessions/${encodeURIComponent(tab.sessionId)}/file?path=${encodeURIComponent(tab.path)}`).then((r) => r.json()).catch(() => ({ error: 'not available' }));
+  if (j.text === undefined) { box.innerHTML = `<div class="code-note">${j.binary ? 'Binary file. Use ↗ in the files list to open it.' : j.tooLarge ? `Too large to show here (${Math.round(j.size / 1024)} KB). Use ↗ to open it.` : esc(j.error ?? 'not available')}</div>`; return; }
+  const top = box.scrollTop;
+  box.innerHTML = `<pre>${j.text.split('\n').map((line) => `<span class="code-line">${esc(line) || ' '}</span>`).join('')}</pre>`;
+  box.scrollTop = top; // a reload keeps your place
 }
 function viewTabEl(name, tab) {
   const el = document.createElement('div');
   el.className = 'tab view' + (name === state.activeTab ? ' active' : '');
   el.title = tab.path;
-  el.innerHTML = `<span class="view-icon">◫</span><span class="tab-label">${esc(tab.label)}</span><span class="close" data-close="1" title="Close preview">×</span>`;
+  el.innerHTML = `<span class="view-icon">${VIEWABLE.test(tab.path) ? '◫' : '{}'}</span><span class="tab-label">${esc(tab.label)}</span><span class="close" data-close="1" title="Close">×</span>`;
   el.addEventListener('click', (e) => { if (e.target.dataset.close) closeTab(name); else activateTab(name); });
   return el;
 }
-// Live reload: the active preview asks for the file's ETag (mtime + size) and reloads when it changes.
+// Live reload: the active file tab asks for the file's ETag (mtime + size) and reloads when it changes.
 async function checkView(tab) {
   if (!tab || tab.kind !== 'view' || document.hidden) return;
   try {
     const r = await fetch(viewUrl(tab.sessionId, tab.path), { method: 'HEAD' });
     const etag = r.ok ? r.headers.get('etag') : null;
-    if (tab.etag && etag && etag !== tab.etag) tab.frame.src = viewUrl(tab.sessionId, tab.path);
+    if (tab.etag && etag && etag !== tab.etag) {
+      if (tab.mode === 'page') tab.wrap.querySelector('iframe').src = viewUrl(tab.sessionId, tab.path);
+      else loadSource(tab);
+    }
     if (etag) tab.etag = etag;
   } catch {}
 }
@@ -887,24 +913,20 @@ function renderArtifactCard(id, files) {
 }
 
 // ---------- files the session touched ----------
-const expandedFiles = new Set(), readsShown = new Set(), fileCache = new Map();
+const readsShown = new Set();
 let filesCollapsed = false;
 try { filesCollapsed = localStorage.getItem('fox.filesCollapsed') === '1'; } catch {}
 const FILE_LABEL = { write: 'wrote', edit: 'edited', mention: 'mentioned', read: 'read' };
 function fileRow(f) {
-  const open = expandedFiles.has(f.path);
   const kids = f.by.filter((b) => b > 0).map((b) => '#' + b);
   const subs = kids.join(' ');
   // Name first so a narrow column still tells files apart; the folder follows, muted.
   const name = f.rel.split('/').pop(), dir = f.rel.slice(0, f.rel.length - name.length);
-  const c = fileCache.get(f.path);
-  const preview = !open ? '' : !c ? '<div class="file-note">loading…</div>'
-    : c.text !== undefined ? `<pre class="file-preview">${esc(c.text)}</pre>`
-    : `<div class="file-note">${c.binary ? 'binary file' : c.tooLarge ? `too large to preview (${Math.round(c.size / 1024)} KB)` : esc(c.error ?? 'not available')}</div>`;
-  const target = !f.exists ? '' : canView(f) ? `data-view-file="${esc(f.path)}" title="Open as a tab next to the terminal"` : `data-file="${esc(f.path)}"`;
-  return `<div class="file ${open ? 'open' : ''} ${f.exists ? '' : 'missing'} ${canView(f) ? 'viewable' : ''}" ${target}>
-    <div class="file-head"><span class="file-act ${f.action}">${FILE_LABEL[f.action]}</span><span class="file-path" title="${esc(f.path)}"><span class="file-name">${esc(name)}</span>${dir ? `<span class="file-dir">${esc(dir.replace(/\/$/, ''))}</span>` : ''}</span>${subs ? `<span class="file-by" title="by subagent ${subs}">${kids[0]}${kids.length > 1 ? ' +' + (kids.length - 1) : ''}</span>` : ''}${f.exists ? `<a href="#" class="file-open" data-open-file="${esc(f.path)}" title="Open with the default app">↗</a>` : '<span class="file-by">deleted</span>'}</div>
-    ${preview}</div>`;
+  const kind = VIEWABLE.test(f.path) ? '◫' : '{}';
+  const target = f.exists ? `data-view-file="${esc(f.path)}" data-view-mode="${defaultMode(f)}" title="Open in the middle"` : '';
+  return `<div class="file ${f.exists ? '' : 'missing'}" ${target}>
+    <div class="file-head"><span class="file-act ${f.action}">${FILE_LABEL[f.action]}</span><span class="file-kind" aria-hidden="true">${kind}</span><span class="file-path" title="${esc(f.path)}"><span class="file-name">${esc(name)}</span>${dir ? `<span class="file-dir">${esc(dir.replace(/\/$/, ''))}</span>` : ''}</span>${subs ? `<span class="file-by" title="by subagent ${subs}">${kids[0]}${kids.length > 1 ? ' +' + (kids.length - 1) : ''}</span>` : ''}${f.exists ? `<a href="#" class="file-open" data-open-file="${esc(f.path)}" title="Open with the default app">↗</a>` : '<span class="file-by">deleted</span>'}</div>
+  </div>`;
 }
 function filesSection(id, files) {
   if (!files?.length) return '';
@@ -915,24 +937,13 @@ function filesSection(id, files) {
   return `${head}<div class="files">${main.map(fileRow).join('')}
     ${reads.length ? (showReads ? reads.map(fileRow).join('') + (main.length ? `<a href="#" class="files-more" data-toggle-reads="${id}">hide read files</a>` : '') : `<a href="#" class="files-more" data-toggle-reads="${id}">${reads.length} read</a>`) : ''}</div>`;
 }
-async function toggleFile(path) {
-  const id = state.selected;
-  if (expandedFiles.has(path)) expandedFiles.delete(path);
-  else {
-    expandedFiles.add(path);
-    fileCache.delete(path); // re-read: the agent may have changed it
-    fetch(`/api/sessions/${id}/file?path=${encodeURIComponent(path)}`).then((r) => r.json()).then((j) => { fileCache.set(path, j); lastTranscriptKey = ''; loadTranscript(id, true); });
-  }
-  lastTranscriptKey = ''; loadTranscript(id, true);
-}
-
 $('#transcript').addEventListener('click', (e) => {
   const opener = e.target.closest('[data-open-file]');
   if (opener) { e.preventDefault(); return post(`/api/sessions/${state.selected}/open-file`, { path: opener.dataset.openFile }); }
   const full = e.target.closest('[data-full-view]');
   if (full) { e.preventDefault(); return window.open(viewUrl(state.selected, full.dataset.fullView), '_blank', 'noopener'); }
   const viewer = e.target.closest('[data-view-file]');
-  if (viewer) { e.preventDefault(); return openView(state.selected, viewer.dataset.viewFile); }
+  if (viewer) { e.preventDefault(); return openView(state.selected, viewer.dataset.viewFile, viewer.dataset.viewMode || 'page'); }
   if (e.target.closest('[data-toggle-agents]')) {
     e.preventDefault(); agentsCollapsed = !agentsCollapsed;
     try { localStorage.setItem('fox.agentsCollapsed', agentsCollapsed ? '1' : '0'); } catch {}
@@ -945,8 +956,6 @@ $('#transcript').addEventListener('click', (e) => {
   }
   const reads = e.target.closest('[data-toggle-reads]');
   if (reads) { e.preventDefault(); const id = reads.dataset.toggleReads; readsShown.has(id) ? readsShown.delete(id) : readsShown.add(id); lastTranscriptKey = ''; return loadTranscript(id, true); }
-  const file = e.target.closest('[data-file]');
-  if (file && !e.target.closest('.file-preview')) { toggleFile(file.dataset.file); return; }
   const toggle = e.target.closest('a[data-hide-convo]');
   if (toggle) {
     e.preventDefault();

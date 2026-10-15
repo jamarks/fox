@@ -429,14 +429,17 @@ async function handlePanelRequest(req, res) {
       // without allow-same-origin: an opaque origin that cannot read fox's API or reach its terminals),
       // even when opened full screen in its own browser tab. HEAD answers the ETag for live reload.
       if (m[2] === 'preview') {
+        const etag = `"${Math.round(f.mtime)}-${f.size}"`;
+        // HEAD works for any file: source tabs use it to know when fx changed the file.
+        if (req.method === 'HEAD') { res.writeHead(200, { etag, 'cache-control': 'no-store' }); return res.end(); }
         const type = PREVIEW_TYPES[extname(f.path).toLowerCase()];
         if (!type) return send(res, 415, { error: 'no preview for this file type' });
         if (f.size > 20 * 1024 * 1024) return send(res, 413, { error: 'file too large to preview' });
         res.writeHead(200, {
-          'content-type': type, 'cache-control': 'no-store', etag: `"${Math.round(f.mtime)}-${f.size}"`,
+          'content-type': type, 'cache-control': 'no-store', etag,
           'x-content-type-options': 'nosniff', 'content-security-policy': 'sandbox allow-scripts allow-forms allow-popups allow-modals',
         });
-        return res.end(req.method === 'HEAD' ? undefined : await readFile(f.path));
+        return res.end(await readFile(f.path));
       }
       if (f.size > 512 * 1024) return send(res, 200, { tooLarge: true, size: f.size });
       const buf = await readFile(f.path);

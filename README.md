@@ -66,8 +66,8 @@ To offer another one, add an entry to `tools.mjs`.
 - **New replies**: an inbox above the projects lists answers you have not opened yet; click one to jump to it.
 - **Provider and model**: `codex` subscription or pay-per-use `▲ gateway`, picked per new session.
 - **Subagents**: grouped by task to compare models; click one for its answer; weak answers flagged.
-- **Files**: what the session wrote, edited or read; preview in place or open with ↗.
-- **See what fx made**: an HTML page, SVG or image fx writes shows up as a card with a live thumbnail; click it and it opens as a tab next to the terminal that reloads whenever fx changes the file. Pages run sandboxed, so their scripts cannot reach fox or your terminals.
+- **Files**: what the session wrote, edited or read. Click one and it opens as a tab next to the terminal: pages and images rendered, code as text with line numbers, HTML with a page · source switch. Tabs reload when fx changes the file; ↗ opens it in its default app.
+- **See what fx made**: the newest page, SVG or image fx wrote shows up as a card with a live thumbnail at the top of the right column. Pages run sandboxed, so their scripts cannot reach fox or your terminals.
 - **One terminal**: fx runs in tmux, so closing the tab or the browser never stops it; pin to keep tabs.
 - **Dictation**: in Chrome, tap the mic by the terminal tabs (or hold ⌥D) and speak. The mic turns into an orange orb whose rings follow your voice, and a pill over the terminal shows the words as they are heard; when you stop, the text lands in fx's input for you to edit. Enter while dictating sends it right away, Esc discards it. Recognition is Chrome's (it may use its online service); fox stores no audio. On a phone, open fox over HTTPS for the mic.
 - **Drop files**: drag images or files onto the terminal to attach them to your next message.
