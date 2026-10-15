@@ -384,29 +384,92 @@ $('#pick-folder').addEventListener('click', async (e) => {
 // ---------- terminals (tmux attach over WebSocket) ----------
 const dictationButton = $('#dictation');
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const pill = $('#dictation-pill');
+let pillTimer = null;
+// Live level bars: a second, silent look at the mic (Chrome shares the permission with speech recognition).
+const meter = { stream: null, ctx: null, raf: 0 };
+async function startMeter() {
+  if (meter.stream || !navigator.mediaDevices?.getUserMedia) return;
+  try {
+    meter.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (!dictation.active) return stopMeter();
+    meter.ctx = new AudioContext();
+    const analyser = meter.ctx.createAnalyser();
+    analyser.fftSize = 512;
+    meter.ctx.createMediaStreamSource(meter.stream).connect(analyser);
+    const data = new Uint8Array(analyser.fftSize), bars = [...pill.querySelectorAll('.dict-bars i')], shape = [0.45, 0.8, 1, 0.75, 0.5];
+    const tick = () => {
+      analyser.getByteTimeDomainData(data);
+      let sum = 0; for (const v of data) sum += ((v - 128) / 128) ** 2;
+      const level = Math.min(1, Math.sqrt(sum / data.length) * 6);
+      bars.forEach((b, i) => { b.style.height = `${3 + Math.round(level * shape[i] * 11)}px`; });
+      meter.raf = requestAnimationFrame(tick);
+    };
+    pill.classList.add('metered');
+    tick();
+  } catch { stopMeter(); } // no meter is fine: the bars keep their idle animation
+}
+function stopMeter() {
+  cancelAnimationFrame(meter.raf);
+  meter.stream?.getTracks().forEach((t) => t.stop());
+  meter.ctx?.close().catch(() => {});
+  meter.stream = meter.ctx = null;
+  pill.classList.remove('metered');
+}
+// The pill floats over the terminal while you speak: what Chrome hears, final words bright, the rest muted.
+function showPill({ phase, message, live, pushToTalk }) {
+  clearTimeout(pillTimer);
+  const listening = phase === 'listening' || phase === 'stopping';
+  pill.classList.toggle('hidden', !listening && phase !== 'error');
+  pill.classList.toggle('error', phase === 'error');
+  if (phase === 'error') {
+    pill.querySelector('.dict-final').textContent = message;
+    pill.querySelector('.dict-interim').textContent = '';
+    pill.querySelector('.dict-hint').textContent = '';
+    pillTimer = setTimeout(() => pill.classList.add('hidden'), 3500);
+    return;
+  }
+  if (!listening) return;
+  if (live) {
+    // Keep the latest words in view: when it gets long, show its end.
+    const room = Math.min(680, $('#terminals').clientWidth - 32) - 140; // bars, hint and padding
+    const MAX = Math.max(16, Math.floor(room / 7.4)), total = live.final.length + live.interim.length;
+    const cut = Math.max(0, total - MAX);
+    const final = cut ? '…' + live.final.slice(Math.min(cut, live.final.length)) : live.final;
+    const interim = cut > live.final.length ? (final === '…' ? '' : '…') + live.interim.slice(cut - live.final.length) : live.interim;
+    pill.querySelector('.dict-final').textContent = final === '…' ? '' : final;
+    pill.querySelector('.dict-interim').textContent = interim;
+    pill.dataset.live = '1';
+  } else if (!pill.dataset.live) { // nothing heard yet
+    pill.querySelector('.dict-final').textContent = '';
+    pill.querySelector('.dict-interim').textContent = 'Listening…';
+  }
+  pill.querySelector('.dict-hint').textContent = pushToTalk ? 'release ⌥D' : '↵ send · esc';
+}
 const dictation = createDictationController(SpeechRecognition, {
   language: () => navigator.language || 'en-US',
-  send: (name, text) => {
+  // The words land in fx's own input; Enter is pressed only when you asked to send.
+  send: (name, text, { submit = false } = {}) => {
     const tab = state.tabs.get(name);
     if (state.activeTab !== name || !tab || tab.closed || tab.ws?.readyState !== WebSocket.OPEN) return false;
-    tab.ws.send(JSON.stringify({ type: 'input', data: text + '\r' }));
+    tab.ws.send(JSON.stringify({ type: 'input', data: text + (submit ? '\r' : '') }));
+    tab.term.focus();
     return true;
   },
-  update: ({ phase, message }) => {
-    dictationButton.classList.toggle('listening', phase === 'listening' || phase === 'stopping');
-    dictationButton.setAttribute('aria-label', phase === 'listening' ? 'Stop and send dictation' : 'Start dictation');
-    dictationButton.title = phase === 'listening' ? 'Stop and send dictation' : 'Dictate to the active terminal';
-    $('#dictation-status').textContent = message;
-    $('#dictation-status').title = message;
+  update: (st) => {
+    const listening = st.phase === 'listening' || st.phase === 'stopping';
+    dictationButton.classList.toggle('listening', listening);
+    dictationButton.setAttribute('aria-label', listening ? 'Stop dictation' : 'Start dictation');
+    dictationButton.title = listening ? 'Stop: the words go to fx\'s input (Enter sends, Esc discards)' : 'Dictate to the active terminal (hold ⌥D)';
+    if (listening) startMeter(); else { stopMeter(); delete pill.dataset.live; }
+    showPill(st);
   },
 });
 function updateDictationAvailability() {
   const tab = state.tabs.get(state.activeTab);
   dictationButton.disabled = !SpeechRecognition || !tab || tab.closed || tab.ws?.readyState !== WebSocket.OPEN;
-  if (!SpeechRecognition) {
-    dictationButton.title = 'Dictation is not supported in this browser (try Chrome)';
-    $('#dictation-status').textContent = 'Dictation unavailable — try Chrome';
-  } else if (!tab) dictationButton.title = 'Open a terminal to dictate';
+  if (!SpeechRecognition) dictationButton.title = 'Dictation needs Chrome';
+  else if (!tab) dictationButton.title = 'Open a terminal to dictate';
 }
 dictationButton.addEventListener('click', () => {
   if (dictation.active) dictation.stop();
@@ -1297,6 +1360,12 @@ function showShortcuts() {
   document.body.appendChild(el);
 }
 let pushToTalkHeld = false;
+// While dictating: Enter sends what you said, Esc throws it away. Captured before xterm sees the key.
+window.addEventListener('keydown', (e) => {
+  if (!dictation.active || pushToTalkHeld || e.altKey || e.metaKey || e.ctrlKey) return;
+  if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); dictation.stop({ submit: true }); }
+  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); dictation.cancel(); }
+}, true);
 window.addEventListener('keyup', (e) => {
   if (e.code !== 'KeyD' || !pushToTalkHeld) return;
   pushToTalkHeld = false;

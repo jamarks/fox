@@ -1,7 +1,8 @@
-// Browser speech recognition; only a final transcript is sent, once, after listening ends.
+// Browser speech recognition. While listening, `update` gets the live words (final + interim) to show;
+// when it ends the final transcript goes to `send` once: inserted into fx's input, or submitted on request.
 function createDictationController(Recognition, { send, update, language }) {
   let active = null;
-  const status = (phase, message) => update({ phase, message });
+  const status = (phase, message, live = null) => update({ phase, message, live, pushToTalk: active?.pushToTalk ?? false });
   const errors = {
     'not-allowed': 'Microphone permission denied.',
     'service-not-allowed': 'Speech recognition is not allowed here.',
@@ -23,14 +24,14 @@ function createDictationController(Recognition, { send, update, language }) {
     const text = [...current.results].sort(([a], [b]) => a - b).map(([, part]) => part)
       .join(' ').replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim();
     if (!text) { status('error', emptyMessage(current)); return; }
-    const sent = send(current.target, text);
-    status(sent ? 'sent' : 'error', sent ? 'Dictation sent.' : 'Terminal disconnected; dictation not sent.');
+    const sent = send(current.target, text, { submit: current.submit });
+    status(sent ? 'sent' : 'error', sent ? (current.submit ? 'Dictation sent.' : 'Dictation inserted.') : 'Terminal disconnected; dictation not sent.');
   }
   return {
     start(target, { pushToTalk = false } = {}) {
       if (!Recognition || active) return;
       const recognition = new Recognition();
-      const current = { recognition, target, results: new Map(), stopping: false, pushToTalk, ended: false,
+      const current = { recognition, target, results: new Map(), interim: '', submit: false, stopping: false, pushToTalk, ended: false,
         audioStarted: false, soundDetected: false, speechDetected: false, interimSeen: false };
       active = current;
       recognition.lang = language();
@@ -41,10 +42,14 @@ function createDictationController(Recognition, { send, update, language }) {
       recognition.onspeechstart = () => { if (active === current) { current.speechDetected = true; status('listening', 'Speech detected…'); } };
       recognition.onresult = (event) => {
         if (active !== current) return;
+        let interim = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
           if (event.results[i].isFinal) current.results.set(i, event.results[i][0].transcript);
-          else if (event.results[i][0]?.transcript) { current.interimSeen = true; status('listening', 'Transcribing…'); }
+          else if (event.results[i][0]?.transcript) { current.interimSeen = true; interim += event.results[i][0].transcript; }
         }
+        current.interim = interim;
+        const final = [...current.results].sort(([a], [b]) => a - b).map(([, part]) => part).join(' ');
+        status('listening', 'Transcribing…', { final: final.trim(), interim: interim.trim() });
       };
       recognition.onerror = (event) => {
         if (active !== current) return;
@@ -65,9 +70,11 @@ function createDictationController(Recognition, { send, update, language }) {
       try { recognition.start(); }
       catch { active = null; status('error', 'Could not start the microphone.'); }
     },
-    stop() {
+    // submit: also press Enter in fx; otherwise the words wait in fx's input for you to edit.
+    stop({ submit = false } = {}) {
       if (!active || active.stopping) return;
       active.stopping = true;
+      active.submit = submit;
       if (active.ended) { finish(active); return; }
       status('stopping', 'Finishing dictation…');
       try { active.recognition.stop(); }

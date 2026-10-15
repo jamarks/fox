@@ -68,7 +68,7 @@ To offer another one, add an entry to `tools.mjs`.
 - **Subagents**: grouped by task to compare models; click one for its answer; weak answers flagged.
 - **Files**: what the session wrote, edited or read; preview in place or open with ↗.
 - **One terminal**: fx runs in tmux, so closing the tab or the browser never stops it; pin to keep tabs.
-- **Dictation**: in Chrome, tap the microphone by the terminal tabs on Mac or phone, speak, then tap again (or wait for recognition to end). With a keyboard, hold ⌥D to talk and release it to send; this shortcut works in the terminal, not in text fields. Fox sends the final transcript to the active fx terminal and presses Enter. Speech recognition depends on the browser and may use its online service; fox does not store audio. On phones, open fox over HTTPS to grant microphone access.
+- **Dictation**: in Chrome, tap the mic by the terminal tabs (or hold ⌥D) and speak. A pill over the terminal shows the words as they are heard, with level bars that follow your voice; when you stop, the text lands in fx's input for you to edit. Enter while dictating sends it right away, Esc discards it. Recognition is Chrome's (it may use its online service); fox stores no audio. On a phone, open fox over HTTPS for the mic.
 - **Drop files**: drag images or files onto the terminal to attach them to your next message.
 - **Search everything**: ⌥Space searches names and messages across all sessions.
 - **Tools for fx**: chips in the new-session panel add MCP servers to fx in one click.

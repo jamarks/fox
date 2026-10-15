@@ -58,9 +58,8 @@ button:disabled { opacity: .3; cursor: not-allowed; }
 #tabbar { display: flex; align-items: flex-end; background: var(--panel); border-bottom: 1px solid var(--border); padding-right: 6px; }
 #tabbar > button { margin-bottom: 4px; }
 #dictation { flex: none; width: 28px; height: 28px; }
-#dictation.listening { color: var(--err); background: var(--panel-2); animation: pulse 1.2s infinite; }
-#dictation-status { color: var(--muted); font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#dictation-status:empty { display: none; }
+#dictation { color: var(--muted); }
+#dictation.listening { color: var(--accent); background: var(--panel-2); }
 #tabs { display: flex; gap: 2px; padding: 6px 8px 0; overflow-x: auto; flex: 1; }
 body.no-transcript { grid-template-columns: var(--left) 1fr; }
 body.no-transcript #rs-right { display: none; }
@@ -393,8 +392,7 @@ a.section-title.fold:hover { color: var(--text); }
   #tabs, #toggle-transcript { display: none; }
   #mobile-terminal-title { display: block; flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 600; }
   #dictation { width: 44px; height: 44px; margin: 0 0 0 8px; }
-  #dictation-status { order: 3; flex-basis: 100%; max-width: none; white-space: normal; overflow: visible; padding-bottom: 6px; font-size: 12px; }
-  .term-wrap { padding: 8px 5px 5px; }
+    .term-wrap { padding: 8px 5px 5px; }
   #empty-state { padding: 24px; text-align: center; }
   #transcript .side-head { min-height: 52px; padding: 10px 16px; font-size: 15px; }
   #close-transcript { width: 44px; height: 44px; }
@@ -419,3 +417,19 @@ a.section-title.fold:hover { color: var(--text); }
 .menu-item:hover { background: var(--panel-2); }
 .menu-item svg { flex: none; color: var(--muted); }
 .menu-state { margin-left: auto; font-size: 11px; color: var(--muted); font-family: var(--mono); }
+/* dictation pill: floats over the terminal while you speak */
+#dictation-pill { position: absolute; left: 16px; right: 16px; bottom: 56px; margin: 0 auto; width: fit-content; z-index: 6; display: flex; align-items: center; gap: 12px; max-width: min(680px, calc(100% - 32px)); box-sizing: border-box; padding: 9px 16px; border-radius: 999px; background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--border); box-shadow: 0 12px 36px rgba(0,0,0,.4); backdrop-filter: blur(10px); font-size: 13px; color: var(--text); animation: pill-in .18s ease-out; }
+#dictation-pill.hidden { display: none; }
+@keyframes pill-in { from { opacity: 0; transform: translateY(6px); } }
+.dict-bars { display: flex; align-items: center; gap: 2px; height: 16px; flex: none; }
+.dict-bars i { display: block; width: 3px; height: 4px; border-radius: 2px; background: var(--accent); transition: height .08s linear; }
+#dictation-pill:not(.metered) .dict-bars i { animation: bar-idle 1.1s ease-in-out infinite; }
+.dict-bars i:nth-child(2) { animation-delay: .15s !important; } .dict-bars i:nth-child(3) { animation-delay: .3s !important; } .dict-bars i:nth-child(4) { animation-delay: .45s !important; } .dict-bars i:nth-child(5) { animation-delay: .6s !important; }
+@keyframes bar-idle { 0%, 100% { height: 4px; } 50% { height: 11px; } }
+.dict-text { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
+.dict-interim { color: var(--muted); }
+.dict-hint { flex: none; font-size: 11px; color: var(--muted); font-family: var(--mono); }
+#dictation-pill.error { border-color: color-mix(in srgb, var(--err) 50%, var(--border)); }
+#dictation-pill.error .dict-bars { display: none; }
+#dictation-pill.error .dict-final { color: var(--err); }
+@media (max-width: 1100px) { .dict-hint { display: none; } #dictation-pill { bottom: 72px; } } /* on a phone, tap the mic again to stop */

@@ -114,3 +114,28 @@ test('recognition errors and empty results do not send', () => {
   assert.equal(states.at(-1).phase, 'error');
   assert.equal(sent.length, 0);
 });
+
+test('shows live words while listening, final and interim apart', () => {
+  const { controller, instances, states } = setup();
+  controller.start('terminal-a');
+  const rec = instances[0];
+  rec.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'revisá el bug' } }, { isFinal: false, 0: { transcript: 'de promedio' } }] });
+  const { final, interim } = states.at(-1).live; // created in the vm context: compare fields
+  assert.deepEqual([final, interim], ['revisá el bug', 'de promedio']);
+});
+
+test('inserts without Enter by default; submits only when asked', () => {
+  const opts = [];
+  const instances = [];
+  class Recognition { constructor() { instances.push(this); } start() {} stop() {} abort() {} }
+  const controller = create(Recognition, { language: () => 'es-AR', send: (t, text, o) => { opts.push([text, o.submit]); return true; }, update: () => {} });
+  controller.start('a');
+  instances[0].onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'uno' } }] });
+  controller.stop();
+  instances[0].onend();
+  controller.start('a');
+  instances[1].onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: 'dos' } }] });
+  controller.stop({ submit: true });
+  instances[1].onend();
+  assert.deepEqual(opts, [['uno', false], ['dos', true]]);
+});
