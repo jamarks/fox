@@ -50,7 +50,7 @@ test('remote port requires QR, Mac approval and cookie for all HTTP/WS; revoke c
   const port = await freePort(), share = await freePort();
   const processChild = spawn(process.execPath, ['server.mjs'], {
     cwd: new URL('..', import.meta.url),
-    env: { ...process.env, HOME: home, PORT: String(port), FOX_SHARE_PORT: String(share), TMUX_BIN: tmux, CLOUDFLARED_BIN: cloudflared }, stdio: 'pipe',
+    env: { ...process.env, HOME: home, PORT: String(port), FOX_SHARE_PORT: String(share), TMUX_BIN: tmux, CLOUDFLARED_BIN: cloudflared, FOX_AUTH_DISABLED: '1' }, stdio: 'pipe',
   });
   const host = 'fox-demo.trycloudflare.com', origin = `https://${host}`;
   const local = (path, data) => request(port, path, { method: data ? 'POST' : 'GET', origin: `http://127.0.0.1:${port}`, data });

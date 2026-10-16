@@ -9,6 +9,7 @@ import { join, resolve, extname, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { createShareBridge } from './share.mjs';
+import { createAuth } from './auth.mjs';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import * as pty from 'node-pty';
@@ -29,6 +30,11 @@ const STATE_DIR = join(homedir(), '.config', 'fox');
 const DROP_DIR = join(STATE_DIR, 'drops');
 const DROP_LIMIT = 25 * 1024 * 1024;
 const STATE_FILE = join(STATE_DIR, 'state.json');
+if (process.env.FOX_PUBLIC_ORIGIN && (process.env.FOX_SHARE_PORT || process.env.FOX_MOBILE_PORT)) {
+  throw new Error('FOX_PUBLIC_ORIGIN cannot be combined with the legacy share or mobile listener');
+}
+const auth = await createAuth({ stateDir: STATE_DIR, disabled: process.env.FOX_AUTH_DISABLED === '1', publicOrigin: process.env.FOX_PUBLIC_ORIGIN });
+if (process.env.FOX_AUTH_DISABLED === '1') console.warn('WARNING: Fox passkey authentication disabled; do not expose this server.');
 
 // Estado del panel: qué sesiones están archivadas y nombres propios. Nunca se escribe en ~/.fx.
 async function loadState() {
@@ -371,7 +377,7 @@ function sameOrigin(req) {
   if (!req.headers.origin || !req.headers.host) return false;
   try {
     const origin = new URL(req.headers.origin);
-    return origin.host === req.headers.host && (origin.protocol === 'http:' || origin.protocol === 'https:') && origin.origin === req.headers.origin;
+    return origin.host === req.headers.host && (origin.protocol === 'http:' || origin.protocol === 'https:') && origin.origin === req.headers.origin && auth.validOrigin(req);
   } catch { return false; }
 }
 
@@ -577,8 +583,31 @@ async function handleView(req, res, path) {
 const server = http.createServer(async (req, res) => {
   if (process.env.FOX_SHARE_PORT !== undefined && !localHost(req.headers.host)) return send(res, 403, { error: 'use the paired gateway for remote access' });
   const path = new URL(req.url, 'http://localhost').pathname;
-  if (path.startsWith('/api/pair/')) return bridge.handleLocalPairing(req, res);
+  if (!auth.accepts(req) && process.env.FOX_AUTH_DISABLED !== '1') {
+    if (!process.env.FOX_PUBLIC_ORIGIN && localHost(req.headers.host) && req.method === 'GET' &&
+        (path === '/' || path === '/login.html' || path === '/login.css' || path === '/login.js' || path === '/fox.svg')) {
+      return serveStatic(res, PUBLIC, path === '/' ? '/login.html' : path);
+    }
+    return send(res, 403, { error: 'host not allowed' });
+  }
+  // Preview links carry their own key (a short-lived token), so they skip the passkey check: the sandboxed
+  // page that loads them has an opaque origin and sends no session cookie.
   if (path.startsWith('/view/')) return handleView(req, res, path);
+  if (!auth.active(req)) {
+    if (path.startsWith('/api/auth/')) return auth.handle(req, res);
+    const enrollment = Boolean(process.env.FOX_PUBLIC_ORIGIN && !auth.registered);
+    if (req.method === 'GET' && enrollment &&
+        (path === '/' || path === '/enroll.html' || path === '/enroll.css' || path === '/enroll.js' || path === '/fox.svg')) {
+      return serveStatic(res, PUBLIC, path === '/' ? '/enroll.html' : path);
+    }
+    if (req.method === 'GET' && !enrollment &&
+        (path === '/' || path === '/login.html' || path === '/login.css' || path === '/login.js' || path === '/fox.svg')) {
+      return serveStatic(res, PUBLIC, path === '/' ? '/login.html' : path);
+    }
+    return send(res, 401, { error: 'passkey required' });
+  }
+  if (path.startsWith('/api/auth/')) return auth.handle(req, res);
+  if (path.startsWith('/api/pair/')) return bridge.handleLocalPairing(req, res);
   return handlePanelRequest(req, res);
 });
 
@@ -662,10 +691,11 @@ async function killTerminal(name) {
 
 const wss = new WebSocketServer({ noServer: true });
 function upgrade(req, socket, head, deviceId = null, remoteSockets = null) {
-  if (new URL(req.url, 'http://localhost').pathname !== '/pty' || !sameOrigin(req)) {
+  if (!auth.active(req) || new URL(req.url, 'http://localhost').pathname !== '/pty' || !sameOrigin(req)) {
     socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return;
   }
   wss.handleUpgrade(req, socket, head, (ws) => {
+    auth.track(req, ws);
     if (deviceId) {
       if (!remoteSockets.has(deviceId)) remoteSockets.set(deviceId, new Set());
       remoteSockets.get(deviceId).add(ws);
@@ -782,6 +812,7 @@ if (mobilePort !== undefined) {
   const port = Number(mobilePort);
   if (!Number.isInteger(port) || port < 1 || port > 65535 || port === PORT) throw new Error('FOX_MOBILE_PORT must be a distinct port from 1 to 65535');
   const mobile = http.createServer(async (req, res) => {
+    if (!auth.active(req)) return send(res, 401, { error: 'passkey required' });
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'");
     res.setHeader('X-Content-Type-Options', 'nosniff');
     const url = new URL(req.url, 'http://localhost');
@@ -815,7 +846,8 @@ if (mobilePort !== undefined) {
 
 const bridge = createShareBridge({
   port: process.env.FOX_SHARE_PORT, panelPort: PORT, mobilePort,
-  handlePanelRequest, upgrade, serveStatic, publicDir: PUBLIC, sameOrigin,
+  handlePanelRequest: (req, res) => auth.active(req) ? handlePanelRequest(req, res) : send(res, 401, { error: 'passkey required' }),
+  upgrade, serveStatic, publicDir: PUBLIC, sameOrigin,
 });
 bridge.listen();
 

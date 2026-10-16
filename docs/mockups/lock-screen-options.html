@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Fox — exploraciones de bloqueo</title>
+  <style>
+    :root { color-scheme:dark; --ink:#f2f0ec; --dim:#b0ada8; --orange:#ed8d50; --line:#303036; font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#101013; color:var(--ink); }
+    svg { display:block; }
+    button { font:inherit; cursor:pointer; }
+    button:focus-visible { outline:2px solid #ffb47d; outline-offset:4px; }
+    [hidden] { display:none !important; }
+    .page { width:min(1280px,100%); margin:auto; padding:clamp(20px,4vw,56px) clamp(16px,4vw,56px) 90px; }
+    .mast { display:flex; justify-content:space-between; align-items:end; gap:20px; margin-bottom:28px; }
+    .eyebrow { font:600 11px ui-monospace,Menlo,monospace; letter-spacing:.15em; text-transform:uppercase; color:var(--orange); }
+    h1 { margin:9px 0 0; font-size:clamp(30px,4vw,48px); line-height:1.08; letter-spacing:-.055em; font-weight:600; }
+    .disclaimer { color:var(--dim); font-size:12px; margin:0 0 4px; }
+    .tabs { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin:0 0 16px; }
+    .tabs button { min-height:60px; padding:9px 12px; border:1px solid #2e2e32; border-radius:8px; background:#19191d; color:#c9c7c5; text-align:left; transition:background .18s,border-color .18s,color .18s; }
+    .tabs button:hover { background:#242429; }
+    .tabs button[aria-selected="true"] { border-color:#a96843; background:#2b221e; color:#fff; }
+    .tabs small { display:block; font:11px ui-monospace,Menlo,monospace; color:#c68b65; margin-bottom:2px; }
+    .frame { border:1px solid #323238; border-radius:11px; overflow:hidden; box-shadow:0 25px 70px #0006; }
+    .stage { position:relative; min-height:clamp(540px,68vh,760px); overflow:hidden; isolation:isolate; }
+    .screen { position:absolute; inset:0; padding:clamp(26px,4vw,55px); display:flex; flex-direction:column; overflow:hidden; }
+    .fox { color:var(--orange); }
+    .visual-button { display:inline-flex; align-items:center; justify-content:center; gap:11px; min-height:48px; width:max-content; max-width:100%; padding:11px 20px; border-radius:7px; font-size:14px; font-weight:600; white-space:nowrap; }
+    .visual-button svg { flex:none; }
+    .visual-button.light { background:#efeae3; color:#181619; }
+    .visual-button.warm { background:#e99b69; color:#211511; }
+    .visual-button.outline { border:1px solid #77706b; color:#f5eee8; }
+    .visual-button.underline { padding:10px 0; min-height:48px; border-bottom:1px solid #eb9b6d; border-radius:0; color:#f4eee9; }
+    .screen .content { margin:auto; display:flex; flex-direction:column; align-items:center; gap:48px; position:relative; z-index:1; }
+    /* Six arrangements of the same two elements: logo + unlock. */
+    .silence { background:#111113; }
+    .silence .content { gap:44px; }
+    .monogram { background:#131315; }
+    .monogram .watermark { position:absolute; width:min(65vw,680px); height:min(65vw,680px); top:50%; left:50%; transform:translate(-50%,-52%); color:#292225; opacity:.75; pointer-events:none; }
+    .monogram .content { gap:60px; }
+    .lightline { background:#101011; }
+    .lightline::before { content:""; position:absolute; top:0; bottom:0; left:clamp(28px,11%,150px); width:1px; background:linear-gradient(180deg,transparent 4%,#9b5639 44%,#f0a576 52%,#77442f 62%,transparent 98%); box-shadow:0 0 46px 3px #df754033; }
+    .lightline .content { margin:auto 0 auto clamp(45px,17%,200px); align-items:flex-start; }
+    .aperture { background:radial-gradient(ellipse at 50% 53%,#242024 0%,#151417 52%,#101012 100%); }
+    .aperture .ring { width:clamp(156px,22vw,236px); aspect-ratio:1; border:1px solid #6a5146; border-radius:50%; display:grid; place-items:center; box-shadow:inset 0 0 36px #e8995312,0 0 70px #bb73401a; position:relative; }
+    .aperture .ring::after { content:""; position:absolute; inset:-1px; border:2px solid transparent; border-top-color:#e39b69; border-radius:50%; transform:rotate(37deg); }
+    .aperture .ring svg { color:#eab181; }
+    .aperture .content { gap:55px; }
+    .type { background:#171617; }
+    .type .content { width:100%; max-width:850px; align-items:flex-start; gap:54px; }
+    .threshold { background:#151518; }
+    .threshold .content { margin:auto 0 auto 12%; align-items:flex-start; gap:45px; }
+    .threshold .rule { width:60px; height:2px; background:#ed9863; position:absolute; left:0; top:-44px; }
+    .context { display:flex; justify-content:space-between; align-items:baseline; gap:12px; padding:13px 2px 0; color:#bdb9b6; font-size:13px; }
+    .context strong { font-weight:600; color:#eee7e0; }
+    .context span:last-child { text-align:right; }
+    .footer-section { margin-top:78px; padding-top:28px; border-top:1px solid var(--line); }
+    .footer-section h3 { font-size:24px; letter-spacing:-.04em; font-weight:550; margin:5px 0 8px; }
+    .footer-section > p { color:var(--dim); font-size:14px; margin:0 0 22px; }
+    .sidebar-sample { width:min(320px,100%); height:340px; display:flex; flex-direction:column; background:#161920; border:1px solid #353a44; border-radius:9px; overflow:hidden; }
+    .sidebar-sample .head { display:flex; align-items:center; justify-content:space-between; padding:13px 16px; border-bottom:1px solid #30343e; }
+    .sidebar-sample .head .fox { width:22px; height:22px; }
+    .sidebar-sample .head span { color:#a7adb9; font-size:16px; letter-spacing:.3em; }
+    .sidebar-sample .group { padding:18px 16px 6px; color:#aeb4bf; font:11px ui-monospace,Menlo,monospace; letter-spacing:.08em; }
+    .sidebar-sample .item { color:#d6d9df; padding:9px 18px; font-size:13px; }
+    .sidebar-sample .item.selected { background:#242933; border-left:2px solid #7aa2f7; padding-left:16px; }
+    .sidebar-sample .spacer { flex:1; }
+    .sidebar-sample .sidebar-foot { border-top:1px solid #333945; padding:8px 10px 8px 16px; display:flex; align-items:center; justify-content:space-between; color:#c9ced8; font-size:12px; }
+    .sidebar-sample .sidebar-foot .icon { width:44px; height:44px; border:1px solid #555e6c; border-radius:7px; display:grid; place-items:center; color:#f1b589; }
+    @media (max-width:800px) { .tabs { grid-template-columns:repeat(3,1fr); } }
+    @media (max-width:520px) { .mast { align-items:start; flex-direction:column; } .tabs { grid-template-columns:repeat(2,1fr); } .tabs button { min-height:54px; } .stage { min-height:570px; } .screen { padding:24px; } .lightline .content { margin-left:55px; } .lightline::before { left:26px; } .threshold .content { margin-left:5%; } .type .content > .fox { width:150px; height:150px; } .context { flex-direction:column; gap:2px; } .context span:last-child { text-align:left; } }
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { transition:none !important; } }
+  </style>
+</head>
+<body>
+  <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
+    <symbol id="fox" viewBox="0 0 32 32"><path d="M4 3 13 9h6l9-6-1 12c0 7-5 13-11 14C10 28 5 22 5 15Z" fill="currentColor"/><path d="m9 18 7 11 7-11-7 3Z" fill="#151416"/><circle cx="16" cy="23.5" r="1.6" fill="currentColor"/><circle cx="11.5" cy="16" r="1.5" fill="#151416"/><circle cx="20.5" cy="16" r="1.5" fill="#151416"/></symbol>
+    <symbol id="lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 10V7a5 5 0 0 1 10 0v3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="arrow" viewBox="0 0 20 20"><path d="M3 10h13m-5-5 5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </svg>
+  <main class="page">
+    <header class="mast"><div><div class="eyebrow">Fox / lock studies</div><h1>Menos interfaz. Más intención.</h1></div><p class="disclaimer">6 exploraciones · prototipo visual, sin passkey real</p></header>
+    <div class="tabs" role="tablist" aria-label="Diseños de pantalla bloqueada">
+      <button id="tab-1" role="tab" type="button" aria-controls="screen-1" aria-selected="true" tabindex="0" data-option="1"><small>01</small> Silencio</button>
+      <button id="tab-2" role="tab" type="button" aria-controls="screen-2" aria-selected="false" tabindex="-1" data-option="2"><small>02</small> Monograma</button>
+      <button id="tab-3" role="tab" type="button" aria-controls="screen-3" aria-selected="false" tabindex="-1" data-option="3"><small>03</small> Línea de luz</button>
+      <button id="tab-4" role="tab" type="button" aria-controls="screen-4" aria-selected="false" tabindex="-1" data-option="4"><small>04</small> Apertura</button>
+      <button id="tab-5" role="tab" type="button" aria-controls="screen-5" aria-selected="false" tabindex="-1" data-option="5"><small>05</small> Tipografía</button>
+      <button id="tab-6" role="tab" type="button" aria-controls="screen-6" aria-selected="false" tabindex="-1" data-option="6"><small>06</small> Umbral</button>
+    </div>
+    <div class="frame"><div class="stage">
+      <section id="screen-1" role="tabpanel" aria-labelledby="tab-1" class="screen silence">
+        <div class="content"><svg class="fox" width="80" height="80" role="img" aria-label="Fox"><use href="#fox"/></svg><span class="visual-button light">Desbloquear <svg width="17" height="17" aria-hidden="true"><use href="#arrow"/></svg></span></div>
+      </section>
+      <section id="screen-2" role="tabpanel" aria-labelledby="tab-2" class="screen monogram" hidden>
+        <svg class="watermark" aria-hidden="true"><use href="#fox"/></svg><div class="content"><svg class="fox" width="50" height="50" role="img" aria-label="Fox"><use href="#fox"/></svg><span class="visual-button warm">Desbloquear</span></div>
+      </section>
+      <section id="screen-3" role="tabpanel" aria-labelledby="tab-3" class="screen lightline" hidden>
+        <div class="content"><svg class="fox" width="105" height="105" role="img" aria-label="Fox"><use href="#fox"/></svg><span class="visual-button underline">Desbloquear <svg width="19" height="19" aria-hidden="true"><use href="#arrow"/></svg></span></div>
+      </section>
+      <section id="screen-4" role="tabpanel" aria-labelledby="tab-4" class="screen aperture" hidden>
+        <div class="content"><div class="ring"><svg width="50" height="50" role="img" aria-label="Fox"><use href="#fox"/></svg></div><span class="visual-button outline">Desbloquear <svg width="18" height="18" aria-hidden="true"><use href="#arrow"/></svg></span></div>
+      </section>
+      <section id="screen-5" role="tabpanel" aria-labelledby="tab-5" class="screen type" hidden>
+        <div class="content"><svg class="fox" width="240" height="240" role="img" aria-label="Fox"><use href="#fox"/></svg><span class="visual-button light">Desbloquear <svg width="18" height="18" aria-hidden="true"><use href="#arrow"/></svg></span></div>
+      </section>
+      <section id="screen-6" role="tabpanel" aria-labelledby="tab-6" class="screen threshold" hidden>
+        <div class="content"><div class="rule" aria-hidden="true"></div><svg class="fox" width="130" height="130" role="img" aria-label="Fox"><use href="#fox"/></svg><span class="visual-button underline">Desbloquear <svg width="19" height="19" aria-hidden="true"><use href="#arrow"/></svg></span></div>
+      </section>
+    </div></div>
+    <div class="context"><strong id="selected-name">01 — Silencio</strong><span id="selected-description">Lo esencial, sin distracciones.</span></div>
+    <section class="footer-section" aria-labelledby="footer-title"><div class="eyebrow">Aparte / navegación</div><h3 id="footer-title">El footer del sidebar</h3><p>Una ubicación posible para el candado, separada del diseño de bloqueo. Hoy está en la cabecera de Fox.</p><div class="sidebar-sample" aria-label="Propuesta visual de footer fijo para el sidebar"><div class="head"><svg class="fox" aria-hidden="true"><use href="#fox"/></svg><span aria-hidden="true">＋ ⌕ ⚙</span></div><div class="group">SESIONES</div><div class="item selected">fox / main</div><div class="item">docs / revisión</div><div class="item">sitio / diseño</div><div class="spacer"></div><div class="sidebar-foot"><span>Fox · local</span><span class="icon" role="img" aria-label="Icono propuesto para bloquear Fox"><svg width="18" height="18" aria-hidden="true"><use href="#lock"/></svg></span></div></div></section>
+  </main>
+  <script>
+    const descriptions = [
+      ['01 — Silencio','Lo esencial, sin distracciones.'],
+      ['02 — Monograma','Una presencia de marca casi invisible.'],
+      ['03 — Línea de luz','Un solo gesto de color sobre negro.'],
+      ['04 — Apertura','Un símbolo contenido, con profundidad sutil.'],
+      ['05 — Tipografía','Una palabra como protagonista.'],
+      ['06 — Umbral','Editorial, asimétrica y deliberada.']
+    ];
+    const tabs = [...document.querySelectorAll('[role="tab"]')];
+    function select(index, focus = false) {
+      tabs.forEach((tab, i) => {
+        const active = i === index;
+        tab.setAttribute('aria-selected', String(active));
+        tab.tabIndex = active ? 0 : -1;
+        document.getElementById(tab.getAttribute('aria-controls')).hidden = !active;
+        if (active && focus) tab.focus();
+      });
+      document.getElementById('selected-name').textContent = descriptions[index][0];
+      document.getElementById('selected-description').textContent = descriptions[index][1];
+    }
+    tabs.forEach((tab, i) => {
+      tab.addEventListener('click', () => select(i));
+      tab.addEventListener('keydown', event => {
+        if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+        event.preventDefault();
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (i + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+        select(next, true);
+      });
+    });
+  </script>
+</body>
+</html>

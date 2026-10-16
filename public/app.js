@@ -1399,6 +1399,10 @@ document.addEventListener('click', (e) => { if (!e.target.closest('.menu-wrap'))
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') setSettingsMenu(false); });
 $('#keys').addEventListener('click', () => setSettingsMenu(false));
 $('#pair-phone').addEventListener('click', () => setSettingsMenu(false));
+$('#sign-out').addEventListener('click', async () => {
+  const response = await fetch('/api/auth/logout', { method: 'POST' });
+  if (response.ok) location.replace('/');
+});
 const THEME_ORDER = ['dark', 'dusk', 'mauve', 'terracotta', 'copper', 'plum', 'sky'];
 try { const saved = localStorage.getItem('fox.theme'); $('#theme').value = saved === 'night' ? 'sky' : THEME_ORDER.includes(saved) ? saved : 'dark'; } catch {}
 applyTheme();
@@ -1636,6 +1640,10 @@ mobileLayout.addEventListener('change', async () => {
 const pairDialog = $('#pair-dialog');
 let pairTimer = null, pairStarting = false;
 if (!['127.0.0.1', 'localhost'].includes(location.hostname)) $('#pair-phone').classList.add('hidden');
+fetch('/api/auth/status').then((response) => response.ok ? response.json() : null).then((info) => {
+  if (info?.registered) $('#pair-phone').classList.add('hidden');
+  else if (!info) $('#sign-out').classList.add('hidden');
+}).catch(() => {});
 const pairApi = async (path, data) => {
   const response = await fetch(path, data === undefined ? undefined : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
   const result = await response.json();

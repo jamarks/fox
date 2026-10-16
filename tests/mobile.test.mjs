@@ -40,7 +40,7 @@ else appendFileSync(${JSON.stringify(tmuxLog)}, JSON.stringify([command, ...args
 `);
   await chmod(fakeTmux, 0o755);
   const port = await freePort(), mobilePort = await freePort();
-  const child = spawn(process.execPath, ['server.mjs'], { cwd: new URL('..', import.meta.url), env: { ...process.env, HOME: home, PORT: String(port), FOX_MOBILE_PORT: String(mobilePort), TMUX_BIN: fakeTmux }, stdio: 'pipe' });
+  const child = spawn(process.execPath, ['server.mjs'], { cwd: new URL('..', import.meta.url), env: { ...process.env, HOME: home, PORT: String(port), FOX_MOBILE_PORT: String(mobilePort), TMUX_BIN: fakeTmux, FOX_AUTH_DISABLED: '1' }, stdio: 'pipe' });
   const base = `http://127.0.0.1:${mobilePort}`;
   try {
     const page = await ready(base);

@@ -102,11 +102,17 @@ git clone https://github.com/jamarks/fox && cd fox
 npm install && node bin/fox.mjs
 ```
 
-`fox` starts the server and opens http://127.0.0.1:4848 in your browser. If it is already running, it just opens the existing panel. The same panel adapts below 1100px to Sessions / Terminal / Read. Tap inside the terminal to type directly with the phone keyboard. No Tailscale setup or separate mobile URL is needed for this layout. Keep the terminal open; Ctrl+C stops fox, but tmux-backed fx sessions keep running. `npm start` runs only the server, without opening a browser. Knobs: `PORT`, `FX_BIN` (path to the fx binary), `TMUX_BIN`.
+`fox` starts the server and opens the local sign-in screen (redirecting from `127.0.0.1` to `localhost` for WebAuthn). On first use, choose **Create passkey** in the browser on this computer; after that, opening fox asks for the passkey on its own (Touch ID); **Unlock with passkey** appears only if you cancel or the browser wants a click first. The passkey is bound to `localhost` and the credential record is stored at `~/.config/fox/passkey.json` (mode 0600). Back up this file and your passkey; if the passkey is lost, local recovery requires deliberately removing the credential record and registering a new one (existing fx sessions remain on disk). **Lock fox** in Settings revokes the current browser session; sessions also expire after 12 hours or a server restart. Keep the terminal open; Ctrl+C stops fox, but tmux-backed fx sessions keep running. `npm start` runs only the server, without opening a browser. Knobs: `PORT`, `FX_BIN` (path to the fx binary), `TMUX_BIN`.
 
 Deep links: `?session=<id>` selects a session, `?open=<id>` also opens its terminal.
 
 ## Open the same fox from another device
+
+**VPS passkey mode is opt-in and not a deployment recipe.** From a Fox checkout on a fresh Linux VM with its own HOME, set `FOX_PUBLIC_ORIGIN=https://fox.your-domain` and run `npm start` (not `fox`, which opens a local browser). Fox continues listening only on `127.0.0.1:4848`; you must configure DNS, a TLS reverse proxy that preserves the original `Host` and forwards WebSockets, firewall rules that keep port 4848 private, process supervision and backups before exposing it. The public domain must be stable: a `localhost` passkey cannot be used on that domain, and Fox refuses to start if its credential belongs to a different RP ID. Do not copy `~/.config/fox/passkey.json` from the Mac to the VPS.
+
+For **first enrollment only**, run `FOX_PUBLIC_ORIGIN=https://fox.your-domain node bin/fox-enroll.mjs` over SSH as the same user/HOME that runs Fox. It prints a single-use code valid for 10 minutes. Open the HTTPS Fox URL, type the code into the enrollment page, and create a new passkey. Never place the code in a URL or share it. Once registered, normal visits go straight to Fox's passkey login. This mode uses `Secure`, `HttpOnly`, `SameSite=Strict` cookies and checks the exact configured host and browser origin on requests and WebSockets; it cannot be combined with `FOX_SHARE_PORT`, `FOX_MOBILE_PORT` or `FOX_AUTH_DISABLED=1`. **Do not publish it until HTTPS, unauthorized HTTP/API/WebSocket rejection and a real browser passkey flow have been tested on the VPS.**
+
+The access methods below describe the older Mac setup; they are not a substitute for the VPS configuration above. With local passkey mode enabled, nonlocal hosts are denied even if Tailscale Serve or phone pairing is configured.
 
 Keep fox and fx running on the Mac. Install Tailscale on the Mac and each phone/computer you want to use, and sign in to the same tailnet. On the Mac, with fox running on its default port:
 
@@ -174,7 +180,7 @@ fox's own state (archived ids, custom names, pins, collapsed groups) lives in `~
 npm test
 ```
 
-Runs the tests (search index, replies inbox, tools catalog, launcher) with Node's built-in runner.
+Runs the tests (including a simulated WebAuthn credential and authenticated terminal) with Node's built-in runner. `FOX_AUTH_DISABLED=1` is used only by legacy remote-access tests; never set it on a real Fox server.
 
 ## Why not libfx?
 

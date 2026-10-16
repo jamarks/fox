@@ -1,0 +1,26 @@
+:root { color-scheme:dark; font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:#101012; color:#f2f0ec; }
+* { box-sizing:border-box; }
+body { margin:0; }
+.lock-screen { min-height:100dvh; display:grid; place-items:center; padding:32px 20px; background:radial-gradient(ellipse at 50% 47%,#242024 0%,#151417 46%,#101012 100%); }
+.lock-center { width:min(100%,400px); display:flex; flex-direction:column; align-items:center; text-align:center; }
+.aperture { position:relative; width:clamp(166px,24vw,222px); aspect-ratio:1; display:grid; place-items:center; border:1px solid #6a5146; border-radius:50%; box-shadow:inset 0 0 36px #e8995312,0 0 70px #bb73401a; margin-bottom:55px; }
+.aperture::after { content:""; position:absolute; inset:-1px; border:2px solid transparent; border-top-color:#e39b69; border-radius:50%; transform:rotate(37deg); pointer-events:none; opacity:.35; transition:opacity .3s, border-color .3s; }
+/* waiting for the passkey: the arc turns; unlocked: the ring closes and the screen fades */
+.aperture.waiting::after { opacity:1; animation:ring-turn 1.25s linear infinite; }
+.aperture.done::after { opacity:1; border-color:#e39b69; animation:none; }
+@keyframes ring-turn { from { transform:rotate(37deg); } to { transform:rotate(397deg); } }
+.lock-screen { transition:opacity .4s ease; }
+body.unlocked .lock-screen { opacity:0; }
+#enter.hidden { visibility:hidden; opacity:0; }
+#enter { transition:background .2s, border-color .2s, opacity .3s; }
+.aperture img { display:block; width:54px; height:54px; }
+#setup-copy[hidden] { display:none; }
+h1 { font-size:26px; letter-spacing:-.04em; line-height:1.15; margin:0 0 10px; }
+#description { font-size:14px; color:#c1bdb8; margin:0 0 20px; }
+#enter { min-height:52px; display:inline-flex; align-items:center; justify-content:center; gap:12px; padding:11px 21px; border:1px solid #77706b; border-radius:8px; background:transparent; color:#f5eee8; font:600 15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; cursor:pointer; transition:background .2s,border-color .2s; }
+#enter:hover:not(:disabled) { background:#2a2525; border-color:#eab181; }
+#enter:disabled { opacity:.55; cursor:default; }
+#enter:focus-visible { outline:2px solid #f0b486; outline-offset:4px; }
+#status { color:#f0bd76; font-size:14px; max-width:350px; margin:18px 0 0; overflow-wrap:anywhere; }
+#status:empty { display:none; }
+@media (prefers-reduced-motion:reduce) { #enter, .lock-screen { transition:none; } .aperture.waiting::after { animation:none; } }

@@ -35,7 +35,7 @@ test('full panel keeps loopback, accepts same-origin HTTPS proxy and rejects for
   const port = await freePort();
   const child = spawn(process.execPath, ['server.mjs'], {
     cwd: new URL('..', import.meta.url),
-    env: { ...process.env, HOME: home, PORT: String(port), TMUX_BIN: '/bin/true' }, stdio: 'pipe',
+    env: { ...process.env, HOME: home, PORT: String(port), TMUX_BIN: '/bin/true', FOX_AUTH_DISABLED: '1' }, stdio: 'pipe',
   });
   const base = `http://127.0.0.1:${port}`;
   const remote = 'fox-device.tailnet.ts.net';

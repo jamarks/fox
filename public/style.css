@@ -26,7 +26,9 @@ input { width: 100%; background: var(--bg); color: var(--text); border: 1px soli
 #new-session { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
 .hint { color: var(--muted); font-size: 11px; min-height: 14px; }
 .hint.ok { color: var(--ok); } .hint.err { color: var(--err); }
-#session-groups { overflow-y: auto; flex: 1; }
+#session-groups { overflow-y: auto; flex: 1; min-height: 0; }
+.sidebar-footer { flex: none; display: flex; align-items: center; justify-content: flex-end; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--panel); }
+#sign-out:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .group { padding: 8px 0; }
 .group h3 { margin: 0; padding: 6px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
 .group h3 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -374,7 +376,7 @@ a.section-title.fold:hover { color: var(--text); }
   #mobile-nav button[aria-current="page"] { background: var(--panel-2); color: var(--accent); }
   #sidebar .side-head { flex-wrap: wrap; gap: 12px; padding: 12px 16px; }
   #sidebar .side-head .row { flex: 1; justify-content: flex-end; gap: 3px; }
-  #sidebar .side-head .row .icon { width: 40px; height: 40px; }
+  #sidebar .side-head .row .icon, #sidebar .sidebar-footer .icon { width: 40px; height: 40px; }
   #settings-menu #keys { display: none; } /* no keyboard on a phone */
   #summary { min-height: 36px; font-size: 12px; }
   #session-groups { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }

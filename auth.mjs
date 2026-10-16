@@ -1,0 +1,152 @@
+import { readFile, mkdir, writeFile, rename, chmod } from 'node:fs/promises';
+import { randomBytes, createHash } from 'node:crypto';
+import { join } from 'node:path';
+import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
+import { parsePublicOrigin, validEnrollment, consumeEnrollment } from './enrollment.mjs';
+
+const ttl = 12 * 60 * 60 * 1000;
+const nonce = () => randomBytes(32).toString('base64url');
+const digest = (value) => createHash('sha256').update(value).digest('hex');
+const json = (res, status, data, headers = {}) => {
+  res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...headers });
+  res.end(JSON.stringify(data));
+};
+const local = (req) => {
+  const host = req.headers.host ?? '';
+  return /^localhost:[0-9]+$/.test(host) &&
+    ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+};
+const origin = (req) => `http://${req.headers.host}`;
+const cookieToken = (req) => (req.headers.cookie ?? '').split(';').map((s) => s.trim()).find((s) => s.startsWith('fox_session='))?.slice(12) ?? '';
+async function body(req) {
+  let text = '';
+  for await (const chunk of req) {
+    text += chunk;
+    if (Buffer.byteLength(text) > 16000) throw new Error('request too large');
+  }
+  return JSON.parse(text || '{}');
+}
+
+export async function createAuth({ stateDir, disabled = false, publicOrigin = null }) {
+  const remote = parsePublicOrigin(publicOrigin);
+  if (disabled && remote) throw new Error('FOX_AUTH_DISABLED must never be used with FOX_PUBLIC_ORIGIN');
+  const file = join(stateDir, 'passkey.json');
+  const accepts = (req) => remote
+    ? req.headers.host === remote.host && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)
+    : local(req);
+  const expectedOrigin = (req) => remote?.origin ?? origin(req);
+  const validOrigin = (req) => disabled || (accepts(req) && req.headers.origin === expectedOrigin(req));
+  let credential = null;
+  if (!disabled) {
+    try {
+      const saved = JSON.parse(await readFile(file, 'utf8'));
+      if (typeof saved.id !== 'string' || typeof saved.publicKey !== 'string' || !Number.isSafeInteger(saved.counter)) throw new Error('invalid credential');
+      if ((saved.rpID ?? 'localhost') !== (remote?.hostname ?? 'localhost')) {
+        throw new Error('passkey belongs to another domain; use a separate Fox HOME for remote deployment');
+      }
+      credential = saved;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw new Error(`Cannot load Fox passkey: ${error.message}`);
+  }}
+  const pending = new Map(), sessions = new Map(), sockets = new Map();
+  const active = (req) => {
+    if (disabled) return true;
+    if (!accepts(req)) return false;
+    const key = digest(cookieToken(req));
+    const session = sessions.get(key);
+    if (!session) return false;
+    if (session < Date.now()) { sessions.delete(key); for (const ws of sockets.get(key) ?? []) ws.close(4001, 'session expired'); sockets.delete(key); return false; }
+    return true;
+  };
+  const track = (req, ws) => {
+    if (disabled) return;
+    const key = digest(cookieToken(req));
+    if (!sockets.has(key)) sockets.set(key, new Set());
+    sockets.get(key).add(ws);
+    ws.once('close', () => sockets.get(key)?.delete(ws));
+  };
+  const save = async (value) => {
+    await mkdir(stateDir, { recursive: true, mode: 0o700 });
+    const tmp = `${file}.${nonce()}.tmp`;
+    try {
+      await writeFile(tmp, JSON.stringify(value), { mode: 0o600, flag: 'wx' });
+      await rename(tmp, file);
+      await chmod(file, 0o600);
+    } catch (error) { throw error; }
+  };
+  function issue(res) {
+    const token = nonce();
+    const key = digest(token);
+    sessions.set(key, Date.now() + ttl);
+    const expiry = setTimeout(() => {
+      sessions.delete(key);
+      for (const ws of sockets.get(key) ?? []) ws.close(4001, 'session expired');
+      sockets.delete(key);
+    }, ttl);
+    expiry.unref();
+    json(res, 200, { ok: true }, { 'set-cookie': `fox_session=${token}; HttpOnly; ${remote ? 'Secure; ' : ''}SameSite=Strict; Path=/; Max-Age=${ttl / 1000}` });
+  }
+  async function handle(req, res) {
+    if (disabled) return json(res, 404, { error: 'not found' });
+    if (!accepts(req)) return json(res, 403, { error: 'host not allowed' });
+    const path = new URL(req.url, expectedOrigin(req)).pathname;
+    if (req.method === 'GET' && path === '/api/auth/status') return json(res, 200, { registered: Boolean(credential), authenticated: active(req), enrollmentRequired: Boolean(remote && !credential) });
+    if (req.method !== 'POST' || !validOrigin(req)) return json(res, 403, { error: 'same-origin POST required' });
+    if (path === '/api/auth/logout') {
+      const key = digest(cookieToken(req));
+      sessions.delete(key);
+      for (const ws of sockets.get(key) ?? []) ws.close(4001, 'signed out');
+      sockets.delete(key);
+      return json(res, 200, { ok: true }, { 'set-cookie': `fox_session=; HttpOnly; ${remote ? 'Secure; ' : ''}SameSite=Strict; Path=/; Max-Age=0` });
+    }
+    const setup = path.startsWith('/api/auth/register/');
+    if (setup ? credential : !credential) return json(res, 403, { error: 'not available' });
+    if (path.endsWith('/options')) {
+      let data = {};
+      if (setup && remote) {
+        try { data = await body(req); } catch { return json(res, 400, { error: 'invalid enrollment request' }); }
+        if (!await validEnrollment(stateDir, data.code, remote.origin)) return json(res, 403, { error: 'valid enrollment code required' });
+      }
+      for (const [key, item] of pending) if (item.expires < Date.now()) pending.delete(key);
+      if (pending.size >= 100) return json(res, 429, { error: 'try again later' });
+      const rpID = remote?.hostname ?? 'localhost';
+      const options = setup
+        ? await generateRegistrationOptions({ rpName: 'fox', rpID, userName: 'owner', authenticatorSelection: { residentKey: 'required', userVerification: 'required' } })
+        : await generateAuthenticationOptions({ rpID, allowCredentials: [{ id: credential.id }], userVerification: 'required' });
+      const id = nonce();
+      pending.set(id, { challenge: options.challenge, rpID, expires: Date.now() + 120000, setup, enrollment: setup && remote ? data.code : null });
+      return json(res, 200, { id, options });
+    }
+    if (!path.endsWith('/verify')) return json(res, 404, { error: 'not found' });
+    let data;
+    try { data = await body(req); } catch { return json(res, 400, { error: 'invalid response' }); }
+    const item = pending.get(data.id);
+    pending.delete(data.id); // A challenge can be used only once, including failed attempts.
+    if (!item || item.setup !== setup || item.expires < Date.now() || item.rpID !== (remote?.hostname ?? 'localhost') ||
+        (setup && remote && (item.enrollment !== data.code || !await validEnrollment(stateDir, data.code, remote.origin)))) {
+      return json(res, 403, { error: 'challenge expired' });
+    }
+    try {
+      if (setup) {
+        if (credential) return json(res, 403, { error: 'already registered' });
+        const result = await verifyRegistrationResponse({ response: data.response, expectedChallenge: item.challenge, expectedOrigin: expectedOrigin(req), expectedRPID: item.rpID, requireUserVerification: true });
+        if (!result.verified) throw new Error('not verified');
+        if (remote && !await consumeEnrollment(stateDir, data.code, remote.origin)) throw new Error('enrollment already consumed');
+        const saved = result.registrationInfo.credential;
+        const record = { id: saved.id, publicKey: Buffer.from(saved.publicKey).toString('base64url'), counter: saved.counter, rpID: item.rpID };
+        await save(record);
+        credential = record;
+      } else {
+        if (data.response?.id !== credential.id) throw new Error('unknown credential');
+        const result = await verifyAuthenticationResponse({ response: data.response, expectedChallenge: item.challenge, expectedOrigin: expectedOrigin(req), expectedRPID: item.rpID,
+          credential: { id: credential.id, publicKey: Buffer.from(credential.publicKey, 'base64url'), counter: credential.counter }, requireUserVerification: true });
+        if (!result.verified) throw new Error('not verified');
+        const updated = { ...credential, counter: result.authenticationInfo.newCounter };
+        await save(updated);
+        credential = updated;
+      }
+      return issue(res);
+    } catch { return json(res, 403, { error: 'passkey verification failed' }); }
+  }
+  return { active, track, handle, accepts, validOrigin, get registered() { return Boolean(credential); } };
+}
