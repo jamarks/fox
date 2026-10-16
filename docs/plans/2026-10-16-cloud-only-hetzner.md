@@ -17,7 +17,7 @@ Handoff para el agente que lo implemente. Primero las decisiones tomadas y por q
    - **El passkey remoto de fox** (`FOX_PUBLIC_ORIGIN`, ya implementado en el commit 62a646e; ver `docs/plans/2026-10-16-remote-passkey-design.md`). Es el segundo candado y el login del día a día.
    - **Aceptado:** el TLS termina en Cloudflare, así que Cloudflare puede ver en texto plano la terminal, el código y lo que se escriba. Está bien para uso personal. Si algún día hay requisitos de compliance, hay que revisarlo.
 6. **Dos usuarios Linux:** `admin`, con sudo, para administrar; y `fox`, **sin sudo**, donde corren fox, tmux, fx, los repos y las sesiones. fx ejecuta comandos que escribe un modelo: si `fox` tuviera sudo, un prompt injection sería root.
-7. **Login de fx:** API key del Vercel AI Gateway (`fx setup`) **con límite de gasto**. No está verificado que el login con suscripción de ChatGPT (`fx login codex`) funcione sin navegador.
+7. **Login de fx:** API key del Vercel AI Gateway (`fx setup`) **con límite de gasto**. **Verificado:** el login con suscripción de ChatGPT también funciona. `fx login codex` espera la respuesta en `localhost:1455` del servidor, así que se corre con un túnel SSH desde la Mac: `ssh -t -L 1455:localhost:1455 fox@<ip> 'bash -lc "fx login codex"'`, y se abre el link en el browser de la Mac. Sin `-L`, el browser redirige al localhost de la Mac y el login no termina. Nunca copiar la URL de callback a mano: lleva un código de autorización.
 8. **Actualizaciones automáticas desde la rama `release`, con rollback.** fox está en desarrollo y cambia seguido, y en modo solo nube es la única puerta de entrada: si una actualización lo rompe, solo queda SSH. Por eso el servidor **no sigue `main`**: se desarrolla en `main` y, cuando algo está probado, se avanza `release`. El VPS busca los cambios con un timer (pull); GitHub nunca entra al servidor, así que no hay claves del VPS en GitHub. Si la versión nueva no pasa los tests o el chequeo de salud, vuelve sola a la anterior. Detalle en el paso 10.
 9. **El modo local sigue existiendo y no se toca.** `FOX_PUBLIC_ORIGIN` ya se niega a combinarse con `FOX_SHARE_PORT`, `FOX_MOBILE_PORT` y `FOX_AUTH_DISABLED`; el pairing y Tailscale quedan para el modo local.
 
@@ -188,7 +188,6 @@ No automatizar el borrado de credenciales. Restaurar un backup que todavía cont
 - Que tmux como servicio de usuario aparte funcione con fox y sobreviva a un restart de fox (paso 3).
 - Que los previews por hostname funcionen con hot reload por el túnel, detrás de Access, y que no reciban la cookie de fox (paso 8.1).
 - Que el script de actualización y el rollback funcionen de punta a punta, incluido el primer despliegue y un reinicio del VPS a mitad de una actualización (paso 10).
-- Si `fx login codex` funciona sin navegador. Si no, el plan es usar solo el Gateway.
 
 ## Seguridad: no negociable
 
