@@ -121,7 +121,14 @@ WantedBy=multi-user.target
 
 ### 8. Cambios en fox para el modo nube
 Detectar el modo con `FOX_PUBLIC_ORIGIN`, o con `process.platform !== 'darwin'` cuando sea algo específico de macOS. En orden de prioridad:
-1. **Ver los dev servers.** Es el hueco de producto más grande. Si fx levanta `npm run dev` en el 3000, hoy no hay forma de abrirlo desde el browser: `/view/` solo sirve archivos estáticos. Hace falta un proxy de previews dentro de fox, detrás del passkey (por ejemplo `/preview/<puerto>/` limitado a un rango de puertos locales), con soporte de WebSocket para el hot reload. Diseñarlo antes de implementarlo: aislar el origen para que el dev server no pueda llamar a la API de fox con la cookie del dueño.
+1. **Ver los dev servers (a considerar; el hueco de producto más grande).**
+   - **El problema:** si fx levanta `npm run dev` y la terminal dice `http://localhost:3000`, ese localhost es el del VPS. Desde la laptop o el teléfono no hay forma de abrirlo. `/view/` no alcanza: muestra archivos estáticos, no una app que necesita su servidor corriendo (React, Next, una API).
+   - **Cómo lo resuelve exe.dev** (según su doc de proxy): el puerto principal de la VM se publica en `https://<vm>.exe.xyz/` (el 80, o el menor ≥ 1024, o el que se elija con `share port`). **Los puertos 3000–9999 salen en `https://<vm>.exe.xyz:<puerto>/`**, solo para quien tiene acceso a la VM: el primer acceso redirige al login de exe.dev. El TLS termina en su proxy, que agrega `X-Forwarded-Proto`, `X-Forwarded-Host` y `X-Forwarded-For`. Un solo puerto puede ser público y el resto queda privado. La doc no dice nada de WebSocket; no lo verifiqué.
+   - **Por qué no copiarlo tal cual:** Cloudflare solo proxea algunos puertos (443, 8443, etc.), así que `fox.<dominio>:3000` no funciona por el túnel. Además, las cookies **no se separan por puerto**: en el mismo hostname, el dev server (código que escribió un agente) recibiría la cookie de sesión de fox en los headers y podría robarla. **Los previews tienen que vivir en otro hostname**, no en otro puerto ni en otra ruta de `fox.<dominio>`. Por eso se descarta la idea anterior de `/preview/<puerto>/` dentro de fox.
+   - **Propuesta, primer paso sin código en fox:** un hostname por puerto, en el **primer nivel** del dominio (`fox-3000.<dominio>`, `fox-5173.<dominio>`), para que lo cubra el certificado universal gratis de Cloudflare. `*.fox.<dominio>` necesitaría el certificado avanzado, que es pago. En `config.yml` de cloudflared, una regla de ingress por puerto de una lista fija (3000–3005, 4321, 5173, 8000, 8080) → `http://127.0.0.1:<puerto>`, con `originRequest.httpHostHeader: localhost`, porque Vite y otros dev servers rechazan hosts desconocidos.
+   - **Access:** una aplicación que cubra esos hostnames (o `*.<dominio>` con una política solo para el dueño), **configurada antes de crear las rutas DNS**, igual que fox. El passkey de fox no aplica ahí: su cookie es host-only. La barrera de los previews es Access; si se implementa la validación del JWT (punto 6), se puede sumar.
+   - **En la UI de fox, después:** detectar `localhost:<puerto>` en la salida de la terminal y convertirlo en un link a `https://fox-<puerto>.<dominio>/`.
+   - **Verificar:** que el hot reload (WebSocket) funcione por el túnel; que sin Access no se llegue a ningún preview; que un preview no reciba la cookie `fox_session` (revisar los headers que llegan al dev server); y qué pasa con dev servers que generan URLs absolutas con `localhost`.
 2. **Nuevo proyecto desde una URL de git**: "clonar y abrir fx ahí". En la nube no hay carpetas locales que elegir.
 3. **Selector de carpeta nativo** (`/api/pick-folder`, cerca de la línea 532) usa osascript. En modo nube: escribir la ruta, o un explorador de carpetas simple del lado del servidor dentro de `$HOME`.
 4. **Abrir un archivo con ↗** (`server.mjs`, cerca de la línea 431) hoy responde 501 fuera de macOS. En modo nube: ocultar el botón o reemplazarlo por una descarga.
@@ -179,6 +186,7 @@ No automatizar el borrado de credenciales. Restaurar un backup que todavía cont
 - Que cloudflared preserve Host y Origin (paso 4).
 - Que el WebSocket de la terminal funcione detrás de Access y cómo se comporta cuando vence la sesión (paso 5).
 - Que tmux como servicio de usuario aparte funcione con fox y sobreviva a un restart de fox (paso 3).
+- Que los previews por hostname funcionen con hot reload por el túnel, detrás de Access, y que no reciban la cookie de fox (paso 8.1).
 - Que el script de actualización y el rollback funcionen de punta a punta, incluido el primer despliegue y un reinicio del VPS a mitad de una actualización (paso 10).
 - Si `fx login codex` funciona sin navegador. Si no, el plan es usar solo el Gateway.
 
