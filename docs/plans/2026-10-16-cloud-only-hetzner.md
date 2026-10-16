@@ -9,11 +9,11 @@ Handoff para el agente que lo implemente. Primero las decisiones tomadas y por q
 3. **Descartados por ahora:**
    - **Vercel Sandbox.** Las sesiones duran como máximo 24 h en Pro (45 min en Hobby). Al apagarse se guarda solo el disco, no los procesos (tmux y fx mueren). No se apaga solo por inactividad, así que fox tendría que dormirlo y despertarlo, y las URLs públicas no tienen login. Queda como posible demo futura para llamar la atención de Vercel, no como base.
    - **El enfoque de pi sobre Cloudflare Durable Objects.** Sirve cuando el loop del agente es tuyo. fox envuelve el binario de fx, que necesita una máquina real.
-   - **Exponer un puerto con Caddy.** Es válido, pero se prefiere el túnel para no abrir ningún puerto.
-4. **Entrada, con dos candados y cero puertos abiertos:**
+   - **Exponer un puerto con Caddy.** Es válido, pero se prefiere el túnel para no abrir ningún puerto web.
+4. **Entrada, con dos candados y ningún puerto web entrante en el VPS.** SSH (22) sigue abierto para administrar; si se puede, restringirlo por IP. El hostname es públicamente resoluble: no tratar la URL como secreto.
    - **Cloudflare Tunnel con nombre** (`cloudflared` como servicio en el VPS, conexión saliente). No es el Quick Tunnel que usa `tunnel.mjs`.
-   - **Cloudflare Access** delante del hostname: login por mail o Google, solo para el dueño. Es el primer candado y frena a cualquiera antes de que llegue a fox.
-   - **El passkey remoto de fox** (`FOX_PUBLIC_ORIGIN`, ya implementado en el commit 62a646e; ver `docs/plans/2026-10-16-remote-passkey-design.md`). Es el segundo candado.
+   - **Cloudflare Access** delante del hostname: login por mail o Google, solo para el dueño, con **sesión de 30 días**. Es el primer candado y frena a cualquiera antes de que llegue a fox. **Decidido por el dueño:** se acepta un login extra de Cloudflare más o menos una vez por mes por dispositivo, a cambio de que el passkey de fox (código nuevo, sin auditar) no sea la única barrera frente a internet.
+   - **El passkey remoto de fox** (`FOX_PUBLIC_ORIGIN`, ya implementado en el commit 62a646e; ver `docs/plans/2026-10-16-remote-passkey-design.md`). Es el segundo candado y el login del día a día.
 5. **Un usuario y un VPS.** Todos los repos y todas las sesiones de fx viven en el VPS, bajo un usuario Linux `fox` (nunca root).
 6. **Login de fx:** API key del Vercel AI Gateway (`fx setup`). No está verificado que el login con suscripción de ChatGPT (`fx login codex`) funcione sin navegador.
 7. **El modo local sigue existiendo y no se toca.** `FOX_PUBLIC_ORIGIN` ya se niega a combinarse con `FOX_SHARE_PORT`, `FOX_MOBILE_PORT` y `FOX_AUTH_DISABLED`; el pairing y Tailscale quedan para el modo local.
@@ -39,7 +39,7 @@ El agente **no** crea cuentas, no compra, no ingresa contraseñas ni tarjetas y 
 ### 1. Endurecer el servidor
 - Crear el usuario `fox` con sudo y copiarle la clave SSH.
 - `/etc/ssh/sshd_config`: `PasswordAuthentication no`, `PermitRootLogin no`. Reiniciar sshd **después** de verificar que entrar como `fox` funciona.
-- `ufw`: denegar todo lo entrante salvo 22/tcp. Nada más: el túnel es saliente.
+- `ufw`: denegar todo lo entrante salvo 22/tcp (restringido por IP si la administración lo permite). Nada más: el túnel es saliente.
 - Activar `unattended-upgrades`. fail2ban es opcional.
 
 ### 2. Dependencias (como `fox`)
@@ -77,12 +77,14 @@ WantedBy=multi-user.target
 - Instalar `cloudflared` desde el repo apt oficial de Cloudflare.
 - La persona corre `cloudflared tunnel login`. Después: `cloudflared tunnel create fox` y `cloudflared tunnel route dns fox fox.<dominio>`.
 - `/etc/cloudflared/config.yml`: ingress `fox.<dominio>` → `http://127.0.0.1:4848` y una regla final `http_status:404`. Instalar como servicio con `cloudflared service install`.
+- **Credenciales del túnel:** definir y documentar bajo qué usuario corren `tunnel login`, `tunnel create` y el servicio. Comprobar la ruta efectiva del certificado (`cert.pem`), del JSON de credenciales del túnel y de `config.yml`, con permisos mínimos que el servicio pueda leer. Nunca copiar estos archivos al repo ni imprimirlos en logs.
+- Probar que `systemctl restart cloudflared` y un reinicio del VPS levantan el túnel sin intervención humana.
 - **Verificar que el Host que le llega a fox sea `fox.<dominio>`** y que el header Origin pase intacto. fox rechaza cualquier otro valor, y eso es lo que tiene que pasar.
 
 ### 5. Cloudflare Access
 - Zero Trust → Access → Applications → Self-hosted, con el hostname `fox.<dominio>`.
 - Política: Allow, que incluya solo el mail del dueño. Método: one-time PIN por mail o Google.
-- Duración de sesión de 24 h. Confirmar que, al vencer, la terminal se reconecta después de volver a loguearse y no queda colgada.
+- Duración de sesión: **30 días** (decidido). Confirmar que, al vencer, la terminal se reconecta después de volver a loguearse y no queda colgada.
 
 ### 6. Registrar el passkey
 - Por SSH, como `fox`: `FOX_PUBLIC_ORIGIN=https://fox.<dominio> node bin/fox-enroll.mjs`.
@@ -90,8 +92,8 @@ WantedBy=multi-user.target
 - No copiar el `~/.config/fox/passkey.json` de la Mac: el de localhost no sirve en el dominio, y fox se niega a arrancar si lo encuentra.
 
 ### 7. Verificación (todo tiene que pasar antes de usarlo en serio)
-- `curl -I https://fox.<dominio>` sin sesión de Access → redirige al login de Cloudflare.
-- Desde afuera, el puerto 4848 está cerrado (`nmap -p 4848,80,443 <ip>`). Solo el 22 abierto.
+- Sin sesión de Access, **ninguna petición llega a fox**: puede ser una redirección, un desafío o un rechazo según la configuración real. Confirmarlo en los logs de fox, no solo por la respuesta de `curl`.
+- Desde afuera, en la IP del VPS, 80, 443 y 4848 no responden (`nmap -p 22,80,443,4848 <ip>`), y 22 sí permite administrar.
 - Con Access y sin passkey: la API y el WebSocket `/pty` responden 401 o 403.
 - El flujo completo en un browser real, en laptop y teléfono: Access, passkey, panel, terminal en vivo, escribir en fx.
 - `sudo systemctl restart fox` → las sesiones de tmux y fx siguen vivas y se reconectan.
@@ -109,7 +111,18 @@ Ninguno bloquea; son para que la experiencia tenga sentido sin Mac. Detectar el 
 
 ### 9. Backups
 - Activar los backups de Hetzner (+20% del precio) o correr `restic` sobre `/home/fox` (repos, `~/.fx` y `~/.config/fox`) hacia un bucket.
-- El passkey vive en `~/.config/fox/passkey.json`. Si se pierde, se vuelve a registrar con `fox-enroll` por SSH.
+- El passkey vive en `~/.config/fox/passkey.json`.
+
+### 10. Recuperar un passkey perdido
+`bin/fox-enroll.mjs` se niega a emitir un código si ya existe `~/.config/fox/passkey.json`, así que no alcanza con volver a correrlo. Procedimiento manual, solo por SSH como usuario `fox`:
+1. `sudo systemctl stop fox`.
+2. Respaldar `~/.config/fox/passkey.json` en un lugar protegido y sacarlo de la ruta activa.
+3. `sudo systemctl start fox`.
+4. `FOX_PUBLIC_ORIGIN=https://fox.<dominio> node bin/fox-enroll.mjs`: código nuevo, válido 10 minutos.
+5. Registrar el passkey nuevo desde `https://fox.<dominio>`, pasando por Access.
+6. Verificar que las sesiones de fx sigan en disco y que la credencial vieja ya no deje entrar.
+
+No automatizar el borrado de credenciales. Restaurar un backup que todavía contiene `passkey.json` devuelve la credencial vieja; no es una forma de recuperar el acceso.
 
 ## Pendiente de verificar
 
@@ -122,5 +135,5 @@ Ninguno bloquea; son para que la experiencia tenga sentido sin Mac. Detectar el 
 ## Seguridad: no negociable
 
 - fox es una shell remota sobre el servidor. Nunca `FOX_AUTH_DISABLED=1`, nunca escuchar en `0.0.0.0` y nunca correr como root.
-- No publicar el hostname ni compartir la URL hasta que pase toda la verificación del paso 7.
+- No publicar el hostname ni compartir la URL hasta que pase toda la verificación del paso 7. La URL no es un secreto: la seguridad la dan Access y el passkey.
 - No dejar secretos en el repo, en el chat ni en la unidad systemd. El Gateway key vive en la config de fx.
