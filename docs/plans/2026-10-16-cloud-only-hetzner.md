@@ -5,8 +5,7 @@ Handoff para el agente que lo implemente. Primero las decisiones tomadas y por q
 ## Decisiones tomadas
 
 1. **Objetivo:** fox corre solo en la nube, sin nada local, y se usa desde cualquier dispositivo (teléfono, laptop, otro browser) sin Tailscale ni el pairing por QR.
-2. **Una persona por VPS.** Si un colega quiere lo mismo, repite este plan en **su propio VPS**, con su dominio o subdominio, su Access, su passkey y sus credenciales.
-   - **Descartado un VPS compartido** con un fox por integrante. Exige un usuario Linux, un servicio, un puerto, un ingress y una app de Access por persona, más altas y bajas manuales. Solo da aislamiento débil: mismo kernel, mismo loopback, `/proc` y `/tmp` compartidos y recursos compartidos. Y no se comparte nada útil, porque repos y sesiones tienen que quedar separados igual. Un VPS más cuesta unos €9 por mes en Europa (CX33) y es más simple y más seguro. El borrador descartado no está en el repo.
+2. **Una persona por VPS.** Este fox es solo del dueño.
 3. **Dónde:** Hetzner, Ubuntu 24.04, **CX33 (4 vCPU, 8 GB, 80 GB) en Europa**: €8,49/mes más unos €0,50 de IPv4, sin IVA, según los precios oficiales posteriores al ajuste del 15 de junio de 2026. El dueño está en Europa: elegir la ubicación más cercana (Falkenstein, Núremberg o Helsinki). 8 GB porque dos agentes, más Chromium de Playwright, más un dev server no entran en 4 GB; medir con carga real y ajustar. Si alcanzara con 4 GB, el CX23 sale €5,49. Los planes CX y CAX **no existen en EE. UU. ni en Singapur**: allá lo más barato con 8 GB es el CCX13, a unos USD 51/mes. Cualquier VPS con Ubuntu sirve igual.
 4. **Descartados por ahora:**
    - **Vercel Sandbox.** Las sesiones duran como máximo 24 h en Pro (45 min en Hobby). Al apagarse se guarda solo el disco, no los procesos (tmux y fx mueren). No se apaga solo por inactividad, así que fox tendría que dormirlo y despertarlo, y las URLs públicas no tienen login. Queda como posible demo futura para llamar la atención de Vercel, no como base.
@@ -19,7 +18,8 @@ Handoff para el agente que lo implemente. Primero las decisiones tomadas y por q
    - **Aceptado:** el TLS termina en Cloudflare, así que Cloudflare puede ver en texto plano la terminal, el código y lo que se escriba. Está bien para uso personal. Si algún día hay requisitos de compliance, hay que revisarlo.
 6. **Dos usuarios Linux:** `admin`, con sudo, para administrar; y `fox`, **sin sudo**, donde corren fox, tmux, fx, los repos y las sesiones. fx ejecuta comandos que escribe un modelo: si `fox` tuviera sudo, un prompt injection sería root.
 7. **Login de fx:** API key del Vercel AI Gateway (`fx setup`) **con límite de gasto**. No está verificado que el login con suscripción de ChatGPT (`fx login codex`) funcione sin navegador.
-8. **El modo local sigue existiendo y no se toca.** `FOX_PUBLIC_ORIGIN` ya se niega a combinarse con `FOX_SHARE_PORT`, `FOX_MOBILE_PORT` y `FOX_AUTH_DISABLED`; el pairing y Tailscale quedan para el modo local.
+8. **Actualizaciones automáticas desde la rama `release`, con rollback.** fox está en desarrollo y cambia seguido, y en modo solo nube es la única puerta de entrada: si una actualización lo rompe, solo queda SSH. Por eso el servidor **no sigue `main`**: se desarrolla en `main` y, cuando algo está probado, se avanza `release`. El VPS busca los cambios con un timer (pull); GitHub nunca entra al servidor, así que no hay claves del VPS en GitHub. Si la versión nueva no pasa los tests o el chequeo de salud, vuelve sola a la anterior. Detalle en el paso 10.
+9. **El modo local sigue existiendo y no se toca.** `FOX_PUBLIC_ORIGIN` ya se niega a combinarse con `FOX_SHARE_PORT`, `FOX_MOBILE_PORT` y `FOX_AUTH_DISABLED`; el pairing y Tailscale quedan para el modo local.
 
 ## Lo que ya existe en el código
 
@@ -56,7 +56,7 @@ El agente **no** crea cuentas, no compra, no ingresa contraseñas ni tarjetas y 
 - Para el navegador de fx (Playwright MCP): instalar las dependencias de Chromium (`npx playwright install-deps chromium` como `admin`).
 
 ### 3. fox y tmux como servicios
-- Código de fox en **`/opt/fox`, propiedad de root y de solo lectura para `fox`**: `git clone https://github.com/jamarks/fox /opt/fox && cd /opt/fox && npm ci`. Así un agente no puede modificar el fox que lo controla.
+- Código de fox en **`/opt/fox`, propiedad de root y de solo lectura para `fox`**, con una carpeta por versión y un symlink a la activa (ver paso 10): `/opt/fox/releases/<commit>/` y `/opt/fox/current`. Así un agente no puede modificar el fox que lo controla, y volver atrás es cambiar el symlink, sin reconstruir nada. La primera versión se instala con el mismo script de actualización del paso 10.
 - **tmux en su propio servicio, separado de fox.** Si fox lanza tmux como hijo, reiniciar fox puede matar todas las sesiones. `KillMode=process` lo evita, pero systemd lo desaconseja. Lo recomendado:
   - `loginctl enable-linger fox`.
   - Un servicio de usuario `~fox/.config/systemd/user/fox-tmux.service` que mantenga vivo el servidor de tmux (por ejemplo `tmux -D` con un socket fijo), con `Restart=always`.
@@ -72,11 +72,11 @@ After=network-online.target
 
 [Service]
 User=fox
-WorkingDirectory=/opt/fox
+WorkingDirectory=/opt/fox/current
 Environment=FOX_PUBLIC_ORIGIN=https://fox.<dominio>
 Environment=PORT=4848
 Environment=TMUX_TMPDIR=/home/fox/.tmux
-ExecStart=/usr/bin/node /opt/fox/server.mjs
+ExecStart=/usr/bin/node /opt/fox/current/server.mjs
 Restart=always
 UMask=0077
 NoNewPrivileges=yes
@@ -104,7 +104,7 @@ WantedBy=multi-user.target
 - Duración de sesión: **30 días** (decidido). Confirmar que, al vencer, la terminal se reconecta después de volver a loguearse y no queda colgada.
 
 ### 6. Registrar el passkey
-- Desde `admin`: `cd /opt/fox && sudo -u fox -H env FOX_PUBLIC_ORIGIN=https://fox.<dominio> node bin/fox-enroll.mjs`.
+- Desde `admin`: `cd /opt/fox/current && sudo -u fox -H env FOX_PUBLIC_ORIGIN=https://fox.<dominio> node bin/fox-enroll.mjs`.
 - La persona abre `https://fox.<dominio>`, pasa Access, escribe el código y crea el passkey. Conviene registrarlo en un gestor que sincronice (iCloud Keychain o 1Password) para que funcione en el teléfono y en la laptop.
 - No copiar el `~/.config/fox/passkey.json` de la Mac: el de localhost no sirve en el dominio, y fox se niega a arrancar si lo encuentra.
 
@@ -116,6 +116,7 @@ WantedBy=multi-user.target
 - Como `fox`: no tiene sudo, no puede escribir en `/opt/fox`, no llega a `169.254.169.254` y no puede leer las credenciales de cloudflared.
 - `sudo systemctl restart fox` → las sesiones de tmux y fx siguen vivas y se reconectan.
 - Reiniciar el VPS → fox, tmux y cloudflared vuelven solos. Las sesiones de fx mueren; comprobar que `fx session resume <id>` (o abrirla desde fox) retoma la conversación.
+- Actualización: avanzar `release` con un cambio inocuo → el servidor lo toma solo, sin cortar sesiones de fx. Después, avanzar `release` con un commit que rompa el arranque a propósito → el script vuelve a la versión anterior, fox sigue respondiendo y llega la alerta. Al terminar, avanzar `release` con el revert de ese commit (fast-forward, sin force push) y comprobar que se despliega.
 - Dos agentes trabajando a la vez, uno con el navegador de Playwright: medir RAM, CPU y swap, y ajustar el tamaño del VPS y los límites del paso 3.
 
 ### 8. Cambios en fox para el modo nube
@@ -127,19 +128,46 @@ Detectar el modo con `FOX_PUBLIC_ORIGIN`, o con `process.platform !== 'darwin'` 
 5. **Retomar al arrancar:** si fox arranca y no hay sesiones de tmux (por ejemplo después de un reboot), ofrecer reabrir las que estaban abiertas con `fx session resume`.
 6. **Validar el JWT de Access** (`Cf-Access-Jwt-Assertion`, contra los certificados del team de Cloudflare). Opcional con una sola persona, pero suma defensa: fox rechaza cualquier request que no haya pasado por Access, incluso desde el propio VPS.
 7. **README:** sección "Cloud mode" con este recorrido. El README hoy promete "Nothing leaves your machine": ajustarlo para que ese sea el modo local.
-8. **`setup-vps.sh`** (opcional): automatizar los pasos 1 a 4, idempotente y sin manejar secretos. Es lo que hace fácil que un colega repita el plan en su propio VPS.
+8. **`setup-vps.sh`** (opcional): automatizar los pasos 1 a 4, idempotente y sin manejar secretos.
 
 ### 9. Operación
 - **Backups:** activar los backups de Hetzner (+20% del precio) o correr `restic` sobre `/home/fox` (repos, `~/.fx` y `~/.config/fox`) hacia un bucket cifrado. El passkey vive en `~/.config/fox/passkey.json`.
 - **Monitoreo mínimo:** una alerta si el disco pasa el 80% y si fox, tmux o cloudflared se caen. Por ejemplo, un healthcheck externo (Healthchecks.io, gratis) alimentado por un timer de systemd.
-- **Actualizar fox:** como `admin`, `cd /opt/fox && git pull && npm ci` (node-pty se recompila), y después `systemctl restart fox`. Las sesiones de fx no se cortan porque tmux vive aparte.
+- **Actualizar fox:** automático desde `release` (paso 10). Para forzar una actualización o un rollback a mano: `sudo /usr/local/sbin/fox-update` o `sudo /usr/local/sbin/fox-update --rollback`.
 
-### 10. Recuperar un passkey perdido
+### 10. Actualizaciones automáticas desde `release`
+**Flujo de desarrollo:** se trabaja en `main`. Cuando una versión está probada, se avanza `release` con fast-forward (`git push origin main:release`, o un commit concreto: `git push origin <commit>:release`). Nunca se reescribe `release` con force push.
+
+**Lo que hace la persona:** crear la rama `release` en GitHub desde el último commit sano de `main`. Opcional: protegerla para que solo acepte fast-forward.
+
+**Usuarios y archivos:**
+- `foxbuild`: usuario de sistema sin login y sin sudo. Es el único que corre `npm ci` y `npm test`, porque los scripts de instalación de npm (node-pty) ejecutan código del repo. Nunca correrlos como root.
+- `/opt/fox/releases/<commit>/`: una carpeta por versión. La arma `foxbuild` en un directorio temporal; cuando pasa los tests, root la mueve acá y la deja `root:root` y de solo lectura para `fox`.
+- `/opt/fox/current`: symlink a la versión activa. `/opt/fox/previous`: symlink a la anterior.
+- `/usr/local/sbin/fox-update`: el script, `root:root`, `0755`. Lo corre `fox-update.timer` cada 10 minutos.
+
+**Qué hace `fox-update`:**
+1. Toma un lock (`flock`) para no correr dos veces a la vez.
+2. `git fetch` de `release` en un clon espejo propio del script. Si el commit es el mismo que `current`, termina.
+3. **Solo avanza si es fast-forward** respecto de la versión activa (`git merge-base --is-ancestor`). Si alguien reescribió `release`, no despliega y alerta.
+4. Opcional, recomendado: `git verify-commit` contra la clave del dueño. Sin firma válida, no despliega.
+5. Como `foxbuild`, en un directorio temporal: export del commit, `npm ci`, `npm test`. Si falla, borra el temporal, alerta y termina: no se tocó nada.
+6. Root mueve la versión a `releases/<commit>/`, apunta `previous` a la versión actual y cambia `current` a la nueva **de forma atómica** (`ln -sfn` a un symlink temporal y `mv -T`).
+7. `systemctl restart fox`. Las sesiones de fx no se cortan porque tmux vive en su propio servicio (paso 3). El browser toma la versión nueva al recargar, porque fox sirve todo con `no-store`.
+8. **Chequeo de salud**, hasta 30 segundos: `systemctl is-active fox` y `curl -fsS -H 'Host: fox.<dominio>' http://127.0.0.1:4848/`, que tiene que devolver 200 con `<title>fox</title>` (página de login) o `<title>Set up fox</title>` (página de alta, antes de registrar el passkey). Con `FOX_PUBLIC_ORIGIN`, sin ese Host fox responde 403.
+9. **Si el chequeo falla: rollback.** `current` vuelve a apuntar a `previous`, `systemctl restart fox`, se repite el chequeo y se alerta. Ese commit queda marcado como malo y no se reintenta hasta que `release` avance a otro.
+10. Conserva las últimas 3 versiones en `releases/` y borra las más viejas.
+
+**Límites, a dejar claros:** el rollback automático detecta lo que miden los tests y el chequeo de salud (que fox arranque y sirva la página). Un bug de la UI con fox arrancando bien no lo detecta: para eso está `sudo fox-update --rollback`, que vuelve a `previous` a mano.
+
+**Ciclo con fx:** si fox se desarrolla con fx desde este mismo servidor, fx trabaja sobre un clon en el HOME de `fox`, hace push a `main`, y el dueño revisa y avanza `release`. El agente nunca toca `/opt/fox` ni puede avanzar `release` solo: el token de GitHub de `fox` no debe tener permiso de push a `release` (proteger la rama).
+
+### 11. Recuperar un passkey perdido
 `bin/fox-enroll.mjs` se niega a emitir un código si ya existe `~/.config/fox/passkey.json`, así que no alcanza con volver a correrlo. Procedimiento manual por SSH desde `admin`:
 1. `sudo systemctl stop fox`.
 2. Respaldar `/home/fox/.config/fox/passkey.json` en un lugar protegido y sacarlo de la ruta activa.
 3. `sudo systemctl start fox`.
-4. `cd /opt/fox && sudo -u fox -H env FOX_PUBLIC_ORIGIN=https://fox.<dominio> node bin/fox-enroll.mjs`: código nuevo, válido 10 minutos.
+4. `cd /opt/fox/current && sudo -u fox -H env FOX_PUBLIC_ORIGIN=https://fox.<dominio> node bin/fox-enroll.mjs`: código nuevo, válido 10 minutos.
 5. Registrar el passkey nuevo desde `https://fox.<dominio>`, pasando por Access.
 6. Verificar que las sesiones de fx sigan en disco y que la credencial vieja ya no deje entrar.
 
@@ -151,6 +179,7 @@ No automatizar el borrado de credenciales. Restaurar un backup que todavía cont
 - Que cloudflared preserve Host y Origin (paso 4).
 - Que el WebSocket de la terminal funcione detrás de Access y cómo se comporta cuando vence la sesión (paso 5).
 - Que tmux como servicio de usuario aparte funcione con fox y sobreviva a un restart de fox (paso 3).
+- Que el script de actualización y el rollback funcionen de punta a punta, incluido el primer despliegue y un reinicio del VPS a mitad de una actualización (paso 10).
 - Si `fx login codex` funciona sin navegador. Si no, el plan es usar solo el Gateway.
 
 ## Seguridad: no negociable
@@ -159,4 +188,4 @@ No automatizar el borrado de credenciales. Restaurar un backup que todavía cont
 - fx ejecuta comandos que escribe un modelo, y un repo clonado puede traer instrucciones maliciosas (prompt injection). Todo lo que hay en el HOME de `fox` es alcanzable por un agente: credenciales mínimas y con límite (Gateway con tope de gasto, GitHub fine-grained por repo), y para repos de terceros usar fx en modo `ask`.
 - No publicar el hostname ni compartir la URL hasta que pase toda la verificación del paso 7. La URL no es un secreto: la seguridad la dan Access y el passkey.
 - No dejar secretos en el repo, en el chat, en la unidad systemd ni en el cloud-init. El Gateway key vive en la config de fx.
-- Para un colega: su propio VPS con este plan. Nunca darle acceso a este fox, a este Access ni a este usuario.
+- Este fox es de una sola persona: no darle a nadie más acceso a este fox, a este Access ni al usuario `fox`.
