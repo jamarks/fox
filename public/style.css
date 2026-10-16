@@ -438,10 +438,6 @@ a.section-title.fold:hover { color: var(--text); }
 .view-mode button.on { background: var(--panel-2); color: var(--text); }
 /* source view: the file as text, with line numbers */
 .code-view { flex: 1; min-height: 0; overflow: auto; padding: 14px 0; }
-.code-view pre { margin: 0; font: 12.5px/1.6 var(--mono); color: var(--text); counter-reset: line; tab-size: 2; }
-.code-line { display: block; padding: 0 20px 0 0; white-space: pre; }
-.code-line::before { counter-increment: line; content: counter(line); display: inline-block; width: 4.5em; padding-right: 1.4em; text-align: right; color: var(--muted); opacity: .55; user-select: none; }
-.code-line:hover { background: color-mix(in srgb, var(--panel-2) 60%, transparent); }
 .code-note { padding: 24px; color: var(--muted); font-size: 13px; }
 .tab.view .view-icon { color: #f0883e; margin-right: 2px; }
 #artifact-slot { padding: 12px 16px 2px; }
@@ -462,3 +458,22 @@ a.section-title.fold:hover { color: var(--text); }
 .file[data-view-file] { cursor: pointer; }
 .file-kind { flex: none; width: 16px; font: 10px var(--mono); color: var(--muted); text-align: center; }
 .file[data-view-file]:hover .file-name { color: #f0883e; }
+/* file tab: highlighted code with a line-number gutter; colors follow the theme */
+.code-grid { display: flex; min-width: max-content; }
+.code-grid pre { margin: 0; font: 12.5px/1.6 var(--mono); tab-size: 2; }
+.code-gutter { flex: none; padding: 0 1.2em 0 1.6em; text-align: right; color: var(--muted); opacity: .5; user-select: none; }
+.code-body { flex: 1; padding-right: 24px; color: var(--text); background: none; }
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-type, .hljs-meta .hljs-keyword { color: var(--accent); }
+.hljs-string, .hljs-attr-value, .hljs-regexp, .hljs-addition { color: var(--ok); }
+.hljs-number, .hljs-literal, .hljs-symbol, .hljs-variable.constant_ { color: var(--warn); }
+.hljs-comment, .hljs-quote, .hljs-meta { color: var(--muted); font-style: italic; }
+.hljs-title, .hljs-title.function_, .hljs-section, .hljs-selector-class, .hljs-selector-id { color: #f0883e; }
+.hljs-attr, .hljs-attribute, .hljs-property, .hljs-name, .hljs-tag { color: var(--err); }
+.hljs-deletion { color: var(--err); } .hljs-emphasis { font-style: italic; } .hljs-strong { font-weight: 600; }
+.code-view.doc { padding: 0; display: flex; }
+.doc-frame { flex: 1; width: 100%; border: 0; background: transparent; }
+.table-view { padding: 0 20px; }
+.table-view table { border-collapse: collapse; font: 12.5px/1.5 var(--mono); }
+.table-view th, .table-view td { border: 1px solid var(--border); padding: 5px 12px; text-align: left; white-space: nowrap; }
+.table-view th { position: sticky; top: -14px; background: var(--panel-2); font-weight: 600; }
+.table-view tr:hover td { background: color-mix(in srgb, var(--panel-2) 55%, transparent); }

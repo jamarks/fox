@@ -533,6 +533,8 @@ async function handlePanelRequest(req, res) {
     }
     if (p.startsWith('/vendor/xterm/')) return serveStatic(res, join(__dirname, 'node_modules/@xterm/xterm'), p.slice('/vendor/xterm'.length));
     if (p.startsWith('/vendor/addon-fit/')) return serveStatic(res, join(__dirname, 'node_modules/@xterm/addon-fit'), p.slice('/vendor/addon-fit'.length));
+    if (p.startsWith('/vendor/marked/')) return serveStatic(res, join(__dirname, 'node_modules/marked/lib'), p.slice('/vendor/marked'.length));
+    if (p.startsWith('/vendor/hljs/')) return serveStatic(res, join(__dirname, 'node_modules/@highlightjs/cdn-assets'), p.slice('/vendor/hljs'.length));
     if (p.startsWith('/vendor/font/')) return serveStatic(res, join(__dirname, 'node_modules/@fontsource/source-code-pro'), p.slice('/vendor/font'.length));
     return serveStatic(res, PUBLIC, p === '/' ? '/index.html' : p);
   } catch (err) {

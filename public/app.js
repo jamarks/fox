@@ -821,55 +821,127 @@ function agentsBoard(parent, { selectedId = null } = {}) {
 const convoShown = new Set();
 
 // ---------- files open as tabs next to the terminal (fx's terminal cannot show them) ----------
-// One rule: click a file and it opens in the middle. Pages and images render (sandboxed by the server);
-// code and text show as source with line numbers. HTML can flip between page and source. Every file tab
-// reloads when fx changes the file. The newest page fx wrote also gets a card at the top of the right column.
-const VIEWABLE = /\.(html?|svg|png|jpe?g|gif|webp)$/i;
-const IS_HTML = /\.html?$/i;
+// One rule: click a file and it opens in the middle, shown the way its type reads best: pages and images
+// render (sandboxed by the server), Markdown is formatted, JSON is indented, CSV is a table, code is
+// highlighted. Anything with a preview can flip to its source. Every file tab reloads when fx changes it.
+const VIEWABLE = /\.(html?|svg|png|jpe?g|gif|webp)$/i;      // rendered by the browser from the server
+const FORMATTED = /\.(md|markdown|json|csv|tsv)$/i;         // rendered here from the file's text
+const hasPreview = (path) => VIEWABLE.test(path) || FORMATTED.test(path);
 const canView = (f) => f.exists && VIEWABLE.test(f.path);
 const viewUrl = (id, path) => `/api/sessions/${encodeURIComponent(id)}/preview?path=${encodeURIComponent(path)}`;
 const SANDBOX = 'allow-scripts allow-forms allow-popups allow-modals';
-// A page fx created opens rendered; one it edited is usually part of an app (needs its server), so source.
-const defaultMode = (f) => (canView(f) && (!IS_HTML.test(f.path) || f.action === 'write') ? 'page' : 'source');
+const defaultMode = (f) => (hasPreview(f.path) ? 'page' : 'source');
+const extOf = (path) => (path.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase();
+// Markdown and highlighting libraries load the first time a file needs them.
+const libs = {};
+const loadLib = (src) => (libs[src] ??= new Promise((ok, fail) => { const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = fail; document.head.appendChild(el); }));
+const HLJS_LANG = { mjs: 'javascript', cjs: 'javascript', js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript', py: 'python', rb: 'ruby', sh: 'bash', zsh: 'bash', yml: 'yaml', md: 'markdown', htm: 'xml', html: 'xml', svg: 'xml', zig: 'zig' };
+async function highlight(text, ext) {
+  try {
+    await loadLib('/vendor/hljs/highlight.min.js');
+    const lang = HLJS_LANG[ext] ?? ext;
+    if (window.hljs?.getLanguage(lang)) return hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
+  } catch {}
+  return esc(text);
+}
+// A single file tab: opening another file replaces what it shows.
+const VIEW_TAB = 'view';
 function openView(sessionId, path, mode = 'page') {
-  const name = 'view:' + path;
-  let tab = state.tabs.get(name);
+  let tab = state.tabs.get(VIEW_TAB);
   if (!tab) {
     const wrap = document.createElement('div');
     wrap.className = 'term-wrap view-wrap';
     $('#terminals').appendChild(wrap);
-    tab = { name, kind: 'view', sessionId, path, label: path.split('/').pop(), wrap, closed: false, etag: null, mode: null };
-    state.tabs.set(name, tab);
+    tab = { name: VIEW_TAB, kind: 'view', wrap, closed: false };
+    state.tabs.set(VIEW_TAB, tab);
   }
-  setViewMode(tab, VIEWABLE.test(path) ? mode : 'source');
-  activateTab(name);
+  if (tab.path !== path || tab.sessionId !== sessionId) Object.assign(tab, { sessionId, path, label: path.split('/').pop(), etag: null, mode: null });
+  setViewMode(tab, hasPreview(path) ? mode : 'source');
+  activateTab(VIEW_TAB);
 }
 function setViewMode(tab, mode) {
   if (tab.mode === mode) return;
   tab.mode = mode;
-  const toggle = IS_HTML.test(tab.path)
-    ? `<div class="view-mode">${['page', 'source'].map((m) => `<button type="button" data-view-mode="${m}" class="${m === mode ? 'on' : ''}">${m}</button>`).join('')}</div>` : '';
-  tab.wrap.classList.toggle('source', mode === 'source');
-  tab.wrap.innerHTML = toggle + (mode === 'page'
+  const toggle = hasPreview(tab.path) && !/\.(png|jpe?g|gif|webp)$/i.test(tab.path)
+    ? `<div class="view-mode">${['page', 'source'].map((m) => `<button type="button" data-view-mode="${m}" class="${m === mode ? 'on' : ''}">${m === 'page' ? 'preview' : 'source'}</button>`).join('')}</div>` : '';
+  const framed = mode === 'page' && VIEWABLE.test(tab.path);
+  tab.wrap.classList.toggle('source', !framed);
+  tab.wrap.innerHTML = toggle + (framed
     ? `<iframe sandbox="${SANDBOX}" title="${esc(tab.label)}" src="${viewUrl(tab.sessionId, tab.path)}"></iframe>`
     : '<div class="code-view"><div class="code-note">loading…</div></div>');
   tab.wrap.querySelectorAll('[data-view-mode]').forEach((b) => b.addEventListener('click', () => setViewMode(tab, b.dataset.viewMode)));
-  if (mode === 'source') loadSource(tab);
+  if (!framed) loadSource(tab);
 }
+// Text-based tabs: fetch the file and show it as its type reads best (or as plain source).
 async function loadSource(tab) {
   const box = tab.wrap.querySelector('.code-view');
   if (!box) return;
   const j = await fetch(`/api/sessions/${encodeURIComponent(tab.sessionId)}/file?path=${encodeURIComponent(tab.path)}`).then((r) => r.json()).catch(() => ({ error: 'not available' }));
   if (j.text === undefined) { box.innerHTML = `<div class="code-note">${j.binary ? 'Binary file. Use ↗ in the files list to open it.' : j.tooLarge ? `Too large to show here (${Math.round(j.size / 1024)} KB). Use ↗ to open it.` : esc(j.error ?? 'not available')}</div>`; return; }
-  const top = box.scrollTop;
-  box.innerHTML = `<pre>${j.text.split('\n').map((line) => `<span class="code-line">${esc(line) || ' '}</span>`).join('')}</pre>`;
+  const top = box.scrollTop, ext = extOf(tab.path), text = j.text;
+  let html = null;
+  if (tab.mode === 'page' && /^(md|markdown)$/.test(ext)) html = await markdownView(text);
+  else if (tab.mode === 'page' && ext === 'json') {
+    try { html = codeBlock(await highlight(JSON.stringify(JSON.parse(text), null, 2), 'json')); }
+    catch { html = `<div class="code-note">Not valid JSON, showing it as written.</div>` + codeBlock(await highlight(text, 'json')); }
+  } else if (tab.mode === 'page' && /^(csv|tsv)$/.test(ext)) html = tableView(text, ext === 'tsv' ? '\t' : ',');
+  else html = codeBlock(await highlight(text, ext));
+  box.innerHTML = html;
+  box.classList.toggle('doc', tab.mode === 'page' && /^(md|markdown)$/.test(ext));
   box.scrollTop = top; // a reload keeps your place
+}
+// Highlighted code with a separate line-number gutter, so multi-line tokens stay intact.
+function codeBlock(html) {
+  const lines = html.split('\n').length;
+  return `<div class="code-grid"><pre class="code-gutter" aria-hidden="true">${Array.from({ length: lines }, (_, i) => i + 1).join('\n')}</pre><pre class="code-body hljs">${html}</pre></div>`;
+}
+// Markdown, formatted. marked's HTML is not trusted: it is shown in a frame with no scripts and no access
+// to fox, styled with the current theme.
+async function markdownView(text) {
+  try { await loadLib('/vendor/marked/marked.umd.js'); } catch { return codeBlock(await highlight(text, 'markdown')); }
+  const doc = document.createElement('template');
+  doc.innerHTML = marked.parse(text, { gfm: true });
+  for (const code of doc.content.querySelectorAll('pre code')) {
+    const lang = (code.className.match(/language-([\w-]+)/)?.[1] ?? '').toLowerCase();
+    code.innerHTML = lang ? await highlight(code.textContent, lang) : esc(code.textContent);
+    code.classList.add('hljs');
+  }
+  const css = getComputedStyle(document.body), v = (n) => css.getPropertyValue(n).trim();
+  const page = `<!doctype html><meta charset="utf-8"><base target="_blank"><style>
+    :root{color-scheme:dark;--bg:${v('--bg').startsWith('rgba') ? '#0b0d14' : v('--bg')};--text:${v('--text')};--muted:${v('--muted')};--border:${v('--border')};--panel:${v('--panel-2')};--accent:${v('--accent')};--ok:${v('--ok')};--warn:${v('--warn')};--err:${v('--err')};}
+    ${MD_CSS}</style><article>${doc.innerHTML}</article>`;
+  return `<iframe class="doc-frame" sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc="${esc(page)}"></iframe>`;
+}
+const MD_CSS = `html{background:var(--bg);color:var(--text);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  body{margin:0}article{max-width:760px;margin:0 auto;padding:36px 32px 64px}
+  h1,h2,h3,h4{line-height:1.25;margin:1.6em 0 .6em;letter-spacing:-.01em}h1{font-size:2em;margin-top:.2em}h2{font-size:1.45em;padding-bottom:.3em;border-bottom:1px solid var(--border)}h3{font-size:1.15em}
+  p,ul,ol,blockquote,table,pre{margin:0 0 1em}a{color:var(--accent)}li{margin:.25em 0}hr{border:0;border-top:1px solid var(--border);margin:2em 0}
+  code{font:.88em ui-monospace,"SF Mono",Menlo,monospace;background:var(--panel);padding:.15em .4em;border-radius:5px}
+  pre{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:14px 16px;overflow:auto}pre code{background:none;padding:0;font-size:13px;line-height:1.55}
+  blockquote{border-left:3px solid var(--accent);padding:.2em 1em;color:var(--muted)}
+  table{border-collapse:collapse;display:block;overflow:auto}th,td{border:1px solid var(--border);padding:6px 12px;text-align:left}th{background:var(--panel)}
+  img{max-width:100%}input[type=checkbox]{margin-right:.5em}
+  .hljs-keyword,.hljs-selector-tag,.hljs-built_in{color:var(--accent)}.hljs-string,.hljs-attr-value{color:var(--ok)}.hljs-number,.hljs-literal{color:var(--warn)}.hljs-comment,.hljs-quote{color:var(--muted);font-style:italic}.hljs-title,.hljs-attr,.hljs-property{color:var(--err)}`;
+// CSV or TSV as a table (quoted fields with commas and newlines handled; first row is the header).
+function tableView(text, sep) {
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') q = false; else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === sep) { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  const shown = rows.slice(0, 2001), [head = [], ...body] = shown;
+  return `<div class="table-view"><table><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${body.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>${rows.length > shown.length ? `<div class="code-note">Showing the first 2000 rows of ${rows.length - 1}.</div>` : ''}</div>`;
 }
 function viewTabEl(name, tab) {
   const el = document.createElement('div');
   el.className = 'tab view' + (name === state.activeTab ? ' active' : '');
   el.title = tab.path;
-  el.innerHTML = `<span class="view-icon">${VIEWABLE.test(tab.path) ? '◫' : '{}'}</span><span class="tab-label">${esc(tab.label)}</span><span class="close" data-close="1" title="Close">×</span>`;
+  el.innerHTML = `<span class="view-icon">${hasPreview(tab.path) ? '◫' : '{}'}</span><span class="tab-label">${esc(tab.label)}</span><span class="close" data-close="1" title="Close">×</span>`;
   el.addEventListener('click', (e) => { if (e.target.dataset.close) closeTab(name); else activateTab(name); });
   return el;
 }
@@ -880,7 +952,7 @@ async function checkView(tab) {
     const r = await fetch(viewUrl(tab.sessionId, tab.path), { method: 'HEAD' });
     const etag = r.ok ? r.headers.get('etag') : null;
     if (tab.etag && etag && etag !== tab.etag) {
-      if (tab.mode === 'page') tab.wrap.querySelector('iframe').src = viewUrl(tab.sessionId, tab.path);
+      if (tab.mode === 'page' && VIEWABLE.test(tab.path)) tab.wrap.querySelector('iframe').src = viewUrl(tab.sessionId, tab.path);
       else loadSource(tab);
     }
     if (etag) tab.etag = etag;
@@ -922,7 +994,7 @@ function fileRow(f) {
   const subs = kids.join(' ');
   // Name first so a narrow column still tells files apart; the folder follows, muted.
   const name = f.rel.split('/').pop(), dir = f.rel.slice(0, f.rel.length - name.length);
-  const kind = VIEWABLE.test(f.path) ? '◫' : '{}';
+  const kind = hasPreview(f.path) ? '◫' : '{}';
   const target = f.exists ? `data-view-file="${esc(f.path)}" data-view-mode="${defaultMode(f)}" title="Open in the middle"` : '';
   return `<div class="file ${f.exists ? '' : 'missing'}" ${target}>
     <div class="file-head"><span class="file-act ${f.action}">${FILE_LABEL[f.action]}</span><span class="file-kind" aria-hidden="true">${kind}</span><span class="file-path" title="${esc(f.path)}"><span class="file-name">${esc(name)}</span>${dir ? `<span class="file-dir">${esc(dir.replace(/\/$/, ''))}</span>` : ''}</span>${subs ? `<span class="file-by" title="by subagent ${subs}">${kids[0]}${kids.length > 1 ? ' +' + (kids.length - 1) : ''}</span>` : ''}${f.exists ? `<a href="#" class="file-open" data-open-file="${esc(f.path)}" title="Open with the default app">↗</a>` : '<span class="file-by">deleted</span>'}</div>
