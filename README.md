@@ -66,7 +66,7 @@ To offer another one, add an entry to `tools.mjs`.
 - **New replies**: an inbox above the projects lists answers you have not opened yet; click one to jump to it.
 - **Provider and model**: `codex` subscription or pay-per-use `▲ gateway`, picked per new session.
 - **Subagents**: grouped by task to compare models; click one for its answer; weak answers flagged.
-- **Files**: what the session wrote, edited or read. Click one and it opens in a file tab next to the terminal, the way its type reads best: pages and images rendered, Markdown formatted, JSON indented, CSV as a table, code highlighted with line numbers; preview · source flips between the two. The tab follows fx's changes live; ↗ opens the file in its default app.
+- **Files**: what the session wrote or changed, newest first. Click one and it opens in a file tab next to the terminal, the way its type reads best: pages and images rendered, Markdown formatted, JSON indented, CSV as a table, code highlighted with line numbers; preview · source flips between the two. The tab follows fx's changes live; ↗ opens the file in its default app.
 - **See what fx made**: the newest page, SVG or image fx wrote shows up as a card with a live thumbnail at the top of the right column. Pages run sandboxed, so their scripts cannot reach fox or your terminals.
 - **One terminal**: fx runs in tmux, so closing the tab or the browser never stops it; pin to keep tabs.
 - **Dictation**: in Chrome, tap the mic by the terminal tabs (or hold ⌥D) and speak. The mic turns into an orange orb whose rings follow your voice, and a pill over the terminal shows the words as they are heard; when you stop, the text lands in fx's input for you to edit. Enter while dictating sends it right away, Esc discards it. Recognition is Chrome's (it may use its online service); fox stores no audio. On a phone, open fox over HTTPS for the mic.
@@ -151,7 +151,7 @@ Option is the modifier, because ⌘T and ⌘W belong to the browser.
 |---|---|
 | Left | New replies on top, then sessions from `~/.fx/sessions` grouped by workspace. Click to open. Hover for pin, rename, archive. `+` on a group starts a new session there (pick a model and tools); the folder icon in the header opens any other folder. |
 | Middle | The current terminal (preview, italic) plus pinned tabs. 📌 pins, × unpins. fx keeps running either way. |
-| Right (⇥) | Model, provider, duration and cost; the files the session touched; its subagents (both sections fold). A subagent's own conversation; a session's conversation only when global search or the replies inbox points at a message (the terminal has the rest). × closes it. |
+| Right (⇥) | What the session made: the newest page as a card, then the files it wrote or changed (newest first), then its subagents. No repeated name or model; a subagent shows a link back to its parent. × closes it. |
 
 ## How it works
 

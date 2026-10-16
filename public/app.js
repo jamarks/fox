@@ -985,10 +985,8 @@ function renderArtifactCard(id, files) {
 }
 
 // ---------- files the session touched ----------
-const readsShown = new Set();
 let filesCollapsed = false;
 try { filesCollapsed = localStorage.getItem('fox.filesCollapsed') === '1'; } catch {}
-const FILE_LABEL = { write: 'wrote', edit: 'edited', mention: 'mentioned', read: 'read' };
 function fileRow(f) {
   const kids = f.by.filter((b) => b > 0).map((b) => '#' + b);
   const subs = kids.join(' ');
@@ -997,17 +995,15 @@ function fileRow(f) {
   const kind = hasPreview(f.path) ? '◫' : '{}';
   const target = f.exists ? `data-view-file="${esc(f.path)}" data-view-mode="${defaultMode(f)}" title="Open in the middle"` : '';
   return `<div class="file ${f.exists ? '' : 'missing'}" ${target}>
-    <div class="file-head"><span class="file-act ${f.action}">${FILE_LABEL[f.action]}</span><span class="file-kind" aria-hidden="true">${kind}</span><span class="file-path" title="${esc(f.path)}"><span class="file-name">${esc(name)}</span>${dir ? `<span class="file-dir">${esc(dir.replace(/\/$/, ''))}</span>` : ''}</span>${subs ? `<span class="file-by" title="by subagent ${subs}">${kids[0]}${kids.length > 1 ? ' +' + (kids.length - 1) : ''}</span>` : ''}${f.exists ? `<a href="#" class="file-open" data-open-file="${esc(f.path)}" title="Open with the default app">↗</a>` : '<span class="file-by">deleted</span>'}</div>
+    <div class="file-head"><span class="file-kind" aria-hidden="true">${kind}</span><span class="file-path" title="${esc(f.path)}"><span class="file-name">${esc(name)}</span>${dir ? `<span class="file-dir">${esc(dir.replace(/\/$/, ''))}</span>` : ''}</span>${subs ? `<span class="file-by" title="by subagent ${subs}">${kids[0]}${kids.length > 1 ? ' +' + (kids.length - 1) : ''}</span>` : ''}${f.exists ? `<a href="#" class="file-open" data-open-file="${esc(f.path)}" title="Open with the default app">↗</a>` : '<span class="file-by">deleted</span>'}</div>
   </div>`;
 }
+// What the session made or changed, newest change first. Files it only read are left out.
 function filesSection(id, files) {
-  if (!files?.length) return '';
-  const main = files.filter((f) => f.action !== 'read'), reads = files.filter((f) => f.action === 'read');
-  const showReads = readsShown.has(id) || !main.length;
-  const head = `<a href="#" class="section-title fold ${filesCollapsed ? 'closed' : ''}" data-toggle-files>files <span class="fold-n">${files.length}</span></a>`;
-  if (filesCollapsed) return head;
-  return `${head}<div class="files">${main.map(fileRow).join('')}
-    ${reads.length ? (showReads ? reads.map(fileRow).join('') + (main.length ? `<a href="#" class="files-more" data-toggle-reads="${id}">hide read files</a>` : '') : `<a href="#" class="files-more" data-toggle-reads="${id}">${reads.length} read</a>`) : ''}</div>`;
+  const shown = (files ?? []).filter((f) => f.action !== 'read').sort((a, b) => b.mtime - a.mtime);
+  if (!shown.length) return '';
+  const head = `<a href="#" class="section-title fold ${filesCollapsed ? 'closed' : ''}" data-toggle-files>files <span class="fold-n">${shown.length}</span></a>`;
+  return filesCollapsed ? head : `${head}<div class="files">${shown.map(fileRow).join('')}</div>`;
 }
 $('#transcript').addEventListener('click', (e) => {
   const opener = e.target.closest('[data-open-file]');
@@ -1026,8 +1022,6 @@ $('#transcript').addEventListener('click', (e) => {
     try { localStorage.setItem('fox.filesCollapsed', filesCollapsed ? '1' : '0'); } catch {}
     lastTranscriptKey = ''; return loadTranscript(state.selected, true);
   }
-  const reads = e.target.closest('[data-toggle-reads]');
-  if (reads) { e.preventDefault(); const id = reads.dataset.toggleReads; readsShown.has(id) ? readsShown.delete(id) : readsShown.add(id); lastTranscriptKey = ''; return loadTranscript(id, true); }
   const toggle = e.target.closest('a[data-hide-convo]');
   if (toggle) {
     e.preventDefault();
@@ -1140,10 +1134,11 @@ async function loadTranscript(id, quiet = false) {
   if (quiet && key === lastTranscriptKey) return;
   lastTranscriptKey = key;
 
-  // Header: breadcrumb for subagents so you always know where you are and how to go back.
+  // No title on a desktop: the session is highlighted on the left. A subagent gets a way back to its parent;
+  // on a phone, where the list is another screen, the name and model stay.
   $('#transcript-title').innerHTML = isChild
-    ? `<a href="#" class="crumb" data-goto="${parent.id}">${esc(displayTitle(parent))}</a><span class="crumb-sep">›</span>${esc(displayTitle(s))}`
-    : esc(displayTitle(s));
+    ? `<a href="#" class="crumb" data-goto="${parent.id}">← ${esc(displayTitle(parent))}</a>`
+    : mobileLayout.matches ? esc(displayTitle(s)) : '';
   const u = s.usage;
   const tokens = u.input + u.output ? `${fmtTokens(u.input)} in · ${fmtTokens(u.output)} out · ${fmtTokens(u.cacheRead)} cache` : '';
   $('#transcript-meta').innerHTML = `<span title="${esc([tokens, s.workspace].filter(Boolean).join('\n'))}">${s.model ? vendorDot(s.model) + esc(modelShort(s.model)) : ''}${s.provider ? ` · <span title="${esc(providerLabel(s.provider))}">${s.provider === 'gateway' ? '▲ gateway' : esc(s.provider)}</span>` : ''}${u.wallMs ? ' · ' + fmtDur(u.wallMs) : ''}${isChild ? ' · billed to parent' : u.cost ? ' · $' + u.cost.toFixed(2) : ''}</span>`;
