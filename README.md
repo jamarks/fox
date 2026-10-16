@@ -62,7 +62,7 @@ To offer another one, add an entry to `tools.mjs`.
 ## What it does
 
 - **Sessions by project**: grouped by workspace, collapsible, reorderable by drag, numbered.
-- **Live state**: working, waiting or needs input, with an optional bell (sound + notification) when an agent finishes.
+- **Live state**: a dot per session, orange and breathing while fx works, still green while it waits for you; needs input says so. An optional bell (sound + notification) when an agent finishes.
 - **New replies**: an inbox above the projects lists answers you have not opened yet; click one to jump to it.
 - **Provider and model**: `codex` subscription or pay-per-use `▲ gateway`, picked per new session.
 - **Subagents**: grouped by task to compare models; click one for its answer; weak answers flagged.
@@ -151,7 +151,7 @@ Option is the modifier, because ⌘T and ⌘W belong to the browser.
 |---|---|
 | Left | New replies on top, then sessions from `~/.fx/sessions` grouped by workspace. Click to open. Hover for pin, rename, archive. `+` on a group starts a new session there (pick a model and tools); the folder icon in the header opens any other folder. |
 | Middle | The current terminal (preview, italic) plus pinned tabs. 📌 pins, × unpins. fx keeps running either way. |
-| Right (⇥) | What the session made: the newest page as a card, then the files it wrote or changed (newest first), then its subagents. No repeated name or model; a subagent shows a link back to its parent. × closes it. |
+| Right (⇥) | What the session made: the newest page as a card, then the files it wrote or changed (newest first), then its subagents. No repeated name or model; a subagent shows a link back to its parent. It closes itself when you switch to a session with nothing to show, and comes back as you left it when there is. × closes it. |
 
 ## How it works
 

@@ -159,7 +159,7 @@ function renderSummary() {
   const parts = [];
   // Only what needs attention: waiting is the normal state and is not worth a line.
   if (count('needs_input')) parts.push(`<span class="st needs_input">${count('needs_input')} need input</span>`);
-  if (count('working')) parts.push(`<span class="st working">${count('working')} working</span>`);
+  if (count('working')) parts.push(`<span class="st working" title="${count('working')} working"><i></i>${count('working')}</span>`);
   const subs = state.sessions.filter((s) => s.subagent?.phase === 'running').length;
   if (subs) parts.push(`<span class="st working">${ICON.threads} ${subs} subagent${subs === 1 ? '' : 's'}</span>`);
   // Always rendered, even empty, so the list below never jumps when activity starts or stops.
@@ -187,11 +187,10 @@ function renderSessions() {
     const isCollapsed = collapsed.has(ws);
     g.className = 'group' + (isCollapsed ? ' collapsed' : '');
     g.dataset.ws = ws;
-    const busy = list.filter((s) => s.state === 'working' || s.state === 'needs_input').length;
     const repo = state.repos?.[ws];
     // GitHub remote: owner/repo as a link. Plain git: just the branch (and the repo root if the workspace is a subfolder).
     const gitLine = repo ? `<div class="git" title="${esc(repo.remote || 'git repo without a remote: add one (git remote add origin …) and this becomes a link')}">${repo.url ? `<a href="${esc(repo.url)}" target="_blank" rel="noopener" title="Open ${esc(repo.repo)} on GitHub">${ICON.github}${esc(repo.repo)}</a>` : `<span>${ICON.git}${repo.root !== ws ? esc(shortPath(repo.root)) : 'no remote'}</span>`}${repo.branch ? `<span class="branch">${esc(repo.branch)}</span>` : ''}${repo.changed ? `<span class="changed" title="${repo.changed} changed file${repo.changed === 1 ? '' : 's'}">±${repo.changed}</span>` : ''}</div>` : '';
-    g.innerHTML = `<h3 draggable="true" title="Drag to reorder projects"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(ws)}">${esc(shortPath(ws))}</span><span class="gcount">${list.length}${busy ? ` <b class="st working">· ${busy} active</b>` : ''}</span><button class="icon" data-new="${esc(ws)}" title="New session in this folder">+</button></h3>${isCollapsed ? '' : gitLine}`;
+    g.innerHTML = `<h3 draggable="true" title="Drag to reorder projects"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(ws)}">${esc(shortPath(ws))}</span><span class="gcount">${list.length}</span><button class="icon" data-new="${esc(ws)}" title="New session in this folder">+</button></h3>${isCollapsed ? '' : gitLine}`;
     if (!isCollapsed) list.forEach((s, i) => g.appendChild(sessionCard(s, i + 1)));
     root.appendChild(g);
   }
@@ -211,9 +210,9 @@ function sessionCard(s, index = null) {
   const shown = Boolean(shownTerm && shownTerm.resume === s.id && state.tabs.get(shownTerm.name) && !state.tabs.get(shownTerm.name).closed);
   el.className = `session state-${s.state}` + (s.id === state.selected ? ' active' : '') + (shown ? ' shown' : '') + (s.archived ? ' is-archived' : '');
   el.dataset.id = s.id;
-  // Sidebar state: only say something when it is not the normal case. A live session that is simply waiting
-  // gets a bare green dot; working and needs-input get their label; no process, nothing.
-  const quiet = s.state === 'ready';
+  // Sidebar state as a dot: green and still when fx waits for you, orange and breathing while it works.
+  // Only needs-input (and another terminal) still say it in words; no process, nothing.
+  const quiet = s.state === 'ready' || s.state === 'working';
   const stateHtml = s.state !== 'idle' ? `<span class="st ${s.state}" title="${s.state === 'external' ? 'open in another terminal; fx allows one process per session' : STATE_LABEL[s.state]}"><i></i>${quiet ? '' : STATE_LABEL[s.state]}</span>` : '';
   el.innerHTML = `
     ${index ? `<span class="idx">${index}</span>` : ''}
@@ -242,7 +241,7 @@ function childrenHtml(parent) {
   const working = kids.filter((c) => c.phase === 'running').length;
   const waiting = kids.filter((c) => c.phase === 'idle').length;
   const parts = [`${kids.length} subagent${kids.length === 1 ? '' : 's'}`];
-  if (working) parts.push(`<span class="st working"><i></i>${working} working</span>`);
+  if (working) parts.push(`<span class="st working" title="${working} working"><i></i>${working}</span>`);
   if (waiting) parts.push(`<span class="st ready"><i></i>${waiting} waiting</span>`);
   return `<div class="children-count" data-child="${kids[0].id}" title="open the subagent board">${ICON.threads} ${parts.join(' · ')}</div>`;
 }
@@ -1180,6 +1179,15 @@ async function loadTranscript(id, quiet = false) {
     html.push(filesSection(id, files));
   }
   renderArtifactCard(id, files);
+  // On a session change the column follows its content: nothing to show closes it; something to show
+  // brings back what you chose last. Within a session it never moves by itself.
+  if (id !== columnSessionId && !mobileLayout.matches) {
+    columnSessionId = id;
+    const empty = !html.join('').trim() && $('#artifact-slot').classList.contains('hidden');
+    let wanted = false;
+    try { wanted = localStorage.getItem('fox.transcript') === '1'; } catch {}
+    setTranscript(!empty && wanted, { save: false });
+  }
   const body = $('#transcript-body');
   const wasAtBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
   body.innerHTML = html.join('');
@@ -1195,11 +1203,13 @@ async function loadTranscript(id, quiet = false) {
 }
 
 const transcriptToggle = $('#toggle-transcript');
-function setTranscript(visible) {
+let columnSessionId = null; // the session the right column last adjusted itself for
+// save: false for automatic changes, so your own choice (⇥ or ×) is what comes back.
+function setTranscript(visible, { save = true } = {}) {
   document.body.classList.toggle('no-transcript', !visible);
   transcriptToggle.textContent = visible ? '⇥' : '⇤';
-  transcriptToggle.title = visible ? 'Hide transcript' : 'Show transcript';
-  try { localStorage.setItem('fox.transcript', visible ? '1' : '0'); } catch {}
+  transcriptToggle.title = visible ? 'Hide the right column' : 'Show the right column';
+  if (save) try { localStorage.setItem('fox.transcript', visible ? '1' : '0'); } catch {}
   requestAnimationFrame(() => safeFit(state.tabs.get(state.activeTab)));
 }
 transcriptToggle.addEventListener('click', () => { setTranscript(mobileLayout.matches || document.body.classList.contains('no-transcript')); if (mobileLayout.matches) showMobileView('read'); });

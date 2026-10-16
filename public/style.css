@@ -110,7 +110,10 @@ label.toggle { font-weight: 400; color: var(--muted); font-size: 11px; display: 
 .inbox-excerpt { display: block; color: var(--muted); font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-top: 2px; }
 .st { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; }
 .st i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block; }
-.st.working { color: var(--warn); } .st.working i { background: var(--warn); animation: pulse 1.2s infinite; }
+.st.working { color: var(--warn); } .st.working i { background: #f0a35e; animation: breathe 1.4s ease-in-out infinite; }
+/* fx is working: the dot breathes */
+@keyframes breathe { 0%, 100% { opacity: .45; transform: scale(.8); box-shadow: 0 0 0 0 rgba(240,163,94,0); } 50% { opacity: 1; transform: scale(1.15); box-shadow: 0 0 0 4px rgba(240,163,94,.16); } }
+@media (prefers-reduced-motion: reduce) { .st.working i, .st.needs_input i { animation: none; } }
 .st.ready { color: var(--ok); } .st.ready i { background: var(--ok); }
 .st.needs_input { color: var(--err); font-weight: 600; } .st.needs_input i { background: var(--err); animation: pulse .6s infinite; }
 .st.external { color: var(--muted); } .st.external i { background: var(--muted); }
