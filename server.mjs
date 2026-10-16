@@ -17,6 +17,7 @@ import { promisify } from 'node:util';
 import { createSearchIndex } from './search.mjs';
 import { latestCompletedReply } from './inbox.mjs';
 import { TOOLS, isInstalled, addArgs } from './tools.mjs';
+import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 const execFileP = promisify(execFile);
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -411,7 +412,7 @@ async function handlePanelRequest(req, res) {
       return send(res, 200, await readEvents(id));
     }
     // Files the session touched; content, preview and "open" only for paths in that list.
-    if ((m = p.match(/^\/api\/sessions\/([^/]+)\/(files|file|open-file|preview)$/))) {
+    if ((m = p.match(/^\/api\/sessions\/([^/]+)\/(files|file|open-file|preview|view-url)$/))) {
       const id = safeSessionId(m[1]);
       if (!id) return send(res, 400, { error: 'bad id' });
       const files = await sessionFiles(id);
@@ -428,6 +429,13 @@ async function handlePanelRequest(req, res) {
       // The file itself, to render in a preview tab. An agent wrote it, so it runs sandboxed (CSP sandbox
       // without allow-same-origin: an opaque origin that cannot read fox's API or reach its terminals),
       // even when opened full screen in its own browser tab. HEAD answers the ETag for live reload.
+      // A page with its CSS and JS: a short-lived /view/ link bound to this session's project folder.
+      if (m[2] === 'view-url') {
+        const meta = await readJson(join(SESSIONS_DIR, id, 'session.json'));
+        const root = realPath(meta?.workspace_root ?? meta?.origin_workspace_root ?? '');
+        if (!root || !(f.path === root || f.path.startsWith(root + '/'))) return send(res, 400, { error: 'page is outside the project' });
+        return send(res, 200, { url: viewTokens.issue(root, f.path) });
+      }
       if (m[2] === 'preview') {
         const etag = `"${Math.round(f.mtime)}-${f.size}"`;
         // HEAD works for any file: source tabs use it to know when fx changed the file.
@@ -543,9 +551,34 @@ async function handlePanelRequest(req, res) {
 }
 
 const localHost = (host) => host === `127.0.0.1:${PORT}` || host === `localhost:${PORT}`;
+// /view/<token>/...: a page fx made, with the files it loads. The token is the key (see view.mjs).
+const viewTokens = createViewTokens();
+async function handleView(req, res, path) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, { error: 'GET only' });
+  const [, , token = '', ...rest] = path.split('/');
+  const candidates = viewTokens.candidates(token, rest.join('/'));
+  if (candidates === null) return send(res, 410, 'This preview link expired. Open the file again from fox.', 'text/plain; charset=utf-8');
+  for (const file of candidates) {
+    let st = null;
+    try { st = await stat(file); } catch {}
+    if (!st?.isFile() || st.size > 20 * 1024 * 1024) continue;
+    const type = VIEW_TYPES[extname(file).toLowerCase()];
+    let body = await readFile(file);
+    if (/^text\/(html|css)/.test(type)) body = rewriteRootLinks(body.toString('utf8'), token, type);
+    res.writeHead(200, {
+      'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer',
+      'content-security-policy': 'sandbox allow-scripts allow-forms allow-popups allow-modals',
+    });
+    return res.end(req.method === 'HEAD' ? undefined : body);
+  }
+  return send(res, 404, 'not found', 'text/plain; charset=utf-8');
+}
+
 const server = http.createServer(async (req, res) => {
   if (process.env.FOX_SHARE_PORT !== undefined && !localHost(req.headers.host)) return send(res, 403, { error: 'use the paired gateway for remote access' });
-  if (new URL(req.url, 'http://localhost').pathname.startsWith('/api/pair/')) return bridge.handleLocalPairing(req, res);
+  const path = new URL(req.url, 'http://localhost').pathname;
+  if (path.startsWith('/api/pair/')) return bridge.handleLocalPairing(req, res);
+  if (path.startsWith('/view/')) return handleView(req, res, path);
   return handlePanelRequest(req, res);
 });
 

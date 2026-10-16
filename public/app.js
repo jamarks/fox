@@ -829,6 +829,13 @@ const hasPreview = (path) => VIEWABLE.test(path) || FORMATTED.test(path);
 const canView = (f) => f.exists && VIEWABLE.test(f.path);
 const viewUrl = (id, path) => `/api/sessions/${encodeURIComponent(id)}/preview?path=${encodeURIComponent(path)}`;
 const SANDBOX = 'allow-scripts allow-forms allow-popups allow-modals';
+// HTML loads through a /view/ link that also serves its CSS, JS and images; other files come straight.
+const IS_HTML = /\.html?$/i;
+async function pageSrc(sessionId, path) {
+  if (!IS_HTML.test(path)) return viewUrl(sessionId, path);
+  const j = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/view-url?path=${encodeURIComponent(path)}`).then((r) => r.json()).catch(() => ({}));
+  return j.url ?? viewUrl(sessionId, path);
+}
 const defaultMode = (f) => (hasPreview(f.path) ? 'page' : 'source');
 const extOf = (path) => (path.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase();
 // Markdown and highlighting libraries load the first time a file needs them.
@@ -866,10 +873,11 @@ function setViewMode(tab, mode) {
   const framed = mode === 'page' && VIEWABLE.test(tab.path);
   tab.wrap.classList.toggle('source', !framed);
   tab.wrap.innerHTML = toggle + (framed
-    ? `<iframe sandbox="${SANDBOX}" title="${esc(tab.label)}" src="${viewUrl(tab.sessionId, tab.path)}"></iframe>`
+    ? `<iframe sandbox="${SANDBOX}" title="${esc(tab.label)}"></iframe>`
     : '<div class="code-view"><div class="code-note">loading…</div></div>');
   tab.wrap.querySelectorAll('[data-view-mode]').forEach((b) => b.addEventListener('click', () => setViewMode(tab, b.dataset.viewMode)));
-  if (!framed) loadSource(tab);
+  if (framed) pageSrc(tab.sessionId, tab.path).then((src) => { const f = tab.wrap.querySelector('iframe'); if (f && tab.mode === mode) f.src = src; });
+  else loadSource(tab);
 }
 // Text-based tabs: fetch the file and show it as its type reads best (or as plain source).
 async function loadSource(tab) {
@@ -951,7 +959,7 @@ async function checkView(tab) {
     const r = await fetch(viewUrl(tab.sessionId, tab.path), { method: 'HEAD' });
     const etag = r.ok ? r.headers.get('etag') : null;
     if (tab.etag && etag && etag !== tab.etag) {
-      if (tab.mode === 'page' && VIEWABLE.test(tab.path)) tab.wrap.querySelector('iframe').src = viewUrl(tab.sessionId, tab.path);
+      if (tab.mode === 'page' && VIEWABLE.test(tab.path)) { const f = tab.wrap.querySelector('iframe'); if (f) f.src = await pageSrc(tab.sessionId, tab.path); }
       else loadSource(tab);
     }
     if (etag) tab.etag = etag;
@@ -975,10 +983,12 @@ function renderArtifactCard(id, files) {
     artifactKey = key;
     const isImage = !/\.html?$/i.test(f.path);
     slot.innerHTML = `<div class="art-card" data-view-file="${esc(f.path)}" title="Open as a tab next to the terminal">
-      <div class="art-thumb">${isImage ? `<img src="${viewUrl(id, f.path)}" alt="">` : `<iframe sandbox="${SANDBOX}" tabindex="-1" aria-hidden="true" src="${viewUrl(id, f.path)}"></iframe>`}</div>
+      <div class="art-thumb">${isImage ? `<img src="${viewUrl(id, f.path)}" alt="">` : `<iframe sandbox="${SANDBOX}" tabindex="-1" aria-hidden="true"></iframe>`}</div>
       <div class="art-meta"><span class="art-name">${fresh ? '<span class="art-new">●</span>' : ''}${esc(name)}</span>${dir ? `<span class="art-dir">${esc(dir)}</span>` : ''}<span class="art-ago" data-mtime="${f.mtime}"></span><a href="#" class="art-full" data-full-view="${esc(f.path)}" title="Full screen in a new browser tab">↗</a></div>
     </div>`;
   }
+  const thumb = slot.querySelector('.art-thumb iframe');
+  if (thumb && !thumb.src) pageSrc(id, f.path).then((src) => { if (artifactKey === key) thumb.src = src; });
   slot.querySelector('.art-ago').textContent = fmtAgo(f.mtime);
   slot.querySelector('.art-new')?.classList.toggle('hidden', !fresh);
 }
@@ -1008,7 +1018,12 @@ $('#transcript').addEventListener('click', (e) => {
   const opener = e.target.closest('[data-open-file]');
   if (opener) { e.preventDefault(); return post(`/api/sessions/${state.selected}/open-file`, { path: opener.dataset.openFile }); }
   const full = e.target.closest('[data-full-view]');
-  if (full) { e.preventDefault(); return window.open(viewUrl(state.selected, full.dataset.fullView), '_blank', 'noopener'); }
+  if (full) {
+    e.preventDefault();
+    const win = window.open('about:blank', '_blank'); // opened now, filled once the link arrives (popup blockers)
+    pageSrc(state.selected, full.dataset.fullView).then((src) => { if (win) { win.opener = null; win.location = src; } });
+    return;
+  }
   const viewer = e.target.closest('[data-view-file]');
   if (viewer) { e.preventDefault(); return openView(state.selected, viewer.dataset.viewFile, viewer.dataset.viewMode || 'page'); }
   if (e.target.closest('[data-toggle-agents]')) {
