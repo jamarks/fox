@@ -24,3 +24,10 @@ test('sleeping is off unless a positive number of minutes is set', () => {
   assert.equal(idleSleepMs('30'), 30 * 60_000);
   assert.equal(idleSleepMs('0.5'), 30_000);
 });
+
+test('memory is total minus available, as free shows it', async () => {
+  const { memoryFromMeminfo } = await import('../idle.mjs');
+  const meminfo = 'MemTotal:        3910656 kB\nMemFree:          489000 kB\nMemAvailable:    1990000 kB\nBuffers:           10000 kB\n';
+  assert.deepEqual(memoryFromMeminfo(meminfo), { usedMb: 1876, totalMb: 3819, pct: 49 });
+  assert.equal(memoryFromMeminfo('nothing here'), null);
+});

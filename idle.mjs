@@ -20,3 +20,13 @@ export function idleSleepMs(value) {
   const min = Number(value);
   return Number.isFinite(min) && min > 0 ? min * 60 * 1000 : 0;
 }
+
+// Memory as the sidebar shows it: used = total - available (Linux /proc/meminfo, in kB), like `free`.
+// Page cache counts as available, so the number means what new sessions can still use.
+export function memoryFromMeminfo(text) {
+  const kb = (key) => Number(String(text).match(new RegExp(`^${key}:\\s+(\\d+)\\s*kB`, 'm'))?.[1]);
+  const total = kb('MemTotal'), available = kb('MemAvailable');
+  if (!(total > 0) || !(available >= 0)) return null;
+  const usedMb = Math.round((total - available) / 1024), totalMb = Math.round(total / 1024);
+  return { usedMb, totalMb, pct: Math.round((usedMb / totalMb) * 100) };
+}

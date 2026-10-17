@@ -1820,6 +1820,34 @@ $('#ws-remove-entry').addEventListener('click', () => deleteWorkspace(false));
 $('#ws-delete-folder').addEventListener('click', () => deleteWorkspace(true));
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#wsdialog').classList.contains('hidden')) closeWorkspaceDialog(); });
 
+// ---------- memory (servers): how full the machine is, and a way to free it ----------
+const fmtGb = (mb) => (mb / 1024).toFixed(1);
+function showMemory(m) {
+  $('#mem').classList.toggle('hidden', !m);
+  $('#mem-free').classList.toggle('hidden', !m);
+  if (!m) return;
+  $('#mem-text').textContent = `RAM ${fmtGb(m.usedMb)} / ${fmtGb(m.totalMb)} GB · ${m.pct}%`;
+  $('#mem-fill').style.width = `${Math.min(100, m.pct)}%`;
+  $('#mem').classList.toggle('high', m.pct >= 85);
+}
+async function pollMemory() {
+  try { showMemory((await (await fetch('/api/memory')).json()).memory); } catch {}
+}
+pollMemory();
+setInterval(pollMemory, 10_000);
+$('#mem-free').addEventListener('click', async () => {
+  const btn = $('#mem-free');
+  if (btn.disabled) return;
+  btn.disabled = true; btn.textContent = 'Freeing…';
+  try {
+    const r = await post('/api/memory/free');
+    if (r.memory) showMemory(r.memory);
+    btn.textContent = r.slept ? `Slept ${r.slept} · ${r.freedMb ? `${fmtGb(r.freedMb)} GB freed` : 'done'}` : 'Nothing idle to sleep';
+    refresh();
+  } catch { btn.textContent = 'Could not free memory'; }
+  setTimeout(() => { btn.disabled = false; btn.textContent = 'Free memory'; }, 4000);
+});
+
 // ---------- keyboard ----------
 // ⌥ as the modifier: ⌘T and ⌘W belong to the browser. Captured on window before xterm sees them.
 const SHORTCUTS = [

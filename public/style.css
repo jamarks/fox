@@ -530,3 +530,14 @@ html, body { overscroll-behavior-y: none; }
 @keyframes term-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .term-spinner { animation-duration: 3s; } }
 .st.asleep { color: var(--muted); font-style: italic; }
+
+/* Memory in the sidebar footer (servers only) */
+.sidebar-footer { gap: 10px; }
+#mem { margin-right: auto; display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); min-width: 0; }
+#mem.hidden { display: none; }
+#mem-text { white-space: nowrap; font-family: var(--mono); }
+.mem-bar { display: block; width: 120px; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.mem-bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+#mem.high .mem-bar i { background: var(--warn); } #mem.high #mem-text { color: var(--warn); }
+#mem-free { border: 1px solid var(--border); padding: 4px 8px; font-size: 11px; white-space: nowrap; }
+#mem-free.hidden { display: none; }
