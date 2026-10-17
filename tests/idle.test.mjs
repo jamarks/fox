@@ -16,6 +16,13 @@ test('only unattended fx sessions idle long enough are candidates to sleep', () 
   assert.deepEqual(sleepCandidates(lines, { now, idleMs: 30 * 60_000 }), ['fx-old']);
 });
 
+test('candidates come least recently used first', () => {
+  const now = 10_000_000_000;
+  const at = (minAgo) => Math.floor((now - minAgo * 60_000) / 1000);
+  const lines = [`fx-b|0|${at(10)}`, `fx-a|0|${at(50)}`, `fx-c|0|${at(3)}`].join('\n');
+  assert.deepEqual(sleepCandidates(lines, { now, idleMs: 60_000 }), ['fx-a', 'fx-b', 'fx-c']);
+});
+
 test('sleeping is off unless a positive number of minutes is set', () => {
   assert.equal(idleSleepMs(undefined), 0);
   assert.equal(idleSleepMs(''), 0);

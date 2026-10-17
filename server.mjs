@@ -547,7 +547,7 @@ async function handlePanelRequest(req, res) {
       catch (err) { return send(res, 500, { error: String(err.stderr || err.message).trim() }); }
       return send(res, 200, await listTools());
     }
-    if (p === '/api/memory' && req.method === 'GET') return send(res, 200, { memory: await memory() });
+    if (p === '/api/memory' && req.method === 'GET') return send(res, 200, { memory: await memory(), highPct: MEMORY_HIGH_PCT });
     // "Free memory": sleep now every session idle for a few minutes that waits for you and nobody has open.
     if (p === '/api/memory/free' && req.method === 'POST') {
       const before = await memory();
@@ -733,13 +733,15 @@ async function listTerminals() {
 // Idle sessions sleep (see idle.mjs). FOX_IDLE_SLEEP_MIN=30 on a server; off by default. Only a terminal that
 // waits for you, that nobody has open, idle that long, and whose fx session fox knows (so it can resume it).
 const IDLE_SLEEP_MS = idleSleepMs(process.env.FOX_IDLE_SLEEP_MIN);
-async function sleepIdleSessions(idleMs = IDLE_SLEEP_MS) {
+// `enough` (optional) is checked after each one: freeing memory stops as soon as there is room again.
+async function sleepIdleSessions(idleMs = IDLE_SLEEP_MS, enough = null) {
   const raw = await tmux('list-sessions', '-F', '#{session_name}|#{session_attached}|#{session_activity}');
-  const candidates = sleepCandidates(raw, { idleMs, prefix: TMUX_PREFIX });
+  const candidates = sleepCandidates(raw, { idleMs, prefix: TMUX_PREFIX }); // least recently used first
   const slept = [];
   if (!candidates.length) return slept;
   const terminals = await listTerminals(); // also records which fx session each terminal holds
   for (const name of candidates) {
+    if (enough && slept.length && await enough()) break;
     const t = terminals.find((x) => x.name === name);
     if (!t?.resume || t.attached || t.activity !== 'ready') continue;
     await tmux('kill-session', '-t', name).catch(() => {});
@@ -749,6 +751,19 @@ async function sleepIdleSessions(idleMs = IDLE_SLEEP_MS) {
   return slept;
 }
 if (IDLE_SLEEP_MS) setInterval(() => sleepIdleSessions().catch((err) => console.error(`fox: idle sleep failed: ${err.message}`)), Math.min(60_000, Math.max(5_000, IDLE_SLEEP_MS / 2))).unref();
+// When memory runs high, fox frees it on its own: at FOX_MEMORY_HIGH_PCT (85% by default) it sleeps sessions idle
+// for 3 minutes (1 minute from 7 points above), the one you used longest ago first, until there is room again. Same rules as always: only sessions that wait for you and
+// nobody has open. FOX_MEMORY_HIGH_PCT=0 turns it off.
+const MEMORY_HIGH_PCT = Number(process.env.FOX_MEMORY_HIGH_PCT ?? 85);
+async function freeMemoryWhenHigh() {
+  const m = await memory();
+  if (!m || !(MEMORY_HIGH_PCT > 0) || m.pct < MEMORY_HIGH_PCT) return;
+  // Least recently used first, one at a time, until memory is back under the line (5 points of margin).
+  const roomAgain = async () => { await new Promise((r) => setTimeout(r, 1500)); const now = await memory(); return !now || now.pct < MEMORY_HIGH_PCT - 5; };
+  const slept = await sleepIdleSessions((m.pct >= MEMORY_HIGH_PCT + 7 ? 1 : 3) * 60 * 1000, roomAgain);
+  if (slept.length) console.log(`fox: memory at ${m.pct}%, put ${slept.length} idle session${slept.length === 1 ? '' : 's'} to sleep`);
+}
+if (process.platform === 'linux') setInterval(() => freeMemoryWhenHigh().catch((err) => console.error(`fox: freeing memory failed: ${err.message}`)), 30_000).unref();
 // Memory for the sidebar footer: Linux only (on a Mac, free memory is not a useful number). Null elsewhere.
 async function memory() {
   if (process.platform !== 'linux') return null;

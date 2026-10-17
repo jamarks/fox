@@ -538,6 +538,9 @@ html, body { overscroll-behavior-y: none; }
 #mem-text { white-space: nowrap; font-family: var(--mono); }
 .mem-bar { display: block; width: 120px; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
 .mem-bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .4s; }
-#mem.high .mem-bar i { background: var(--warn); } #mem.high #mem-text { color: var(--warn); }
+#mem.ok .mem-bar i { background: var(--ok); }
+#mem.warm .mem-bar i { background: var(--warn); } #mem.warm #mem-text { color: var(--warn); }
+#mem.high .mem-bar i { background: var(--err); } #mem.high #mem-text { color: var(--err); }
+#summary.hidden { display: none; }
 #mem-free { border: 1px solid var(--border); padding: 4px 8px; font-size: 11px; white-space: nowrap; }
 #mem-free.hidden { display: none; }

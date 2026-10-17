@@ -163,8 +163,9 @@ function renderSummary() {
   if (count('working')) parts.push(`<span class="st working" title="${count('working')} working"><i></i>${count('working')}</span>`);
   const subs = state.sessions.filter((s) => s.subagent?.phase === 'running').length;
   if (subs) parts.push(`<span class="st working">${ICON.threads} ${subs} subagent${subs === 1 ? '' : 's'}</span>`);
-  // Always rendered, even empty, so the list below never jumps when activity starts or stops.
-  $('#summary').innerHTML = parts.join('') || '<span class="muted">quiet</span>';
+  // Only when something is going on: nothing working and nothing waiting needs no line.
+  $('#summary').innerHTML = parts.join('');
+  $('#summary').classList.toggle('hidden', !parts.length);
 }
 
 // ---------- workspaces: folders made of GitHub repos ----------
@@ -1822,16 +1823,21 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#wsdia
 
 // ---------- memory (servers): how full the machine is, and a way to free it ----------
 const fmtGb = (mb) => (mb / 1024).toFixed(1);
+let memHighPct = 85;
 function showMemory(m) {
   $('#mem').classList.toggle('hidden', !m);
   $('#mem-free').classList.toggle('hidden', !m);
   if (!m) return;
   $('#mem-text').textContent = `RAM ${fmtGb(m.usedMb)} / ${fmtGb(m.totalMb)} GB · ${m.pct}%`;
   $('#mem-fill').style.width = `${Math.min(100, m.pct)}%`;
-  $('#mem').classList.toggle('high', m.pct >= 85);
+  // Green while there is room, orange approaching the limit, red where fox starts freeing memory on its own.
+  const high = memHighPct || 85;
+  $('#mem').classList.remove('ok', 'warm', 'high');
+  $('#mem').classList.add(m.pct >= high ? 'high' : m.pct >= high - 15 ? 'warm' : 'ok');
+  $('#mem').title = `Memory in use on this machine (page cache counts as free). From ${high}% fox puts idle sessions to sleep on its own.`;
 }
 async function pollMemory() {
-  try { showMemory((await (await fetch('/api/memory')).json()).memory); } catch {}
+  try { const r = await (await fetch('/api/memory')).json(); if (r.highPct >= 0) memHighPct = r.highPct; showMemory(r.memory); } catch {}
 }
 pollMemory();
 setInterval(pollMemory, 10_000);
