@@ -21,7 +21,8 @@
   },
   "type": "module",
   "bin": {
-    "fox": "./bin/fox.mjs"
+    "fox": "./bin/fox.mjs",
+    "fox-job": "./bin/fox-job.mjs"
   },
   "scripts": {
     "start": "node server.mjs",

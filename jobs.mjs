@@ -279,8 +279,8 @@ export function createRunner({ store, now = () => Date.now(), spawn = nodeSpawn,
     async start() {
       await recover();
       await tick();
+      // Keeps the process alive on its own (bin/fox-jobs.mjs has nothing else to wait on).
       timer = setInterval(() => tick().catch((err) => log(`fox-jobs: ${err.message}`)), tickMs);
-      timer.unref?.();
     },
     stop() { stopped = true; clearInterval(timer); },
     async idle() { while (running) await running; },
