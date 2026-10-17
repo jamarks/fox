@@ -105,16 +105,39 @@ test('a clean workspace folder can be deleted', async () => {
   assert.ok(!existsSync(join(base, 'workspaces', 'gone')));
 });
 
-test('update renames the entry and adds repos without moving the folder', async () => {
+test('update adds repos; the name is the folder and does not change', async () => {
   const { base, ws } = await setup([['jamarks', 'notes'], ['jamarks', 'site']]);
   const created = await ws.create({ name: 'one', repos: [{ owner: 'jamarks', name: 'notes' }] });
   await settle(ws, created.id);
-  await ws.update(created.id, { name: 'renamed', add: [{ owner: 'jamarks', name: 'site' }] });
+  await assert.rejects(ws.update(created.id, { name: 'renamed' }), /cannot change/);
+  await ws.update(created.id, { name: 'one', add: [{ owner: 'jamarks', name: 'site' }] });
   const w = await settle(ws, created.id);
-  assert.equal(w.name, 'renamed');
-  assert.equal(w.dir, join(base, 'workspaces', 'one'));
+  assert.equal(w.name, 'one');
   assert.deepEqual(w.repos.map((r) => r.dir), ['notes', 'site']);
   assert.deepEqual((await readdir(join(base, 'workspaces'))).sort(), ['one']);
+});
+
+test('an empty workspace is a plain folder, and two workspaces never share one', async () => {
+  const { base, ws } = await setup([]);
+  const empty = await ws.create({ name: 'scratch' });
+  assert.deepEqual(empty.repos, []);
+  assert.ok(existsSync(join(base, 'workspaces', 'scratch')));
+  await assert.rejects(ws.create({ name: 'scratch' }), /already exists/);
+  await mkdir(join(base, 'workspaces', 'leftover', 'x'), { recursive: true });
+  await assert.rejects(ws.create({ name: 'leftover' }), /not empty/);
+  await ws.remove(empty.id, { deleteFolder: true });
+  assert.ok(!existsSync(join(base, 'workspaces', 'scratch')));
+});
+
+test('the AGENTS.md fox writes is fox\'s own: it does not block deleting the folder unless you edited it', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'fox-ws-'));
+  const ws = createWorkspaces({ stateDir: join(base, 'state'), rootDir: join(base, 'workspaces'), agentNotes: () => '# notes\n' });
+  await mkdir(join(base, 'workspaces'), { recursive: true });
+  const a = await ws.create({ name: 'a' });
+  assert.equal(await readFile(join(base, 'workspaces', 'a', 'AGENTS.md'), 'utf8'), '# notes\n');
+  assert.deepEqual(await ws.blockers(a.id), []);
+  await writeFile(join(base, 'workspaces', 'a', 'AGENTS.md'), '# my own notes\n');
+  assert.deepEqual(await ws.blockers(a.id), ['AGENTS.md: not one of the workspace repos']);
 });
 
 test('the repo catalog uses the token of each owner and caches', async () => {

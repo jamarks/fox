@@ -501,11 +501,18 @@ a.section-title.fold:hover { color: var(--text); }
 .ws-line .ws-state.ok { color: var(--ok); } .ws-line .ws-state.err { color: var(--err); } .ws-line .ws-state.warn { color: var(--warn); }
 .ws-line .ws-branch { color: var(--muted); }
 .ws-busy { color: var(--warn); font-family: inherit; font-size: 11px; margin-top: 4px; }
-#ws-danger { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
-#ws-danger.hidden { display: none; }
-#ws-danger label { flex: 1; }
-#ws-danger input { width: auto; }
-#ws-remove { color: var(--err); border: 1px solid var(--border); padding: 5px 10px; }
+#ws-delete { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 12px; }
+#ws-delete p { margin: 0 0 8px; }
+#ws-delete .row { gap: 8px; justify-content: flex-end; }
+#ws-delete button, #ws-delete-open { border: 1px solid var(--border); padding: 5px 10px; color: var(--text); }
+button.danger { color: var(--err) !important; }
+button.linkish { color: var(--accent); padding: 5px 0; margin-right: auto; }
+#ws-delete-open { margin-right: auto; }
+#ws-delete-open:not(.hidden) + #ws-mode { display: none; }
+.ws-folder-row { gap: 8px; } .ws-folder-row input { flex: 1; } .ws-folder-row button { border: 1px solid var(--border); padding: 5px 10px; color: var(--text); flex: none; }
+.mono { font-family: var(--mono); }
 .group.workspace h3 .gname { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--text); font-weight: 600; }
 .group.workspace .ws-repos-line { display: flex; flex-direction: column; gap: 1px; padding: 0 12px 6px 28px; font-size: 11px; color: var(--muted); }
 .group.workspace .ws-repos-line .ws-line { font-family: var(--mono); }
+.ns-actions button.linkish { border: 0; padding: 5px 0; white-space: nowrap; color: var(--accent); }
+#ws-summary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

@@ -374,36 +374,7 @@ async function renameInline(id) {
   input.addEventListener('blur', () => done(true));
 }
 
-// ---------- new session form ----------
-$('#new-cwd').addEventListener('input', debounce(async (e) => {
-  const v = e.target.value.trim();
-  const hint = $('#new-cwd-hint');
-  if (!v) return (hint.textContent = '', hint.className = 'hint');
-  const r = await (await fetch('/api/check-dir?path=' + encodeURIComponent(v))).json();
-  hint.textContent = r.ok ? `✓ ${r.path}` : 'Folder not found';
-  hint.className = 'hint ' + (r.ok ? 'ok' : 'err');
-}, 250));
-$('#new-session').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const v = $('#new-cwd').value.trim();
-  if (!v) return;
-  const r = await (await fetch('/api/check-dir?path=' + encodeURIComponent(v))).json();
-  if (r.ok) newSessionSheet(r.path);
-});
 $('#keys').addEventListener('click', () => showShortcuts());
-// Shift-click or right-click the folder icon to type a path instead of using the native picker.
-$('#pick-folder').addEventListener('contextmenu', (e) => { e.preventDefault(); $('#new-session').classList.toggle('hidden'); $('#new-cwd').focus(); });
-$('#pick-folder').addEventListener('click', async (e) => {
-  if (e.shiftKey) { $('#new-session').classList.toggle('hidden'); $('#new-cwd').focus(); return; }
-  const btn = $('#pick-folder');
-  btn.disabled = true;
-  try {
-    const r = await post('/api/pick-folder');
-    if (r.path) newSessionSheet(r.path);
-    else if (r.error) { $('#new-session').classList.remove('hidden'); $('#new-cwd-hint').textContent = r.error; $('#new-cwd-hint').className = 'hint err'; }
-  } finally { btn.disabled = false; }
-});
-
 // ---------- terminals (tmux attach over WebSocket) ----------
 const dictationButton = $('#dictation');
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1583,30 +1554,41 @@ $('#newform').addEventListener('submit', async (e) => {
 });
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#newsheet').classList.contains('hidden')) $('#newsheet').classList.add('hidden'); });
 
-// ---------- workspace dialog: create a workspace from repos, or edit one ----------
+// ---------- workspace dialog: one screen to start somewhere ----------
+// New workspace: a name (also the folder) and, optionally, GitHub repos to clone; no repos is an empty folder.
+// "Use an existing folder instead" opens fx in any folder you type (or pick in Finder on a Mac).
+// Edit: add or remove repos (the name is the folder and stays), or delete the workspace.
 const WS_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
 const repoKey = (r) => `${r.owner}/${r.name}`.toLowerCase();
-const wsDlg = { mode: 'create', id: null, catalog: [], catalogError: null, loading: false, selected: new Map(), initial: new Set(), stage: 'pick', poll: 0 };
-function wsShowPicker(on) {
-  for (const el of ['#ws-repos', '#ws-search', 'label[for="ws-search"]']) $(el).classList.toggle('hidden', !on);
-  $('#ws-progress').classList.toggle('hidden', on);
+const wsDlg = { mode: 'create', id: null, catalog: [], catalogError: null, loading: false, selected: new Map(), initial: new Set(), stage: 'pick', poll: 0, failedDir: null };
+function wsView(view) { // 'create' | 'edit' | 'folder' | 'progress'
+  $('#ws-create-fields').classList.toggle('hidden', view !== 'create');
+  $('#ws-repo-fields').classList.toggle('hidden', view !== 'create' && view !== 'edit');
+  $('#ws-folder-fields').classList.toggle('hidden', view !== 'folder');
+  $('#ws-progress').classList.toggle('hidden', view !== 'progress');
+  $('#ws-mode').classList.toggle('hidden', view !== 'create' && view !== 'folder');
+  $('#ws-mode').textContent = view === 'folder' ? 'Create a workspace instead' : 'Use an existing folder instead';
+  $('#ws-delete-open').classList.toggle('hidden', view !== 'edit');
+  $('#ws-delete').classList.add('hidden');
+  $('#ws-summary').classList.toggle('hidden', view === 'folder');
+  $('#ws-submit').textContent = view === 'edit' ? 'Save' : view === 'folder' ? 'Open' : 'Create and open';
 }
 async function openWorkspaceDialog(id = null) {
   const wsp = id ? (state.workspaces ?? []).find((w) => w.id === id) : null;
-  Object.assign(wsDlg, { mode: wsp ? 'edit' : 'create', id: wsp?.id ?? null, stage: 'pick', catalogError: null });
+  Object.assign(wsDlg, { mode: wsp ? 'edit' : 'create', id: wsp?.id ?? null, stage: 'pick', catalogError: null, failedDir: null });
   clearTimeout(wsDlg.poll);
   wsDlg.selected = new Map((wsp?.repos ?? []).map((r) => [repoKey(r), { owner: r.owner, name: r.name }]));
   wsDlg.initial = new Set(wsDlg.selected.keys());
-  $('#ws-title').textContent = wsp ? `Edit ${wsp.name}` : 'New workspace';
-  $('#ws-name').value = wsp?.name ?? '';
+  $('#ws-title').innerHTML = wsp ? `${esc(wsp.name)} <span class="ns-folder">${esc(shortPath(wsp.dir))}</span>` : 'New workspace';
+  $('#ws-name').value = '';
   $('#ws-search').value = '';
+  $('#ws-folder-path').value = ''; $('#ws-folder-hint').textContent = '';
   $('#ws-error').textContent = '';
-  $('#ws-danger').classList.toggle('hidden', !wsp);
-  $('#ws-delete-folder').checked = false;
-  $('#ws-submit').textContent = wsp ? 'Save' : 'Create and open';
-  $('#ws-cancel').textContent = 'Cancel'; wsDlg.failedDir = null;
+  $('#ws-cancel').textContent = 'Cancel';
   $('#ws-submit').disabled = false;
-  wsShowPicker(true);
+  $('#ws-delete-path').textContent = wsp ? shortPath(wsp.dir) : '';
+  $('#ws-finder').classList.toggle('hidden', foxConfig.remote);
+  wsView(wsp ? 'edit' : 'create');
   $('#wsdialog').classList.remove('hidden');
   (wsp ? $('#ws-search') : $('#ws-name')).focus();
   if (!wsDlg.catalog.length) {
@@ -1627,7 +1609,6 @@ function renderWsRepos() {
   const row = (r, extra = '') => `<label class="ws-repo"><input type="checkbox" data-owner="${esc(r.owner)}" data-name="${esc(r.name)}" ${wsDlg.selected.has(repoKey(r)) ? 'checked' : ''}><span>${esc(r.name)}</span>${r.private ? '<span class="ws-lock" title="private">private</span>' : ''}${extra}</label>`;
   const matches = (r) => !q || repoKey(r).includes(q) || (r.description ?? '').toLowerCase().includes(q);
   let html = '';
-  // Picked repos that are not in the list (typed by hand, or already in the workspace) stay visible on top.
   const extra = [...wsDlg.selected.values()].filter((r) => !known.has(repoKey(r)));
   if (extra.length) html += `<div class="ws-owner">Picked</div>${extra.map((r) => row(r, `<span class="ws-desc">${esc(r.owner)}</span>`)).join('')}`;
   const typed = raw.match(/^([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*)$/);
@@ -1642,9 +1623,8 @@ function renderWsRepos() {
 }
 function updateWsSummary() {
   const n = wsDlg.selected.size, name = $('#ws-name').value.trim();
-  $('#ws-summary').textContent = wsDlg.mode === 'create'
-    ? `${n} repo${n === 1 ? '' : 's'}${name ? ` · cloned into ~/workspaces/${name}` : ''}`
-    : `${n} repo${n === 1 ? '' : 's'}`;
+  const what = n ? `${n} repo${n === 1 ? '' : 's'}` : 'empty folder';
+  $('#ws-summary').textContent = wsDlg.mode === 'create' ? `${name ? `~/workspaces/${name} · ` : ''}${what}` : what;
 }
 $('#ws-search').addEventListener('input', debounce(renderWsRepos, 120));
 $('#ws-name').addEventListener('input', () => { $('#ws-error').textContent = ''; updateWsSummary(); });
@@ -1655,14 +1635,37 @@ $('#ws-repos').addEventListener('change', (e) => {
   $('#ws-error').textContent = '';
   updateWsSummary();
 });
-const closeWorkspaceDialog = () => { clearTimeout(wsDlg.poll); $('#wsdialog').classList.add('hidden'); refresh(); };
-$('#ws-cancel').addEventListener('click', closeWorkspaceDialog);
+$('#ws-mode').addEventListener('click', () => {
+  const toFolder = wsDlg.mode !== 'folder';
+  wsDlg.mode = toFolder ? 'folder' : 'create';
+  $('#ws-error').textContent = '';
+  wsView(wsDlg.mode);
+  $(toFolder ? '#ws-folder-path' : '#ws-name').focus();
+});
+$('#ws-folder-path').addEventListener('input', debounce(async (e) => {
+  const v = e.target.value.trim(), hint = $('#ws-folder-hint');
+  if (!v) return (hint.textContent = '', hint.className = 'hint');
+  const r = await (await fetch('/api/check-dir?path=' + encodeURIComponent(v))).json();
+  hint.textContent = r.ok ? `✓ ${shortPath(r.path)}` : 'Folder not found';
+  hint.className = 'hint ' + (r.ok ? 'ok' : 'err');
+}, 250));
+$('#ws-finder').addEventListener('click', async () => {
+  const r = await post('/api/pick-folder');
+  if (r.path) { $('#ws-folder-path').value = r.path; $('#ws-folder-path').dispatchEvent(new Event('input')); }
+  else if (r.error) $('#ws-error').textContent = r.error;
+});
+const closeWorkspaceDialog = () => { clearTimeout(wsDlg.poll); $('#wsdialog').classList.add('hidden'); return refresh(); };
+$('#ws-cancel').addEventListener('click', () => {
+  const openAnyway = $('#ws-cancel').textContent === 'Open anyway' && wsDlg.failedDir;
+  closeWorkspaceDialog();
+  if (openAnyway) newSessionSheet(wsDlg.failedDir);
+});
 $('#wsdialog').addEventListener('click', (e) => { if (e.target.id === 'wsdialog') closeWorkspaceDialog(); });
 $('#new-workspace').addEventListener('click', () => openWorkspaceDialog());
 // Clone progress: one line per repo until every clone has finished; then open a session (new workspace) or close.
 async function watchClones(id, { thenOpen }) {
   wsDlg.stage = 'progress';
-  wsShowPicker(false);
+  wsView('progress');
   $('#ws-submit').disabled = true; $('#ws-submit').textContent = 'Cloning…';
   const tick = async () => {
     let list = [];
@@ -1671,8 +1674,7 @@ async function watchClones(id, { thenOpen }) {
     if (!w) { $('#ws-error').textContent = 'The workspace is gone.'; return; }
     state.workspaces = list;
     $('#ws-progress').innerHTML = w.repos.map((r) => wsRepoLine(r.status === 'ready' ? { ...r, changed: 0, ahead: 0, behind: 0 } : r).replace('<span class="ws-state "></span>', '<span class="ws-state ok">cloned</span>')).join('');
-    const pending = w.repos.some((r) => r.status === 'cloning' || r.status === 'missing');
-    if (pending) { wsDlg.poll = setTimeout(tick, 1200); return; }
+    if (w.repos.some((r) => r.status === 'cloning' || r.status === 'missing')) { wsDlg.poll = setTimeout(tick, 1200); return; }
     const failed = w.repos.filter((r) => r.status === 'error');
     if (!failed.length) {
       $('#wsdialog').classList.add('hidden'); refresh();
@@ -1680,7 +1682,7 @@ async function watchClones(id, { thenOpen }) {
       return;
     }
     $('#ws-error').textContent = `${failed.length === 1 ? 'One repo' : `${failed.length} repos`} could not be cloned (hover for the reason). The others are ready.`;
-    wsDlg.stage = 'failed'; wsDlg.retryOpen = thenOpen; wsDlg.failedDir = w.dir;
+    Object.assign(wsDlg, { stage: 'failed', retryOpen: thenOpen, failedDir: w.dir });
     $('#ws-submit').disabled = false; $('#ws-submit').textContent = 'Retry';
     $('#ws-cancel').textContent = thenOpen ? 'Open anyway' : 'Close';
   };
@@ -1690,33 +1692,39 @@ $('#wsform').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (wsDlg.stage === 'failed') { $('#ws-error').textContent = ''; $('#ws-cancel').textContent = 'Cancel'; await post(`/api/workspaces/${wsDlg.id}/retry`); return watchClones(wsDlg.id, { thenOpen: wsDlg.retryOpen }); }
   if (wsDlg.stage !== 'pick') return;
+  if (wsDlg.mode === 'folder') {
+    const v = $('#ws-folder-path').value.trim();
+    if (!v) { $('#ws-error').textContent = 'Type the path of a folder.'; return $('#ws-folder-path').focus(); }
+    const r = await (await fetch('/api/check-dir?path=' + encodeURIComponent(v))).json();
+    if (!r.ok) { $('#ws-error').textContent = 'That folder does not exist.'; return; }
+    $('#wsdialog').classList.add('hidden');
+    return newSessionSheet(r.path);
+  }
   const name = $('#ws-name').value.trim();
-  if (!WS_NAME.test(name)) { $('#ws-error').textContent = 'Name it with lowercase letters, numbers, dots, dashes or underscores.'; return $('#ws-name').focus(); }
-  if (!wsDlg.selected.size) { $('#ws-error').textContent = 'Pick at least one repo.'; return $('#ws-search').focus(); }
+  if (wsDlg.mode === 'create' && !WS_NAME.test(name)) { $('#ws-error').textContent = 'Name it with lowercase letters, numbers, dots, dashes or underscores.'; return $('#ws-name').focus(); }
   $('#ws-submit').disabled = true;
   const body = wsDlg.mode === 'create'
     ? { name, repos: [...wsDlg.selected.values()] }
-    : { name, add: [...wsDlg.selected].filter(([k]) => !wsDlg.initial.has(k)).map(([, r]) => r), remove: [...wsDlg.initial].filter((k) => !wsDlg.selected.has(k)).map((k) => { const [owner, n] = k.split('/'); return { owner, name: n }; }) };
+    : { add: [...wsDlg.selected].filter(([k]) => !wsDlg.initial.has(k)).map(([, r]) => r), remove: [...wsDlg.initial].filter((k) => !wsDlg.selected.has(k)).map((k) => { const [owner, n] = k.split('/'); return { owner, name: n }; }) };
   const r = await fetch(wsDlg.mode === 'create' ? '/api/workspaces' : `/api/workspaces/${wsDlg.id}`, { method: wsDlg.mode === 'create' ? 'POST' : 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { $('#ws-submit').disabled = false; $('#ws-error').textContent = j.error || 'Could not save the workspace.'; return; }
   wsDlg.id = j.id;
+  if (wsDlg.mode === 'create' && !body.repos.length) { await closeWorkspaceDialog(); return newSessionSheet(j.dir); }
   if (wsDlg.mode === 'create' || body.add.length) return watchClones(j.id, { thenOpen: wsDlg.mode === 'create' });
   closeWorkspaceDialog();
 });
-$('#ws-cancel').addEventListener('click', () => {
-  if ($('#ws-cancel').textContent === 'Open anyway' && wsDlg.failedDir) newSessionSheet(wsDlg.failedDir);
-  $('#ws-cancel').textContent = 'Cancel';
-});
-$('#ws-remove').addEventListener('click', async () => {
-  const wsp = (state.workspaces ?? []).find((w) => w.id === wsDlg.id); if (!wsp) return;
-  const folder = $('#ws-delete-folder').checked;
-  if (!confirm(folder ? `Remove ${wsp.name} and delete ${shortPath(wsp.dir)}? fox checks first that nothing would be lost.` : `Remove ${wsp.name} from fox? Its folder stays on disk.`)) return;
-  const r = await fetch(`/api/workspaces/${wsp.id}${folder ? '?folder=1' : ''}`, { method: 'DELETE' });
+// Delete: two clear choices, no browser pop-up.
+$('#ws-delete-open').addEventListener('click', () => { $('#ws-repo-fields').classList.add('hidden'); $('#ws-delete').classList.remove('hidden'); $('#ws-error').textContent = ''; });
+$('#ws-delete-cancel').addEventListener('click', () => { $('#ws-delete').classList.add('hidden'); $('#ws-repo-fields').classList.remove('hidden'); });
+async function deleteWorkspace(folder) {
+  const r = await fetch(`/api/workspaces/${wsDlg.id}${folder ? '?folder=1' : ''}`, { method: 'DELETE' });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) { $('#ws-error').textContent = j.error || 'Could not remove the workspace.'; return; }
+  if (!r.ok) { $('#ws-error').textContent = j.error || 'Could not delete the workspace.'; return; }
   closeWorkspaceDialog();
-});
+}
+$('#ws-remove-entry').addEventListener('click', () => deleteWorkspace(false));
+$('#ws-delete-folder').addEventListener('click', () => deleteWorkspace(true));
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#wsdialog').classList.contains('hidden')) closeWorkspaceDialog(); });
 
 // ---------- keyboard ----------
@@ -1785,7 +1793,7 @@ window.addEventListener('keydown', (e) => {
   const idx = tabs.indexOf(state.activeTab);
   const code = e.code; // physical key: Option changes e.key on macOS
   let handled = true;
-  if (code === 'KeyT' || code === 'KeyN') { const ws = currentWorkspace(); if (ws) newSessionSheet(ws); else $('#pick-folder').click(); }
+  if (code === 'KeyT' || code === 'KeyN') { const ws = currentWorkspace(); if (ws) newSessionSheet(ws); else openWorkspaceDialog(); }
   else if (code === 'KeyW') { if (state.activeTab) closeTab(state.activeTab); }
   else if (code === 'BracketRight') { if (tabs.length) activateTab(tabs[(idx + 1) % tabs.length]); }
   else if (code === 'BracketLeft') { if (tabs.length) activateTab(tabs[(idx - 1 + tabs.length) % tabs.length]); }

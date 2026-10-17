@@ -16,6 +16,8 @@ Un **espacio** es una carpeta con nombre, guardada, que contiene uno o varios re
 
 **Barra lateral.** La lista de proyectos agrupa las sesiones por espacio, con su nombre y cuántos repos tiene. Las carpetas sueltas siguen apareciendo como hoy. Un `+` al lado del título "Espacios" abre el diálogo.
 
+**Una sola pantalla para empezar (botón `+`, ⌥T).** Reemplaza al viejo "Open fx in a folder". Sin repos elegidos, crea una carpeta vacía para empezar de cero. "Use an existing folder instead" abre fx en una carpeta cualquiera (ruta escrita, o Finder en la Mac), sin crear un espacio.
+
 **Diálogo "Nuevo espacio".**
 1. Nombre (por ejemplo `orchestra`). Se valida como nombre de carpeta: `^[a-z0-9][a-z0-9._-]{0,62}$`.
 2. Buscador de repos, con la lista agrupada por dueño (`jamarks`, `hiOrchestra`, ...). Muestra solo los repos que ven los tokens del servidor. Selección múltiple con tildes.
@@ -23,9 +25,11 @@ Un **espacio** es una carpeta con nombre, guardada, que contiene uno o varios re
 4. Al confirmar: crea la carpeta, clona cada repo (con progreso por repo en el mismo diálogo) y abre el diálogo de nueva sesión ya apuntando al espacio, con el modelo y las herramientas de siempre.
 5. Si un repo falla al clonar (sin acceso, red), el espacio se crea igual con los demás y el error queda visible en ese repo, con "Reintentar".
 
-**Editar un espacio.** Desde el menú del espacio en la barra lateral: renombrar la entrada (la carpeta no se mueve), agregar repos (los clona) y quitar repos de la lista. Quitar un repo **no borra su carpeta**: fox solo deja de listarlo.
+**Editar un espacio.** Con el lápiz del espacio en la barra lateral: agregar repos (los clona) y quitar repos de la lista. Quitar un repo **no borra su carpeta**: fox solo deja de listarlo. **El nombre es la carpeta y no se cambia** (renombrar solo la entrada llevó a dos espacios apuntando a la misma carpeta; ahora fox también rechaza crear un espacio sobre una carpeta que ya es de otro, o que existe y no está vacía).
 
-**Borrar un espacio.** Saca la entrada de fox. Borrar la carpeta es una opción aparte, con confirmación, y solo si ningún repo tiene cambios sin commitear ni commits sin pushear. Si los tiene, fox lo dice y no borra.
+**Borrar un espacio.** "Delete workspace…" en la edición ofrece dos botones, sin pop-ups del browser: **Remove from fox** (los archivos quedan) y **Delete folder** (solo si cada repo está commiteado y pusheado y no hay otros archivos; si no, fox dice qué falta y no borra).
+
+**AGENTS.md.** Al crear un espacio, fox escribe un `AGENTS.md` en la raíz con cómo correr y probar dev servers: en segundo plano, en uno de los puertos de preview, probándolos con la herramienta de browser en `http://localhost:<puerto>` y dándole al usuario el link de preview. Si nadie lo editó, no impide borrar la carpeta.
 
 **Al abrir una sesión en un espacio** fox corre `git fetch` en cada repo, sin merge ni pull, y muestra el estado por repo: rama, `±` cambios sin commitear, `↑` adelante y `↓` atrás del remoto. Si hay otra sesión de fx trabajando en ese espacio, muestra el aviso.
 

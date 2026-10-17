@@ -55,7 +55,25 @@ const PREVIEW = (() => {
   const url = process.env.FOX_PREVIEW_URL, ports = String(process.env.FOX_PREVIEW_PORTS ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0 && n < 65536);
   return url && /^https:\/\/[^/]*\{port\}[^/]*$/.test(url) && ports.length ? { url, ports } : null;
 })();
-const workspaces = createWorkspaces({ stateDir: STATE_DIR, rootDir: join(homedir(), 'workspaces') });
+// AGENTS.md at the root of every new workspace: fx reads it, so it knows how to run a dev server here,
+// check it itself, and tell you where to look. On a server you cannot open its localhost; the preview can.
+function workspaceAgentNotes() {
+  const ports = PREVIEW?.ports ?? [3000, 3001, 4321, 5173, 8000, 8080];
+  return `# Workspace notes (written by fox)
+
+This folder is a fox workspace. Each subfolder with a \`.git\` is its own GitHub repo: run git (status, commit, push, pull requests) inside that subfolder. Other files here are notes and scratch work.
+
+## Running and checking a dev server
+
+- Start dev servers in the background so the terminal stays yours, and keep their output in a log you can read, for example \`npm run dev > /tmp/dev-5173.log 2>&1 &\`. Stop them when you are done.
+- Use one of these ports: ${ports.join(', ')}. Bind to localhost (127.0.0.1); pass the port explicitly (\`--port 5173\` and, for Vite, \`--strictPort\`).
+- To check your own work, open it with the browser tool at \`http://localhost:<port>\`: it runs on this same machine. Take a screenshot, read the console errors, and fix what you see before saying it works.
+${PREVIEW ? `- The user is not on this machine and cannot open localhost. When something is ready to look at, give them ${PREVIEW.url.replace('{port}', '<port>')} (for example ${PREVIEW.url.replace('{port}', String(ports.includes(5173) ? 5173 : ports[0]))}). Those links are private to them.
+- Next.js may need \`allowedDevOrigins: ['${new URL(PREVIEW.url.replace('{port}', '0')).hostname.replace(/^[^.]*/, '*')}']\` in next.config to serve its dev assets to that address.
+` : `- The user is on this machine: give them the \`http://localhost:<port>\` link.
+`}`;
+}
+const workspaces = createWorkspaces({ stateDir: STATE_DIR, rootDir: join(homedir(), 'workspaces'), agentNotes: workspaceAgentNotes });
 const repoCatalog = createRepoCatalog({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
 // The sidebar polls the overview every few seconds; workspace git state is cheap but not free.
 let workspacesCache = { at: 0, list: [] };

@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 const execFileP = promisify(execFile);
 
 export const WORKSPACE_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
@@ -15,8 +15,11 @@ export const REPO_PART = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 export const validRepo = (r) => Boolean(r && REPO_PART.test(String(r.owner)) && REPO_PART.test(String(r.name)) && !String(r.name).endsWith('.git'));
 const key = (r) => `${r.owner}/${r.name}`.toLowerCase();
 
+const sha = (text) => createHash('sha256').update(text).digest('hex');
+
 export function createWorkspaces({
   stateDir, rootDir,
+  agentNotes = () => null, // AGENTS.md for the workspace root: how fx should run and check dev servers here
   remoteUrl = (r) => `https://github.com/${r.owner}/${r.name}.git`,
   git = (args, opts = {}) => execFileP('git', args, { timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, ...opts }).then((x) => x.stdout.trim()),
 }) {
@@ -82,16 +85,20 @@ export function createWorkspaces({
     },
     async get(id) { return (await load()).find((w) => w.id === id) ?? null; },
     // Creates the entry and the folder, answers at once and clones in the background (poll list()).
-    async create({ name, repos }) {
+    // No repos is fine: an empty folder to start something from scratch. The name is the folder, for good.
+    async create({ name, repos = [] }) {
       name = String(name ?? '').trim();
       if (!WORKSPACE_NAME.test(name)) throw Object.assign(new Error('Use lowercase letters, numbers, dots, dashes or underscores for the name.'), { status: 400 });
-      if (!Array.isArray(repos) || !repos.length || !repos.every(validRepo)) throw Object.assign(new Error('Pick at least one repo.'), { status: 400 });
+      if (!Array.isArray(repos) || !repos.every(validRepo)) throw Object.assign(new Error('Invalid repo.'), { status: 400 });
       const all = await load();
-      if (all.some((w) => w.name === name)) throw Object.assign(new Error(`A workspace named ${name} already exists.`), { status: 409 });
       const dir = join(rootDir, name);
+      if (all.some((w) => w.name === name || resolve(w.dir) === resolve(dir))) throw Object.assign(new Error(`A workspace named ${name} already exists.`), { status: 409 });
+      if ((await readdir(dir).catch(() => [])).length) throw Object.assign(new Error(`~/workspaces/${name} already exists and is not empty. Pick another name.`), { status: 409 });
       await mkdir(dir, { recursive: true });
       if (!(await inside(dir))) throw Object.assign(new Error('Workspace folder is outside ~/workspaces.'), { status: 400 });
       const ws = { id: randomUUID(), name, dir, repos: [], createdAt: Date.now() };
+      const notes = agentNotes();
+      if (notes) { await writeFile(join(dir, 'AGENTS.md'), notes, { flag: 'wx' }).catch(() => {}); ws.agentsHash = sha(notes); }
       for (const r of repos) {
         if (ws.repos.some((x) => key(x) === key(r))) continue;
         const repo = { owner: String(r.owner), name: String(r.name) };
@@ -105,12 +112,7 @@ export function createWorkspaces({
       const all = await load();
       const ws = all.find((w) => w.id === id);
       if (!ws) throw Object.assign(new Error('Workspace not found.'), { status: 404 });
-      if (name !== undefined) {
-        name = String(name).trim();
-        if (!WORKSPACE_NAME.test(name)) throw Object.assign(new Error('Use lowercase letters, numbers, dots, dashes or underscores for the name.'), { status: 400 });
-        if (all.some((w) => w.id !== id && w.name === name)) throw Object.assign(new Error(`A workspace named ${name} already exists.`), { status: 409 });
-        ws.name = name; // only the entry: the folder stays where it is
-      }
+      if (name !== undefined && String(name).trim() !== ws.name) throw Object.assign(new Error('The name is the folder and cannot change. Create a new workspace instead.'), { status: 400 });
       if (!add.every(validRepo) || !remove.every(validRepo)) throw Object.assign(new Error('Invalid repo.'), { status: 400 });
       const drop = new Set(remove.map(key));
       ws.repos = ws.repos.filter((r) => !drop.has(key(r))); // leaves its folder on disk
@@ -146,7 +148,14 @@ export function createWorkspaces({
         const unpushed = await run(['log', '--branches', '--not', '--remotes', '--oneline']).catch(() => 'unknown');
         if (unpushed) out.push(`${r.dir}: commits not pushed`);
       }
-      for (const entry of await readdir(ws.dir).catch(() => [])) if (!repoDirs.has(entry)) out.push(`${entry}: not one of the workspace repos`);
+      for (const entry of await readdir(ws.dir).catch(() => [])) {
+        if (repoDirs.has(entry)) continue;
+        // The AGENTS.md fox wrote, untouched, is fox's own; anything else is yours.
+        if (entry === 'AGENTS.md' && ws.agentsHash && sha(await readFile(join(ws.dir, entry), 'utf8').catch(() => '')) === ws.agentsHash) continue;
+        out.push(`${entry}: not one of the workspace repos`);
+      }
+      const shared = (await load()).filter((w) => w.id !== ws.id && resolve(w.dir) === resolve(ws.dir));
+      for (const w of shared) out.push(`the folder is also the workspace ${w.name}`);
       return out;
     },
     async remove(id, { deleteFolder = false } = {}) {
