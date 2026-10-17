@@ -35,6 +35,7 @@ test('first load baselines history, polling adds unread, selection clears only t
   const ctx = { state, $: (selector) => elements[selector.slice(1)], localStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
     sessionById: (id) => state.sessions.find((s) => s.id === id), displayTitle: (s) => s.title, shortPath: (s) => s, fmtTime: String, esc: String,
     globalMessage: null, convoShown: new Set(), setTranscript() {}, renderSessions() {}, loadTranscript() {}, syncUrl() {}, updatePageTitle() {},
+    mobileLayout: { matches: false }, opened: [], openSession(id) { ctx.opened.push(id); },
   };
   vm.runInNewContext(source.slice(start, end) + selection, ctx);
   vm.runInNewContext('renderReplyInbox()', ctx); // old server must not initialize read state
@@ -51,4 +52,9 @@ test('first load baselines history, polling adds unread, selection clears only t
   assert.equal(elements['reply-inbox'].classList.contains('hidden'), true);
   assert.equal(JSON.parse(storage.get('fox.inbox.seen')).abcd, 2);
   assert.equal(ctx.globalMessage.index, 3);
+  assert.deepEqual(ctx.opened, [], 'on a computer the reply opens in Read');
+  // On a phone it opens the session's terminal instead.
+  ctx.mobileLayout.matches = true;
+  handlers['reply-inbox-list:click']({ target: { closest: () => ({ dataset: { reply: 'abcd' } }) } });
+  assert.deepEqual(ctx.opened, ['abcd']);
 });
