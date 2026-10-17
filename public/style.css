@@ -516,3 +516,7 @@ button.linkish { color: var(--accent); padding: 5px 0; margin-right: auto; }
 .group.workspace .ws-repos-line .ws-line { font-family: var(--mono); }
 .ns-actions button.linkish { border: 0; padding: 5px 0; white-space: nowrap; color: var(--accent); }
 #ws-summary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* Phones: dragging on the terminal scrolls it (see touchScroll in app.js); the page must not pull-to-refresh. */
+html, body { overscroll-behavior-y: none; }
+.term-wrap { touch-action: none; }

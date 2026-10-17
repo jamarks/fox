@@ -517,6 +517,40 @@ function localServerLinks(term) {
   };
 }
 
+// Touch scrolling. Phones send no wheel events, so a finger drag on the terminal did nothing for the terminal and
+// pulled the page instead (pull-to-refresh reloaded fox). The scrollback lives in tmux, not in the browser:
+// with tmux's mouse mode on, a drag becomes wheel events for tmux (its copy mode scrolls, and leaves on its own
+// back at the bottom); otherwise it scrolls xterm's own buffer. A short tap still focuses (opens the keyboard).
+function touchScroll(wrap, term, name) {
+  let lastY = null, acc = 0, dragging = false;
+  const lineHeight = () => wrap.querySelector('.xterm-rows')?.firstElementChild?.getBoundingClientRect().height || term.options.fontSize * 1.25;
+  wrap.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { lastY = null; return; }
+    lastY = e.touches[0].clientY; acc = 0; dragging = false;
+  }, { passive: true });
+  wrap.addEventListener('touchmove', (e) => {
+    if (lastY === null || e.touches.length !== 1) return;
+    const y = e.touches[0].clientY;
+    acc += lastY - y; lastY = y; // finger up: positive, towards newer output
+    if (!dragging && Math.abs(acc) < 8) return;
+    dragging = true;
+    e.preventDefault(); // the page must not scroll or reload
+    const lines = Math.trunc(acc / lineHeight());
+    if (!lines) return;
+    acc -= lines * lineHeight();
+    scrollTerminal(name, term, lines);
+  }, { passive: false });
+  wrap.addEventListener('touchend', () => { lastY = null; }, { passive: true });
+  wrap.addEventListener('click', (e) => { if (dragging) { e.stopImmediatePropagation(); dragging = false; } }, true); // a drag is not a tap
+}
+function scrollTerminal(name, term, lines) {
+  const ws = state.tabs.get(name)?.ws;
+  if (term.modes.mouseTrackingMode !== 'none' && ws?.readyState === 1) {
+    const wheel = lines < 0 ? 64 : 65, at = `${Math.ceil(term.cols / 2)};${Math.ceil(term.rows / 2)}`;
+    ws.send(JSON.stringify({ type: 'input', data: `\x1b[<${wheel};${at}M`.repeat(Math.min(Math.abs(lines), 12)) }));
+  } else term.scrollLines(lines);
+}
+
 function attachTab(t, { user = false, activate = true } = {}) {
   if (state.tabs.has(t.name) && !state.tabs.get(t.name).closed) { if (activate) activateTab(t.name); return; }
   // An unpinned terminal is a preview: opening another one replaces it (its fx keeps running in tmux).
@@ -538,6 +572,7 @@ function attachTab(t, { user = false, activate = true } = {}) {
   // On phones, a deliberate tap on the terminal opens the software keyboard via xterm's input.
   // Do not focus on tab activation: that would pop up the keyboard just by opening a session.
   wrap.addEventListener('click', () => { if (mobileLayout.matches) term.focus(); });
+  touchScroll(wrap, term, t.name);
   state.tabs.set(t.name, { name: t.name, term, fit, ws: null, wrap, closed: false, ready: false });
   if (mobileLayout.matches) document.fonts.load(`${fontSize}px "Source Code Pro"`).then(() => {
     const tab = state.tabs.get(t.name);
@@ -1494,7 +1529,7 @@ function renderNsWorkspace(wsp) {
   box.classList.toggle('hidden', !wsp);
   if (!wsp) return (box.innerHTML = '');
   const busy = state.sessions.filter((s) => !s.archived && s.terminal && (s.state === 'working' || s.state === 'needs_input') && workspaceFor(s.workspace)?.id === wsp.id);
-  box.innerHTML = `<label class="ns-label">Repos · shared by every session in this workspace</label>${wsp.repos.map(wsRepoLine).join('')}${busy.length ? `<div class="ws-busy">${busy.length === 1 ? 'Another session is working here' : `${busy.length} sessions are working here`}: they edit the same files.</div>` : ''}`;
+  box.innerHTML = `${wsp.repos.length ? `<label class="ns-label">Repos · shared by every session in this workspace</label>${wsp.repos.map(wsRepoLine).join('')}` : ''}${busy.length ? `<div class="ws-busy">${busy.length === 1 ? 'Another session is working here' : `${busy.length} sessions are working here`}: they edit the same files.</div>` : ''}`;
 }
 // Tools for fx (MCP servers from fox's catalog): one chip each, ✓ when fx has it. Nothing is added without a click.
 const toolChip = (t) => !t.installed ? `<button type="button" class="ns-chip" data-add-tool="${t.id}" title="${esc(t.description)}">+ ${esc(t.label)}</button>`
