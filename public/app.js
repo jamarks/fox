@@ -178,6 +178,16 @@ function wsRepoLine(r) {
   return `<div class="ws-line" title="${esc(r.owner)}/${esc(r.name)}"><span>${esc(r.dir)}</span>${r.branch ? `<span class="ws-branch">${esc(r.branch)}</span>` : ''}${stateHtml}</div>`;
 }
 
+// In the sidebar only the repos that need you show up (uncommitted, behind or ahead, cloning, failed);
+// when all are clean, one quiet line says how many there are. The edit dialog lists them all.
+function wsRepoSummary(wsp) {
+  const attention = wsp.repos.filter((r) => r.status !== 'ready' || r.changed || r.behind || r.ahead);
+  const n = wsp.repos.length;
+  if (!n) return '';
+  const clean = n - attention.length;
+  return `<div class="ws-repos-line">${attention.map(wsRepoLine).join('')}${clean ? `<div class="ws-line" title="${esc(wsp.repos.filter((r) => !attention.includes(r)).map((r) => r.dir).join(', '))}"><span>${attention.length ? `${clean} more` : `${n} repo${n === 1 ? '' : 's'}`}</span></div>` : ''}</div>`;
+}
+
 function renderSessions() {
   if (state.renaming) return; // replacing the sidebar would blur the input and save prematurely
   const active = state.sessions.filter((s) => !s.archived && !s.parentId);
@@ -205,7 +215,7 @@ function renderSessions() {
     const wsp = (state.workspaces ?? []).find((w) => w.dir === ws);
     if (wsp) {
       g.classList.add('workspace');
-      g.innerHTML = `<h3 draggable="true" title="Drag to reorder"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(wsp.name)}</span><span class="gcount" title="${wsp.repos.length} repo${wsp.repos.length === 1 ? '' : 's'}">${list.length}</span><button class="icon" data-edit-ws="${esc(wsp.id)}" title="Edit workspace">${ICON.rename}</button><button class="icon" data-new="${esc(ws)}" title="New session in this workspace">+</button></h3>${isCollapsed ? '' : `<div class="ws-repos-line">${wsp.repos.map(wsRepoLine).join('')}</div>`}`;
+      g.innerHTML = `<h3 draggable="true" title="Drag to reorder"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(wsp.name)}</span><span class="gcount" title="${wsp.repos.length} repo${wsp.repos.length === 1 ? '' : 's'}">${list.length}</span><button class="icon" data-edit-ws="${esc(wsp.id)}" title="Edit workspace">${ICON.rename}</button><button class="icon" data-new="${esc(ws)}" title="New session in this workspace">+</button></h3>${isCollapsed ? '' : wsRepoSummary(wsp)}`;
       if (!isCollapsed) list.forEach((s, i) => g.appendChild(sessionCard(s, i + 1)));
       root.appendChild(g);
       continue;
@@ -583,8 +593,12 @@ function attachTab(t, { user = false, activate = true } = {}) {
 }
 
 // Connect a tab's WebSocket once it is visible and measured, so tmux draws once at the right size.
+// A dropped connection (code 1006: the network, a proxy, a phone waking up) reconnects on its own: tmux keeps
+// the session, so attaching again just redraws it. A clean close means the tmux session ended, and 4001 means
+// the sign-in expired; neither retries.
+const RECONNECT_DELAYS = [250, 600, 1200, 2500, 5000, 8000];
 function connectTab(tab) {
-  if (!tab?.term || tab.ws || tab.closed) return; // preview tabs have no terminal
+  if (!tab?.term || tab.ws || tab.closed || state.tabs.get(tab.name) !== tab) return; // preview tabs have no terminal; closed tabs stay closed
   const { term, wrap } = tab;
   if (term.cols < 20 || term.rows < 5) { setTimeout(() => { safeFit(tab); connectTab(tab); }, 100); return; } // wait for a real layout
   const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -596,11 +610,22 @@ function connectTab(tab) {
     term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data));
     if (!tab.ready) { clearTimeout(reveal); reveal = setTimeout(() => { tab.ready = true; wrap.classList.remove('warming'); }, 120); }
   };
-  ws.onopen = updateDictationAvailability;
-  ws.onclose = () => { if (state.activeTab === tab.name) dictation.cancel(); tab.closed = true; wrap.classList.remove('warming'); renderTabs(); };
-  const sendResize = () => ws.readyState === 1 && ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-  term.onData((data) => ws.readyState === 1 && ws.send(JSON.stringify({ type: 'input', data })));
-  term.onResize(sendResize);
+  ws.onopen = () => { tab.attempts = 0; updateDictationAvailability(); };
+  ws.onclose = (e) => {
+    if (tab.ws !== ws) return; // replaced or closed by fox
+    tab.ws = null;
+    if (tab.closed) return;
+    const dropped = e.code === 1006 && (tab.attempts ?? 0) < RECONNECT_DELAYS.length && state.terminals.some((t) => t.name === tab.name);
+    if (dropped) { const n = tab.attempts ?? 0; tab.attempts = n + 1; setTimeout(() => connectTab(tab), RECONNECT_DELAYS[n]); return; }
+    if (state.activeTab === tab.name) dictation.cancel();
+    tab.closed = true; wrap.classList.remove('warming'); renderTabs();
+  };
+  // Input and resize follow whichever socket is current; registered once per terminal.
+  if (!tab.wired) {
+    tab.wired = true;
+    term.onData((data) => tab.ws?.readyState === 1 && tab.ws.send(JSON.stringify({ type: 'input', data })));
+    term.onResize(() => tab.ws?.readyState === 1 && tab.ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows })));
+  }
 }
 
 function tabLabel(name) {
@@ -667,6 +692,7 @@ function closeTab(name) {
   if (state.preview === name) state.preview = null;
   const t = state.tabs.get(name);
   if (!t) return;
+  t.closed = true; // no reconnect after this
   try { t.ws?.close(); } catch {}
   t.term?.dispose();
   t.wrap.remove();
