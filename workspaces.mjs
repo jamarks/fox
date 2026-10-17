@@ -1,0 +1,207 @@
+// Workspaces: a named folder under ~/workspaces made of one or more GitHub repos (cloned as subfolders),
+// plus whatever else you keep there. Created once, reopened many times. Definitions live in
+// ~/.config/fox/workspaces.json; fox never writes in ~/.fx. Removing a repo or a workspace never deletes
+// files unless asked, and never when a repo has uncommitted or unpushed work.
+import { readFile, writeFile, mkdir, rename, readdir, rm, realpath, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { randomUUID } from 'node:crypto';
+const execFileP = promisify(execFile);
+
+export const WORKSPACE_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
+export const REPO_PART = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+export const validRepo = (r) => Boolean(r && REPO_PART.test(String(r.owner)) && REPO_PART.test(String(r.name)) && !String(r.name).endsWith('.git'));
+const key = (r) => `${r.owner}/${r.name}`.toLowerCase();
+
+export function createWorkspaces({
+  stateDir, rootDir,
+  remoteUrl = (r) => `https://github.com/${r.owner}/${r.name}.git`,
+  git = (args, opts = {}) => execFileP('git', args, { timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, ...opts }).then((x) => x.stdout.trim()),
+}) {
+  const file = join(stateDir, 'workspaces.json');
+  const cloning = new Map(); // "<id>|owner/name" -> true while a clone runs
+  const errors = new Map();  // "<id>|owner/name" -> last clone error
+
+  async function load() {
+    try { const d = JSON.parse(await readFile(file, 'utf8')); return Array.isArray(d) ? d : []; } catch { return []; }
+  }
+  async function save(list) {
+    await mkdir(stateDir, { recursive: true, mode: 0o700 });
+    const tmp = `${file}.${randomUUID()}.tmp`;
+    await writeFile(tmp, JSON.stringify(list, null, 2), { mode: 0o600 });
+    await rename(tmp, file);
+  }
+  // Every path fox touches must stay inside rootDir, after resolving symlinks.
+  async function inside(dir) {
+    const root = await realpath(rootDir).catch(() => resolve(rootDir));
+    const real = await realpath(dir).catch(() => resolve(dir));
+    return real === root || real.startsWith(root + sep);
+  }
+  // Folder name for a repo: its name, or name-owner if another owner's repo already took it.
+  function folderFor(ws, repo) {
+    const taken = new Set(ws.repos.filter((r) => key(r) !== key(repo)).map((r) => r.dir.toLowerCase()));
+    const plain = repo.name;
+    return taken.has(plain.toLowerCase()) ? `${repo.name}-${repo.owner}` : plain;
+  }
+  async function cloneOne(ws, repo) {
+    const k = `${ws.id}|${key(repo)}`;
+    if (cloning.has(k)) return;
+    const dir = join(ws.dir, repo.dir);
+    if (existsSync(join(dir, '.git'))) return;
+    cloning.set(k, true); errors.delete(k);
+    try {
+      if (!(await inside(ws.dir))) throw new Error('workspace folder is outside ~/workspaces');
+      await git(['clone', '--', remoteUrl(repo), dir], { timeout: 600000 });
+    } catch (err) {
+      errors.set(k, String(err.stderr || err.message).trim().split('\n').filter(Boolean).pop() || 'clone failed');
+    } finally { cloning.delete(k); }
+  }
+  async function cloneMissing(ws) { for (const r of ws.repos) await cloneOne(ws, r); } // one at a time
+
+  async function repoState(ws, r) {
+    const dir = join(ws.dir, r.dir), k = `${ws.id}|${key(r)}`;
+    const base = { owner: r.owner, name: r.name, dir: r.dir };
+    if (cloning.has(k)) return { ...base, status: 'cloning' };
+    if (!existsSync(join(dir, '.git'))) return { ...base, status: errors.has(k) ? 'error' : 'missing', error: errors.get(k) ?? null };
+    const run = (args) => git(['-C', dir, ...args], { timeout: 5000 }).catch(() => '');
+    const [branch, porcelain, counts] = await Promise.all([
+      run(['rev-parse', '--abbrev-ref', 'HEAD']), run(['status', '--porcelain']),
+      run(['rev-list', '--left-right', '--count', '@{u}...HEAD']),
+    ]);
+    const [behind, ahead] = counts ? counts.split(/\s+/).map(Number) : [0, 0];
+    return { ...base, status: 'ready', branch, changed: porcelain ? porcelain.split('\n').filter(Boolean).length : 0, ahead: ahead || 0, behind: behind || 0 };
+  }
+
+  return {
+    rootDir,
+    async list() {
+      const all = await load();
+      return Promise.all(all.map(async (ws) => ({ ...ws, repos: await Promise.all(ws.repos.map((r) => repoState(ws, r))) })));
+    },
+    async get(id) { return (await load()).find((w) => w.id === id) ?? null; },
+    // Creates the entry and the folder, answers at once and clones in the background (poll list()).
+    async create({ name, repos }) {
+      name = String(name ?? '').trim();
+      if (!WORKSPACE_NAME.test(name)) throw Object.assign(new Error('Use lowercase letters, numbers, dots, dashes or underscores for the name.'), { status: 400 });
+      if (!Array.isArray(repos) || !repos.length || !repos.every(validRepo)) throw Object.assign(new Error('Pick at least one repo.'), { status: 400 });
+      const all = await load();
+      if (all.some((w) => w.name === name)) throw Object.assign(new Error(`A workspace named ${name} already exists.`), { status: 409 });
+      const dir = join(rootDir, name);
+      await mkdir(dir, { recursive: true });
+      if (!(await inside(dir))) throw Object.assign(new Error('Workspace folder is outside ~/workspaces.'), { status: 400 });
+      const ws = { id: randomUUID(), name, dir, repos: [], createdAt: Date.now() };
+      for (const r of repos) {
+        if (ws.repos.some((x) => key(x) === key(r))) continue;
+        const repo = { owner: String(r.owner), name: String(r.name) };
+        ws.repos.push({ ...repo, dir: folderFor(ws, { ...repo, dir: '' }) });
+      }
+      all.push(ws); await save(all);
+      cloneMissing(ws);
+      return ws;
+    },
+    async update(id, { name, add = [], remove = [] }) {
+      const all = await load();
+      const ws = all.find((w) => w.id === id);
+      if (!ws) throw Object.assign(new Error('Workspace not found.'), { status: 404 });
+      if (name !== undefined) {
+        name = String(name).trim();
+        if (!WORKSPACE_NAME.test(name)) throw Object.assign(new Error('Use lowercase letters, numbers, dots, dashes or underscores for the name.'), { status: 400 });
+        if (all.some((w) => w.id !== id && w.name === name)) throw Object.assign(new Error(`A workspace named ${name} already exists.`), { status: 409 });
+        ws.name = name; // only the entry: the folder stays where it is
+      }
+      if (!add.every(validRepo) || !remove.every(validRepo)) throw Object.assign(new Error('Invalid repo.'), { status: 400 });
+      const drop = new Set(remove.map(key));
+      ws.repos = ws.repos.filter((r) => !drop.has(key(r))); // leaves its folder on disk
+      for (const r of add) {
+        if (ws.repos.some((x) => key(x) === key(r))) continue;
+        const repo = { owner: String(r.owner), name: String(r.name) };
+        ws.repos.push({ ...repo, dir: folderFor(ws, { ...repo, dir: '' }) });
+      }
+      await save(all);
+      cloneMissing(ws);
+      return ws;
+    },
+    async retry(id) { const ws = await this.get(id); if (ws) { for (const r of ws.repos) errors.delete(`${ws.id}|${key(r)}`); cloneMissing(ws); } return Boolean(ws); },
+    // Fetch only: never merges or pulls.
+    async fetch(id) {
+      const ws = await this.get(id);
+      if (!ws) return false;
+      await Promise.all(ws.repos.map((r) => existsSync(join(ws.dir, r.dir, '.git')) ? git(['-C', join(ws.dir, r.dir), 'fetch', '--quiet', '--prune'], { timeout: 60000 }).catch(() => {}) : null));
+      return true;
+    },
+    // What stops the folder from being deleted: dirty or unpushed repos, and any file that is not a repo.
+    async blockers(id) {
+      const ws = await this.get(id);
+      if (!ws) return null;
+      const out = [];
+      const repoDirs = new Set(ws.repos.map((r) => r.dir));
+      for (const r of ws.repos) {
+        const dir = join(ws.dir, r.dir);
+        if (!existsSync(join(dir, '.git'))) continue;
+        const run = (args) => git(['-C', dir, ...args], { timeout: 10000 });
+        const dirty = await run(['status', '--porcelain']).catch(() => 'unknown');
+        if (dirty) out.push(`${r.dir}: uncommitted changes`);
+        const unpushed = await run(['log', '--branches', '--not', '--remotes', '--oneline']).catch(() => 'unknown');
+        if (unpushed) out.push(`${r.dir}: commits not pushed`);
+      }
+      for (const entry of await readdir(ws.dir).catch(() => [])) if (!repoDirs.has(entry)) out.push(`${entry}: not one of the workspace repos`);
+      return out;
+    },
+    async remove(id, { deleteFolder = false } = {}) {
+      const all = await load();
+      const ws = all.find((w) => w.id === id);
+      if (!ws) throw Object.assign(new Error('Workspace not found.'), { status: 404 });
+      if (deleteFolder) {
+        const blocking = await this.blockers(id);
+        if (blocking.length) throw Object.assign(new Error(`The folder was kept: ${blocking.join('; ')}.`), { status: 409, blockers: blocking });
+        if (!(await inside(ws.dir)) || resolve(ws.dir) === resolve(rootDir)) throw Object.assign(new Error('Workspace folder is outside ~/workspaces.'), { status: 400 });
+        if ((await stat(ws.dir).catch(() => null))?.isDirectory()) await rm(ws.dir, { recursive: true, force: true });
+      }
+      await save(all.filter((w) => w.id !== id));
+      return true;
+    },
+    // The workspace a folder belongs to (the folder itself or anything inside it).
+    async forPath(path) {
+      const p = resolve(path);
+      return (await load()).find((w) => p === resolve(w.dir) || p.startsWith(resolve(w.dir) + sep)) ?? null;
+    },
+  };
+}
+
+// Repos you can pick: every owner gh can see (your user, your orgs, and owners with a token in
+// ~/.config/fox-git/tokens), newest first. Token files let one server hold one fine-grained token per owner.
+export function createRepoCatalog({ tokensDir, gh = 'gh', ttlMs = 5 * 60 * 1000, now = () => Date.now() }) {
+  let cache = null;
+  const run = (args, env = {}) => execFileP(gh, args, { timeout: 30000, env: { ...process.env, GH_PROMPT_DISABLED: '1', ...env } }).then((x) => x.stdout);
+  async function tokenFor(owner) {
+    try { return (await readFile(join(tokensDir, owner.toLowerCase()), 'utf8')).trim() || null; } catch { return null; }
+  }
+  async function fetchAll() {
+    const owners = new Map(); // lowercased -> display name
+    const login = (await run(['api', 'user', '--jq', '.login']).catch(() => '')).trim();
+    if (login) owners.set(login.toLowerCase(), login);
+    for (const o of (await run(['api', 'user/orgs', '--jq', '.[].login']).catch(() => '')).split('\n').map((x) => x.trim()).filter(Boolean)) owners.set(o.toLowerCase(), o);
+    for (const f of await readdir(tokensDir).catch(() => [])) if (REPO_PART.test(f) && !owners.has(f.toLowerCase())) owners.set(f.toLowerCase(), f);
+    if (!owners.size) throw new Error('gh is not signed in: run gh auth login on this machine to list repos.');
+    const groups = [];
+    for (const [low, display] of owners) {
+      const token = await tokenFor(low);
+      const env = token ? { GH_TOKEN: token } : {};
+      try {
+        const repos = JSON.parse(await run(['repo', 'list', display, '--limit', '200', '--json', 'name,owner,isPrivate,updatedAt,description'], env));
+        if (repos.length) groups.push({ owner: repos[0].owner.login, repos: repos.map((r) => ({ owner: r.owner.login, name: r.name, private: r.isPrivate, updatedAt: r.updatedAt, description: r.description || '' })) });
+      } catch {}
+    }
+    return groups;
+  }
+  return {
+    async list({ refresh = false } = {}) {
+      if (!refresh && cache && now() - cache.at < ttlMs) return cache.groups;
+      const groups = await fetchAll();
+      cache = { at: now(), groups };
+      return groups;
+    },
+  };
+}

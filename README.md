@@ -61,6 +61,7 @@ To offer another one, add an entry to `tools.mjs`.
 
 ## What it does
 
+- **Workspaces**: a named folder made of one or more GitHub repos (from your account and your orgs), cloned once and reopened from the sidebar. Sessions in it share the same copy; fox shows each repo's branch, uncommitted changes and commits behind, and warns when another session is working there. Removing one never deletes work: the folder is only deleted on request, and only when every repo is committed and pushed.
 - **Sessions by project**: grouped by workspace, collapsible, reorderable by drag, numbered.
 - **Live state**: a dot per session, orange and breathing while fx works, still green while it waits for you; needs input says so. An optional bell (sound + notification) when an agent finishes.
 - **New replies**: an inbox above the projects lists answers you have not opened yet; click one to jump to it.

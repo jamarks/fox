@@ -17,6 +17,7 @@
       <div class="brand" role="img" aria-label="fox"><svg class="fox" viewBox="0 0 32 32" aria-hidden="true"><path d="M4 3 L13 9 L19 9 L28 3 L27 15 C27 22 22 28 16 29 C10 28 5 22 5 15 Z" fill="currentColor"/><path d="M9 18 L16 29 L23 18 L16 21 Z" fill="var(--panel)"/><circle cx="16" cy="23.5" r="1.6" fill="currentColor"/><circle cx="11.5" cy="16" r="1.5" fill="var(--panel)"/><circle cx="20.5" cy="16" r="1.5" fill="var(--panel)"/></svg></div>
       <div class="row">
         <button type="button" id="pick-folder" class="icon" title="Open fx in a folder…"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4a1 1 0 0 1 1-1h3.2l1.5 1.5h6.3a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/><path d="M8 7v4M6 9h4"/></svg></button>
+        <button type="button" id="new-workspace" class="icon" title="New workspace from GitHub repos" aria-label="New workspace"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 3.5h3l1.2 1.2h4.8a1 1 0 0 1 1 1v6.3a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z"/><path d="M1.5 6v7.5a1 1 0 0 0 1 1h10"/></svg></button>
         <button id="global-search-open" class="icon" title="Search all sessions (⌥Space)" aria-label="Search all sessions"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></svg></button>
         <div class="menu-wrap">
           <button type="button" id="settings" class="icon" title="Settings" aria-label="Settings" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg></button>
@@ -63,8 +64,23 @@
       <div class="ns-head">New session in <span class="ns-folder" id="ns-folder"></span></div>
       <label class="ns-label" for="ns-model">Model</label>
       <div class="row ns-model-row"><span id="ns-badge"></span><select id="ns-model"><option value="">fx default</option></select><span id="ns-prov"></span></div>
+      <div id="ns-ws" class="hidden"></div>
       <div id="ns-tools" class="hidden"></div>
       <div class="row ns-actions"><span class="muted ns-hint">↵ open · esc cancel</span><button type="button" id="ns-cancel">Cancel</button><button type="submit" class="primary">Open</button></div>
+    </form>
+  </div>
+  <div id="wsdialog" class="hidden">
+    <form class="sheet" id="wsform" autocomplete="off">
+      <div class="ns-head" id="ws-title">New workspace</div>
+      <label class="ns-label" for="ws-name">Name</label>
+      <input id="ws-name" placeholder="orchestra" spellcheck="false" />
+      <label class="ns-label" for="ws-search">Repos</label>
+      <input id="ws-search" placeholder="Search your repos, or type owner/repo" spellcheck="false" />
+      <div id="ws-repos" role="group" aria-label="Repos"></div>
+      <div id="ws-progress" class="hidden"></div>
+      <div id="ws-error" class="hint err" role="alert"></div>
+      <div id="ws-danger" class="hidden"><label class="toggle"><input type="checkbox" id="ws-delete-folder" /> Also delete the folder (only if nothing would be lost)</label><button type="button" id="ws-remove">Remove workspace</button></div>
+      <div class="row ns-actions"><span class="muted ns-hint" id="ws-summary"></span><button type="button" id="ws-cancel">Cancel</button><button type="submit" class="primary" id="ws-submit">Create and open</button></div>
     </form>
   </div>
   <div class="resizer" id="rs-left" title="Drag to resize"></div>

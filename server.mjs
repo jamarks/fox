@@ -19,6 +19,7 @@ import { createSearchIndex } from './search.mjs';
 import { latestCompletedReply } from './inbox.mjs';
 import { TOOLS, isInstalled, addArgs } from './tools.mjs';
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
+import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
 const execFileP = promisify(execFile);
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -47,6 +48,15 @@ async function saveState(st) {
   await writeFile(STATE_FILE, JSON.stringify(st, null, 2));
 }
 const searchSessions = createSearchIndex(SESSIONS_DIR, loadState);
+const workspaces = createWorkspaces({ stateDir: STATE_DIR, rootDir: join(homedir(), 'workspaces') });
+const repoCatalog = createRepoCatalog({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
+// The sidebar polls the overview every few seconds; workspace git state is cheap but not free.
+let workspacesCache = { at: 0, list: [] };
+async function listWorkspaces(force = false) {
+  if (!force && Date.now() - workspacesCache.at < 4000) return workspacesCache.list;
+  workspacesCache = { at: Date.now(), list: await workspaces.list() };
+  return workspacesCache.list;
+}
 
 // ---------- sesiones ----------
 async function readJson(path, fallback = null) {
@@ -409,7 +419,7 @@ async function handlePanelRequest(req, res) {
           if (!child.firstPrompt && c.task) child.firstPrompt = c.task;
         }
       }
-      return send(res, 200, { sessions, terminals, repos });
+      return send(res, 200, { sessions, terminals, repos, workspaces: await listWorkspaces() });
     }
     let m;
     if ((m = p.match(/^\/api\/sessions\/([^/]+)\/events$/))) {
@@ -510,6 +520,25 @@ async function handlePanelRequest(req, res) {
       try { await execFileP(FX_BIN, addArgs(tool), { timeout: 30000 }); }
       catch (err) { return send(res, 500, { error: String(err.stderr || err.message).trim() }); }
       return send(res, 200, await listTools());
+    }
+    // Workspaces: folders made of GitHub repos (see workspaces.mjs).
+    if (p === '/api/repos' && req.method === 'GET') {
+      try { return send(res, 200, await repoCatalog.list({ refresh: url.searchParams.get('refresh') === '1' })); }
+      catch (err) { return send(res, 502, { error: err.message }); }
+    }
+    if (p === '/api/workspaces' && req.method === 'GET') return send(res, 200, await listWorkspaces(true));
+    if (p === '/api/workspaces' && req.method === 'POST') {
+      try { const ws = await workspaces.create(JSON.parse(await readBody(req) || '{}')); return send(res, 200, ws); }
+      catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
+    }
+    if ((m = p.match(/^\/api\/workspaces\/([0-9a-f-]{36})(?:\/(fetch|retry))?$/))) {
+      const [, id, action] = m;
+      try {
+        if (action && req.method === 'POST') { const ok = action === 'fetch' ? await workspaces.fetch(id) : await workspaces.retry(id); return send(res, ok ? 200 : 404, ok ? { ok } : { error: 'Workspace not found.' }); }
+        if (!action && req.method === 'PATCH') return send(res, 200, await workspaces.update(id, JSON.parse(await readBody(req) || '{}')));
+        if (!action && req.method === 'DELETE') { await workspaces.remove(id, { deleteFolder: url.searchParams.get('folder') === '1' }); return send(res, 200, { ok: true }); }
+        return send(res, 405, { error: 'method not allowed' });
+      } catch (err) { return send(res, err.status ?? 500, { error: err.message, blockers: err.blockers }); }
     }
     if (p === '/api/models' && req.method === 'GET') return send(res, 200, await getModels());
     if (p === '/api/models/refresh' && req.method === 'POST') { try { return send(res, 200, await fetchModels()); } catch (err) { return send(res, 500, { error: String(err.stderr || err.message) }); } }

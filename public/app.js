@@ -81,8 +81,9 @@ const STATE_ORDER = { needs_input: 0, working: 1, ready: 2, external: 3, done: 4
 
 // ---------- data ----------
 async function refresh() {
-  const { sessions, terminals, repos } = await (await fetch('/api/overview')).json();
+  const { sessions, terminals, repos, workspaces } = await (await fetch('/api/overview')).json();
   state.sessions = sessions;
+  state.workspaces = workspaces ?? [];
   state.terminals = terminals;
   state.repos = repos ?? {};
   updatePageTitle();
@@ -166,14 +167,28 @@ function renderSummary() {
   $('#summary').innerHTML = parts.join('') || '<span class="muted">quiet</span>';
 }
 
+// ---------- workspaces: folders made of GitHub repos ----------
+const workspaceFor = (path) => (state.workspaces ?? []).find((w) => path === w.dir || String(path ?? '').startsWith(w.dir + '/'));
+// One repo of a workspace: its folder, branch and what needs attention (uncommitted, behind, ahead, clone state).
+function wsRepoLine(r) {
+  const stateHtml = r.status === 'cloning' ? '<span class="ws-state">cloning…</span>'
+    : r.status === 'missing' ? '<span class="ws-state">waiting to clone</span>'
+    : r.status === 'error' ? `<span class="ws-state err" title="${esc(r.error ?? '')}">clone failed</span>`
+    : `<span class="ws-state ${r.changed ? 'warn' : ''}">${[r.changed ? `±${r.changed}` : '', r.behind ? `↓${r.behind}` : '', r.ahead ? `↑${r.ahead}` : ''].filter(Boolean).join(' ')}</span>`;
+  return `<div class="ws-line" title="${esc(r.owner)}/${esc(r.name)}"><span>${esc(r.dir)}</span>${r.branch ? `<span class="ws-branch">${esc(r.branch)}</span>` : ''}${stateHtml}</div>`;
+}
+
 function renderSessions() {
   if (state.renaming) return; // replacing the sidebar would blur the input and save prematurely
   const active = state.sessions.filter((s) => !s.archived && !s.parentId);
   const archived = state.sessions.filter((s) => s.archived && !s.parentId);
   const groups = new Map();
+  // Sessions inside a workspace folder group under the workspace; workspaces show even before their first session.
+  for (const w of state.workspaces ?? []) groups.set(w.dir, []);
   for (const s of active) {
-    if (!groups.has(s.workspace)) groups.set(s.workspace, []);
-    groups.get(s.workspace).push(s);
+    const key = workspaceFor(s.workspace)?.dir ?? s.workspace;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
   }
   const root = $('#session-groups');
   root.innerHTML = '';
@@ -187,6 +202,14 @@ function renderSessions() {
     const isCollapsed = collapsed.has(ws);
     g.className = 'group' + (isCollapsed ? ' collapsed' : '');
     g.dataset.ws = ws;
+    const wsp = (state.workspaces ?? []).find((w) => w.dir === ws);
+    if (wsp) {
+      g.classList.add('workspace');
+      g.innerHTML = `<h3 draggable="true" title="Drag to reorder"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(wsp.name)}</span><span class="gcount" title="${wsp.repos.length} repo${wsp.repos.length === 1 ? '' : 's'}">${list.length}</span><button class="icon" data-edit-ws="${esc(wsp.id)}" title="Edit workspace">${ICON.rename}</button><button class="icon" data-new="${esc(ws)}" title="New session in this workspace">+</button></h3>${isCollapsed ? '' : `<div class="ws-repos-line">${wsp.repos.map(wsRepoLine).join('')}</div>`}`;
+      if (!isCollapsed) list.forEach((s, i) => g.appendChild(sessionCard(s, i + 1)));
+      root.appendChild(g);
+      continue;
+    }
     const repo = state.repos?.[ws];
     // GitHub remote: owner/repo as a link. Plain git: just the branch (and the repo root if the workspace is a subfolder).
     const gitLine = repo ? `<div class="git" title="${esc(repo.remote || 'git repo without a remote: add one (git remote add origin …) and this becomes a link')}">${repo.url ? `<a href="${esc(repo.url)}" target="_blank" rel="noopener" title="Open ${esc(repo.repo)} on GitHub">${ICON.github}${esc(repo.repo)}</a>` : `<span>${ICON.git}${repo.root !== ws ? esc(shortPath(repo.root)) : 'no remote'}</span>`}${repo.branch ? `<span class="branch">${esc(repo.branch)}</span>` : ''}${repo.changed ? `<span class="changed" title="${repo.changed} changed file${repo.changed === 1 ? '' : 's'}">±${repo.changed}</span>` : ''}</div>` : '';
@@ -277,6 +300,7 @@ $('#session-groups').addEventListener('click', async (e) => {
   const btn = e.target.closest('button');
   const d = btn?.dataset ?? {};
   if (d.new) return newSessionSheet(d.new);
+  if (d.editWs) return openWorkspaceDialog(d.editWs);
   if (d.pin) return setPinned(d.pin, !state.pinned.has(d.pin));
   if (d.rename) return renameInline(d.rename);
   if (d.archive) {
@@ -1450,11 +1474,26 @@ async function loadModels(force = false) {
   return modelsCatalog;
 }
 function newSessionSheet(cwd) {
-  $('#ns-folder').textContent = shortPath(cwd);
+  const wsp = workspaceFor(cwd);
+  $('#ns-folder').textContent = wsp && cwd === wsp.dir ? wsp.name : shortPath(cwd);
+  renderNsWorkspace(wsp);
+  // Fresh remote state for the repos, without merging anything: fetch, then show it.
+  if (wsp) post(`/api/workspaces/${wsp.id}/fetch`).then(() => fetch('/api/workspaces')).then((r) => r.json()).then((list) => {
+    state.workspaces = list;
+    if (!$('#newsheet').classList.contains('hidden') && $('#newsheet').dataset.cwd === cwd) renderNsWorkspace(workspaceFor(cwd));
+  }).catch(() => {});
   $('#newsheet').dataset.cwd = cwd;
   $('#newsheet').classList.remove('hidden');
   loadModels().then(() => $('#ns-model').focus());
   loadTools();
+}
+// Workspace repos in the new-session sheet, and a warning when another session is working there.
+function renderNsWorkspace(wsp) {
+  const box = $('#ns-ws');
+  box.classList.toggle('hidden', !wsp);
+  if (!wsp) return (box.innerHTML = '');
+  const busy = state.sessions.filter((s) => !s.archived && s.terminal && (s.state === 'working' || s.state === 'needs_input') && workspaceFor(s.workspace)?.id === wsp.id);
+  box.innerHTML = `<label class="ns-label">Repos · shared by every session in this workspace</label>${wsp.repos.map(wsRepoLine).join('')}${busy.length ? `<div class="ws-busy">${busy.length === 1 ? 'Another session is working here' : `${busy.length} sessions are working here`}: they edit the same files.</div>` : ''}`;
 }
 // Tools for fx (MCP servers from fox's catalog): one chip each, ✓ when fx has it. Nothing is added without a click.
 const toolChip = (t) => !t.installed ? `<button type="button" class="ns-chip" data-add-tool="${t.id}" title="${esc(t.description)}">+ ${esc(t.label)}</button>`
@@ -1513,6 +1552,142 @@ $('#newform').addEventListener('submit', async (e) => {
   await openTerminal({ cwd, provider, model });
 });
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#newsheet').classList.contains('hidden')) $('#newsheet').classList.add('hidden'); });
+
+// ---------- workspace dialog: create a workspace from repos, or edit one ----------
+const WS_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
+const repoKey = (r) => `${r.owner}/${r.name}`.toLowerCase();
+const wsDlg = { mode: 'create', id: null, catalog: [], catalogError: null, loading: false, selected: new Map(), initial: new Set(), stage: 'pick', poll: 0 };
+function wsShowPicker(on) {
+  for (const el of ['#ws-repos', '#ws-search', 'label[for="ws-search"]']) $(el).classList.toggle('hidden', !on);
+  $('#ws-progress').classList.toggle('hidden', on);
+}
+async function openWorkspaceDialog(id = null) {
+  const wsp = id ? (state.workspaces ?? []).find((w) => w.id === id) : null;
+  Object.assign(wsDlg, { mode: wsp ? 'edit' : 'create', id: wsp?.id ?? null, stage: 'pick', catalogError: null });
+  clearTimeout(wsDlg.poll);
+  wsDlg.selected = new Map((wsp?.repos ?? []).map((r) => [repoKey(r), { owner: r.owner, name: r.name }]));
+  wsDlg.initial = new Set(wsDlg.selected.keys());
+  $('#ws-title').textContent = wsp ? `Edit ${wsp.name}` : 'New workspace';
+  $('#ws-name').value = wsp?.name ?? '';
+  $('#ws-search').value = '';
+  $('#ws-error').textContent = '';
+  $('#ws-danger').classList.toggle('hidden', !wsp);
+  $('#ws-delete-folder').checked = false;
+  $('#ws-submit').textContent = wsp ? 'Save' : 'Create and open';
+  $('#ws-cancel').textContent = 'Cancel'; wsDlg.failedDir = null;
+  $('#ws-submit').disabled = false;
+  wsShowPicker(true);
+  $('#wsdialog').classList.remove('hidden');
+  (wsp ? $('#ws-search') : $('#ws-name')).focus();
+  if (!wsDlg.catalog.length) {
+    wsDlg.loading = true; renderWsRepos();
+    try {
+      const r = await fetch('/api/repos'); const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Could not list your repos.');
+      wsDlg.catalog = j;
+    } catch (err) { wsDlg.catalogError = err.message; }
+    wsDlg.loading = false;
+  }
+  renderWsRepos();
+}
+function renderWsRepos() {
+  const box = $('#ws-repos');
+  const raw = $('#ws-search').value.trim(), q = raw.toLowerCase();
+  const known = new Set(wsDlg.catalog.flatMap((g) => g.repos.map(repoKey)));
+  const row = (r, extra = '') => `<label class="ws-repo"><input type="checkbox" data-owner="${esc(r.owner)}" data-name="${esc(r.name)}" ${wsDlg.selected.has(repoKey(r)) ? 'checked' : ''}><span>${esc(r.name)}</span>${r.private ? '<span class="ws-lock" title="private">private</span>' : ''}${extra}</label>`;
+  const matches = (r) => !q || repoKey(r).includes(q) || (r.description ?? '').toLowerCase().includes(q);
+  let html = '';
+  // Picked repos that are not in the list (typed by hand, or already in the workspace) stay visible on top.
+  const extra = [...wsDlg.selected.values()].filter((r) => !known.has(repoKey(r)));
+  if (extra.length) html += `<div class="ws-owner">Picked</div>${extra.map((r) => row(r, `<span class="ws-desc">${esc(r.owner)}</span>`)).join('')}`;
+  const typed = raw.match(/^([A-Za-z0-9][A-Za-z0-9._-]*)\/([A-Za-z0-9][A-Za-z0-9._-]*)$/);
+  if (typed && !known.has(q) && !wsDlg.selected.has(q)) html += `<div class="ws-owner">Not in your list</div><label class="ws-repo"><input type="checkbox" data-owner="${esc(typed[1])}" data-name="${esc(typed[2])}"><span>${esc(typed[1])}/${esc(typed[2])}</span><span class="ws-desc">add by name</span></label>`;
+  for (const g of wsDlg.catalog) {
+    const repos = g.repos.filter(matches);
+    if (repos.length) html += `<div class="ws-owner">${esc(g.owner)}</div>${repos.map((r) => row(r, r.description ? `<span class="ws-desc">${esc(r.description)}</span>` : '')).join('')}`;
+  }
+  if (!html) html = `<div class="ws-empty">${wsDlg.loading ? 'Loading your repos…' : wsDlg.catalogError ? esc(wsDlg.catalogError) + ' You can still type owner/repo.' : q ? 'No repo matches. Type owner/repo to add one by name.' : 'No repos found. Type owner/repo to add one by name.'}</div>`;
+  box.innerHTML = html;
+  updateWsSummary();
+}
+function updateWsSummary() {
+  const n = wsDlg.selected.size, name = $('#ws-name').value.trim();
+  $('#ws-summary').textContent = wsDlg.mode === 'create'
+    ? `${n} repo${n === 1 ? '' : 's'}${name ? ` · cloned into ~/workspaces/${name}` : ''}`
+    : `${n} repo${n === 1 ? '' : 's'}`;
+}
+$('#ws-search').addEventListener('input', debounce(renderWsRepos, 120));
+$('#ws-name').addEventListener('input', () => { $('#ws-error').textContent = ''; updateWsSummary(); });
+$('#ws-repos').addEventListener('change', (e) => {
+  const cb = e.target.closest('input[type=checkbox]'); if (!cb) return;
+  const r = { owner: cb.dataset.owner, name: cb.dataset.name };
+  cb.checked ? wsDlg.selected.set(repoKey(r), r) : wsDlg.selected.delete(repoKey(r));
+  $('#ws-error').textContent = '';
+  updateWsSummary();
+});
+const closeWorkspaceDialog = () => { clearTimeout(wsDlg.poll); $('#wsdialog').classList.add('hidden'); refresh(); };
+$('#ws-cancel').addEventListener('click', closeWorkspaceDialog);
+$('#wsdialog').addEventListener('click', (e) => { if (e.target.id === 'wsdialog') closeWorkspaceDialog(); });
+$('#new-workspace').addEventListener('click', () => openWorkspaceDialog());
+// Clone progress: one line per repo until every clone has finished; then open a session (new workspace) or close.
+async function watchClones(id, { thenOpen }) {
+  wsDlg.stage = 'progress';
+  wsShowPicker(false);
+  $('#ws-submit').disabled = true; $('#ws-submit').textContent = 'Cloning…';
+  const tick = async () => {
+    let list = [];
+    try { list = await (await fetch('/api/workspaces')).json(); } catch {}
+    const w = list.find((x) => x.id === id);
+    if (!w) { $('#ws-error').textContent = 'The workspace is gone.'; return; }
+    state.workspaces = list;
+    $('#ws-progress').innerHTML = w.repos.map((r) => wsRepoLine(r.status === 'ready' ? { ...r, changed: 0, ahead: 0, behind: 0 } : r).replace('<span class="ws-state "></span>', '<span class="ws-state ok">cloned</span>')).join('');
+    const pending = w.repos.some((r) => r.status === 'cloning' || r.status === 'missing');
+    if (pending) { wsDlg.poll = setTimeout(tick, 1200); return; }
+    const failed = w.repos.filter((r) => r.status === 'error');
+    if (!failed.length) {
+      $('#wsdialog').classList.add('hidden'); refresh();
+      if (thenOpen) newSessionSheet(w.dir);
+      return;
+    }
+    $('#ws-error').textContent = `${failed.length === 1 ? 'One repo' : `${failed.length} repos`} could not be cloned (hover for the reason). The others are ready.`;
+    wsDlg.stage = 'failed'; wsDlg.retryOpen = thenOpen; wsDlg.failedDir = w.dir;
+    $('#ws-submit').disabled = false; $('#ws-submit').textContent = 'Retry';
+    $('#ws-cancel').textContent = thenOpen ? 'Open anyway' : 'Close';
+  };
+  tick();
+}
+$('#wsform').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (wsDlg.stage === 'failed') { $('#ws-error').textContent = ''; $('#ws-cancel').textContent = 'Cancel'; await post(`/api/workspaces/${wsDlg.id}/retry`); return watchClones(wsDlg.id, { thenOpen: wsDlg.retryOpen }); }
+  if (wsDlg.stage !== 'pick') return;
+  const name = $('#ws-name').value.trim();
+  if (!WS_NAME.test(name)) { $('#ws-error').textContent = 'Name it with lowercase letters, numbers, dots, dashes or underscores.'; return $('#ws-name').focus(); }
+  if (!wsDlg.selected.size) { $('#ws-error').textContent = 'Pick at least one repo.'; return $('#ws-search').focus(); }
+  $('#ws-submit').disabled = true;
+  const body = wsDlg.mode === 'create'
+    ? { name, repos: [...wsDlg.selected.values()] }
+    : { name, add: [...wsDlg.selected].filter(([k]) => !wsDlg.initial.has(k)).map(([, r]) => r), remove: [...wsDlg.initial].filter((k) => !wsDlg.selected.has(k)).map((k) => { const [owner, n] = k.split('/'); return { owner, name: n }; }) };
+  const r = await fetch(wsDlg.mode === 'create' ? '/api/workspaces' : `/api/workspaces/${wsDlg.id}`, { method: wsDlg.mode === 'create' ? 'POST' : 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('#ws-submit').disabled = false; $('#ws-error').textContent = j.error || 'Could not save the workspace.'; return; }
+  wsDlg.id = j.id;
+  if (wsDlg.mode === 'create' || body.add.length) return watchClones(j.id, { thenOpen: wsDlg.mode === 'create' });
+  closeWorkspaceDialog();
+});
+$('#ws-cancel').addEventListener('click', () => {
+  if ($('#ws-cancel').textContent === 'Open anyway' && wsDlg.failedDir) newSessionSheet(wsDlg.failedDir);
+  $('#ws-cancel').textContent = 'Cancel';
+});
+$('#ws-remove').addEventListener('click', async () => {
+  const wsp = (state.workspaces ?? []).find((w) => w.id === wsDlg.id); if (!wsp) return;
+  const folder = $('#ws-delete-folder').checked;
+  if (!confirm(folder ? `Remove ${wsp.name} and delete ${shortPath(wsp.dir)}? fox checks first that nothing would be lost.` : `Remove ${wsp.name} from fox? Its folder stays on disk.`)) return;
+  const r = await fetch(`/api/workspaces/${wsp.id}${folder ? '?folder=1' : ''}`, { method: 'DELETE' });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('#ws-error').textContent = j.error || 'Could not remove the workspace.'; return; }
+  closeWorkspaceDialog();
+});
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#wsdialog').classList.contains('hidden')) closeWorkspaceDialog(); });
 
 // ---------- keyboard ----------
 // ⌥ as the modifier: ⌘T and ⌘W belong to the browser. Captured on window before xterm sees them.
