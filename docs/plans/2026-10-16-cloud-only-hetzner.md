@@ -301,3 +301,82 @@ El anexo revisó `45a4404`. Desde entonces, en `main` y desplegado desde `releas
 **Seguridad verificada durante la instalación (2026-10-16), no re-verificada desde entonces:** desde afuera solo responde el 22 (80, 443, 4848 y los puertos de preview cerrados); SSH sin root ni contraseñas; `fox` sin sudo y sin escritura en `/opt/fox`; metadata de Hetzner bloqueada para `fox` (root sí llega); credenciales de cloudflared ilegibles para `fox`; sin sesión de Access, todos los hostnames (fox, fox-dev y los 6 previews) redirigen al login de Cloudflare.
 
 **Decisiones del dueño (2026-10-17):** backups y notificaciones al teléfono quedan para más adelante. Los callbacks de login (punto 3 del orden sugerido) son de baja prioridad mientras el túnel SSH manual alcance. No pasar a un servidor más grande: la memoria se resuelve durmiendo sesiones.
+
+## Handoff — scheduled jobs del VPS, deterministas e híbridos (2026-10-17)
+
+### Intención acordada con el dueño
+
+Agregar un apartado de **Jobs** en fox para crear y visualizar tareas programadas del VPS. No pensarlo solamente como «mandarle un prompt a una sesión de fx»: fox es la interfaz de administración, el VPS ejecuta y fx puede ser una herramienta opcional dentro de un job o una forma de solicitar su creación.
+
+Un job puede ser:
+
+- **Determinista:** un script Python, Node o ejecutable que no usa modelos.
+- **Híbrido:** código determinista obtiene datos, llama a un LLM, valida su respuesta y termina ejecutando una acción determinista predefinida.
+- **Con agente:** un script invoca fx para una tarea que realmente necesita herramientas de agente. No imponer este costo ni sus permisos a los demás jobs.
+
+Ejemplo conceptual: cada mañana, Python recoge datos → un modelo clasifica → Python valida la clasificación contra un esquema y una lista de acciones permitidas → genera un reporte o aplica una acción acotada → guarda resultado y logs. **No convertir la salida del modelo en comandos de shell arbitrarios.** Un paso final determinista no hace determinista ni necesariamente correcta la decisión previa del LLM.
+
+El dueño pidió este handoff para continuar con otro agente. Este agregado **no autoriza implementar, instalar servicios, desplegar, avanzar `release` ni ejecutar jobs ahora**. La mecánica y los valores por defecto siguientes son propuestas a confirmar, no decisiones ya cerradas.
+
+### Llamadas a modelos: opciones y evidencia
+
+No limitar los jobs a AI Gateway ni exigir una API key para todos los casos:
+
+| Vía | Credencial | Integración propuesta |
+| --- | --- | --- |
+| Codex mediante fx | Login de ChatGPT guardado por `fx login codex` | Ejecutar `FX_PROVIDER=codex fx ask --json` desde el script. |
+| AI Gateway | Cuenta o API key de Gateway configurada | Usar fx o llamar a la API desde el script. |
+| Claude directo | API key de Anthropic | Llamar al SDK/API de Anthropic desde Python/Node; no requiere pasar por fx. |
+| Sin modelo | Ninguna credencial LLM | Ejecutar el script directamente. |
+
+Se inspeccionó el CLI instalado (`fx v0.0.14`): `fx --help` y `fx ask --help` terminaron con salida 0 y confirman ejecución no interactiva, entrada por stdin, salida JSON y opción de no guardar sesión. **No se ejecutó una inferencia para validar estos jobs.** El siguiente agente debe volver a comprobar la versión y las opciones disponibles.
+
+Referencias consultadas: [fx ask](https://fx.sh/docs/using-fx/fx-ask.md) y [autenticación](https://fx.sh/docs/getting-started/authentication.md). La documentación permite seleccionar el proveedor de un request con `FX_PROVIDER`, sin cambiar globalmente el proveedor guardado. El login de ChatGPT no equivale a tener una API key de OpenAI: tiene sus propios límites, puede requerir renovar autenticación y no garantiza disponibilidad para un job desatendido.
+
+`fx ask --json` entrega un envoltorio con campos como `final_output`, `exit_code` y `session_id`; **no garantiza que el texto de `final_output` cumpla el esquema de negocio**. Comprobar salida del proceso, errores y contenido por separado. Si no hay credencial, vence el tiempo, hay un límite de uso o falla la validación, no ejecutar el paso final. No usar `--full-access` para evitar resolver los permisos de una automatización.
+
+### Arquitectura sugerida para el MVP
+
+1. **Un job es un ejecutable/script, argumentos y directorio de trabajo**, no una conversación ni una terminal tmux. El script puede orquestar varios pasos sin que fox necesite un editor visual de workflows.
+2. **Separar ejecución del servidor web.** Preferir servicios/timers de systemd del usuario `fox`, persistentes y sin sudo en ejecución; comprobar primero disponibilidad del user manager, linger y límites efectivos. Las tareas deben poder arrancar con el browser cerrado y con fox reiniciándose. No asumir que una tarea del scheduler hereda los límites del servicio de tmux.
+3. **Una fuente de verdad para los jobs administrados por fox.** Definiciones persistidas, versionadas y con permisos restrictivos; unidades generadas a partir de ellas, con reconciliación idempotente. No tratar de importar ni editar automáticamente todos los cron/timers del VPS. Una CLI/API de fox debe permitir que fx cree la misma definición que crea la UI, sin editar dos configuraciones a mano.
+4. **Creación como operación explícita.** Que fx pueda registrar un job no significa que deba activarlo sin pedido del usuario. Mostrar comando, directorio, horario y credenciales referenciadas antes de activarlo; reutilizar autenticación y validación de origen en toda API web nueva. La CLI local actúa con los permisos del usuario Linux, no obtiene privilegios extra.
+5. **Lanzamiento con ejecutable y argumentos separados**, no concatenar texto del usuario en una shell. Si el usuario elige ejecutar un script, ese script es código con los permisos de `fox`: las validaciones de rutas no son un sandbox. No permitir elegir root, sudo o unidades de sistema desde la UI.
+6. **Historial persistente por ejecución:** identificador, revisión de la definición, horario previsto, inicio/fin, estado, motivo de disparo, exit code, errores y ubicación de logs/artefactos. Guardar un resultado antes de mostrar «éxito»; distinguir éxito del proceso de cumplimiento del objetivo del job. Si se usa fx, enlazar la conversación cuando exista, sin exigirla para todos los jobs.
+7. **No depender de pegar texto en tmux ni interpretar la pantalla.** Para fx usar el CLI no interactivo; para el resto, procesos normales. Estos procesos no deben ser candidatos al mecanismo de dormir terminales: tienen su propio ciclo de vida y límites.
+
+### Alcance visible en fox
+
+Apartado **Jobs** con nombre, habilitado/pausado, horario y zona horaria, próxima ejecución, último resultado y ejecución actual. Detalle con script/argumentos/directorio, historial, stdout/stderr acotados, duración y artefactos; controles de crear/editar, pausar/reactivar y **Run now**. No exponer secretos en formularios de lectura, respuestas API, argumentos ni logs. Diferenciar «guardar» de «activar» y advertir si ya hay una ejecución en curso.
+
+Para el MVP, proponer horarios simples (diario/semanal y ejecución única), con zona IANA explícita. Antes de implementar, acordar comportamiento en cambios de hora, reinicios y horarios perdidos; no agregar cron libre o un constructor de DAG como requisito inicial.
+
+### Reglas de ejecución propuestas
+
+- **Concurrencia inicial: un job activo globalmente**, por la memoria del VPS, y nunca dos ejecuciones simultáneas del mismo job, incluido **Run now**. Lock efectivo entre procesos y disparos manuales/programados, no solo un booleano en el servidor web.
+- **Reinicios y ejecuciones perdidas:** registrar las omitidas y no generar una ráfaga al volver. Si se usa systemd, elegir explícitamente la política de recuperación del timer y hacerla coincidir con lo que muestra fox. No prometer «exactly once»: una caída puede ocurrir después de un efecto externo y antes de registrar el éxito.
+- **Sin reintentos automáticos por defecto.** Para acciones con efectos externos, usar claves de idempotencia o comprobaciones específicas antes de habilitarlos. Recuperar ejecuciones interrumpidas como tales; no asumir éxito ni repetirlas silenciosamente.
+- **Timeout y límites de recursos:** por job, con cancelación del grupo de procesos y registro del motivo. Medir memoria incluyendo herramientas y descendientes; los jobs no deben eludir el presupuesto del VPS. Definir también límites de salida y retención para no llenar el disco.
+- **Secretos:** referencias a credenciales protegidas del usuario `fox`, no valores en definiciones, repos, prompts o logs. Pasar solo las credenciales necesarias al proceso; no heredar indiscriminadamente todo el entorno del servidor web. Ocultar secretos conocidos no garantiza sanitizar cualquier salida de un script: advertirlo y minimizar qué se registra.
+- **Permisos del LLM:** si requiere aprobación, fallar o quedar «requiere intervención» con una explicación; nunca aprobar automáticamente por ser un job. Separar llamadas de clasificación de agentes con acceso a herramientas. Para un MVP de bajo riesgo, empezar con reportes sin escritura en repos, push ni deploy.
+- **Conflictos de workspace:** una única ejecución entre jobs no impide que una sesión humana cambie el mismo repo. Proponer reportes de solo lectura o copias aisladas; para jobs que escriban, diseñar coordinación explícita o worktrees antes de habilitarlos. No presentar la detección de sesiones activas como garantía de exclusión.
+- **Respuesta del LLM:** validar esquema, tipos, límites y acciones permitidas. El código final no ejecuta instrucciones libres del modelo. Una respuesta válida sintácticamente puede ser incorrecta: para efectos sensibles, exigir revisión humana o invariantes verificables del dominio.
+
+### Cómo debería continuar el otro agente
+
+1. Releer este plan y las decisiones posteriores; inspeccionar el estado real de Git y el patrón de autenticación/UI. No dar por implementado el scheduler: este handoff es diseño propuesto.
+2. Presentar un diseño corto y confirmar las decisiones que siguen abiertas: systemd user como backend, horarios iniciales, política ante ejecuciones perdidas, primera tarea real y si solo emitirá reportes o tendrá efectos externos.
+3. Implementar primero una ejecución determinista inocua, con persistencia, historial y logs, en un entorno aislado. Usar rutas de prueba y unidades con prefijo propio; no registrar timers reales ni tocar servicios productivos sin autorización.
+4. Agregar creación y visualización desde fox y una interfaz local estable para que fx registre jobs. Ambas deben compartir validación y fuente de verdad.
+5. Demostrar el flujo híbrido con un proveedor falso y respuestas controladas antes de probar un modelo real. Si se autoriza una prueba real, empezar por el proveedor ya conectado, sin solicitar nuevas claves por chat ni suponer que una suscripción sustituye todas las APIs.
+6. Documentar instalación, límites, recuperación y eliminación de unidades. Separar cambios de código de cualquier instalación/despliegue del VPS, que requiere pedido explícito.
+
+### Criterios de aceptación y verificación
+
+- Un script de prueba corre en horario con el browser cerrado y sobrevive a un restart del servidor web; su ejecución aparece una sola vez en el historial.
+- Crear desde UI y desde CLI/API produce el mismo job visible, con la misma próxima ejecución. Cambiar horario, pausar o eliminar reconcilia las unidades sin timers huérfanos; definir qué ocurre si hay un run activo antes de permitir eliminarlo.
+- Tests con reloj/proveedor/runner falsos cubren zona horaria y cambio de hora, horarios perdidos, doble disparo, caída/reinicio, timeout, salida excesiva y errores de persistencia. Las pruebas unitarias no requieren modelos pagos ni modificar systemd real.
+- Un job híbrido simulado recibe salida válida y ejecuta su acción permitida; con JSON inválido, acción desconocida, fallo del proveedor o respuesta incompleta, no produce el efecto final.
+- Endpoints sin autenticación o con origen incorrecto son rechazados. Entradas maliciosas no inyectan argumentos en unidades ni comandos de shell. Credenciales no aparecen en definiciones exportadas, API ni logs de prueba.
+- Una integración aislada comprueba systemd user y el resultado tras restart/reboot acordado; los tests deterministas por sí solos no prueban esa infraestructura.
+- Antes de cerrar, registrar comandos exactos, resultados y lo que quedó sin verificar. No marcar como resueltos aquí backups, notificaciones o callbacks de login: conservan la prioridad decidida anteriormente.
