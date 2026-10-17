@@ -20,6 +20,7 @@ import { latestCompletedReply } from './inbox.mjs';
 import { TOOLS, isInstalled, addArgs } from './tools.mjs';
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
+import { sleepCandidates, idleSleepMs } from './idle.mjs';
 const execFileP = promisify(execFile);
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -719,6 +720,23 @@ async function listTerminals() {
   }
   return out;
 }
+
+// Idle sessions sleep (see idle.mjs). FOX_IDLE_SLEEP_MIN=30 on a server; off by default. Only a terminal that
+// waits for you, that nobody has open, idle that long, and whose fx session fox knows (so it can resume it).
+const IDLE_SLEEP_MS = idleSleepMs(process.env.FOX_IDLE_SLEEP_MIN);
+async function sleepIdleSessions() {
+  const raw = await tmux('list-sessions', '-F', '#{session_name}|#{session_attached}|#{session_activity}');
+  const candidates = sleepCandidates(raw, { idleMs: IDLE_SLEEP_MS, prefix: TMUX_PREFIX });
+  if (!candidates.length) return;
+  const terminals = await listTerminals(); // also records which fx session each terminal holds
+  for (const name of candidates) {
+    const t = terminals.find((x) => x.name === name);
+    if (!t?.resume || t.attached || t.activity !== 'ready') continue;
+    await tmux('kill-session', '-t', name).catch(() => {});
+    console.log(`fox: ${name} is asleep after ${IDLE_SLEEP_MS >= 60000 ? `${Math.round(IDLE_SLEEP_MS / 60000)} min` : `${Math.round(IDLE_SLEEP_MS / 1000)} s`} idle; opening session ${t.resume} resumes it`);
+  }
+}
+if (IDLE_SLEEP_MS) setInterval(() => sleepIdleSessions().catch((err) => console.error(`fox: idle sleep failed: ${err.message}`)), Math.min(60_000, Math.max(5_000, IDLE_SLEEP_MS / 2))).unref();
 
 async function createTerminal({ cwd, resume, provider = null, model = null }) {
   const name = resume ? `${TMUX_PREFIX}${resume}` : `${TMUX_PREFIX}new-${Date.now().toString(36)}`;
