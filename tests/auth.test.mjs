@@ -36,7 +36,7 @@ test('local passkey gates HTTP and WebSocket, verifies signatures, keeps session
   const launch = async () => {
     child = spawn(process.execPath, ['server.mjs'], { cwd: new URL('..', import.meta.url),
       env: { ...process.env, HOME: home, PORT: String(port), TMUX_BIN: fakeTmux }, stdio: 'pipe' });
-    for (let i = 0; i < 80; i++) { try { return await fetch(base); } catch { await sleep(50); } }
+    for (let i = 0; i < 200; i++) { try { return await fetch(base); } catch { await sleep(50); } } // slow under a parallel test run
     throw new Error('fox did not start');
   };
   const stop = async () => { child.kill(); await new Promise((resolve) => child.once('exit', resolve)); };
