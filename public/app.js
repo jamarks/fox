@@ -560,6 +560,43 @@ function localServerLinks(term) {
   };
 }
 
+// Mac editing keys for fx's input line. The browser keeps Cmd and Option to itself, so they reach the terminal
+// as the control keys fx understands (checked against fx: Ctrl-U kills to the start of the line, Ctrl-W the
+// previous word, Ctrl-A/E go home/end, Alt-B/F move by word). Cmd+C/V/A and the rest stay with the browser.
+const MAC_KEYS = { 'meta+Backspace': '\x15', 'alt+Backspace': '\x17', 'meta+ArrowLeft': '\x01', 'meta+ArrowRight': '\x05', 'alt+ArrowLeft': '\x1bb', 'alt+ArrowRight': '\x1bf' };
+function macEditingKeys(term, name) {
+  term.attachCustomKeyEventHandler((e) => {
+    const mod = e.metaKey && !e.altKey && !e.ctrlKey ? 'meta' : e.altKey && !e.metaKey && !e.ctrlKey ? 'alt' : null;
+    const seq = mod && MAC_KEYS[`${mod}+${e.key}`];
+    if (!seq) return true;
+    if (e.type === 'keydown') {
+      const ws = state.tabs.get(name)?.ws;
+      if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'input', data: seq }));
+    }
+    e.preventDefault();
+    return false;
+  });
+}
+// Copy. Dragging selects in tmux (it owns the mouse) and, on release, tmux sends the text to the terminal with
+// OSC 52, the standard "set the clipboard" sequence that xterm.js ignores by itself. fox puts it on your
+// clipboard. Only writes are accepted: a request to read the clipboard ('?') is ignored.
+function clipboardFromTmux(term) {
+  term.parser.registerOscHandler(52, (data) => {
+    const b64 = data.slice(data.indexOf(';') + 1);
+    if (!b64 || b64 === '?') return true;
+    let text = '';
+    try { text = new TextDecoder().decode(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))); } catch { return true; }
+    if (text) navigator.clipboard?.writeText(text).then(() => toast('Copied'), () => toast('Select with Option+drag and press Cmd+C to copy'));
+    return true;
+  });
+}
+function toast(text) {
+  let el = $('#toast');
+  if (!el) { el = document.createElement('div'); el.id = 'toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+  el.textContent = text; el.classList.add('show');
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.remove('show'), 1600);
+}
+
 // Touch scrolling. Phones send no wheel events, so a finger drag on the terminal did nothing for the terminal and
 // pulled the page instead (pull-to-refresh reloaded fox). The scrollback lives in tmux, not in the browser:
 // with tmux's mouse mode on, a drag becomes wheel events for tmux (its copy mode scrolls, and leaves on its own
@@ -606,6 +643,7 @@ function attachTab(t, { user = false, activate = true } = {}) {
   $('#terminals').appendChild(wrap);
   const term = new Terminal({
     cursorBlink: true, fontSize, fontFamily: terminalFontFamily(), scrollback: 5000, allowTransparency: true,
+    macOptionClickForcesSelection: true, // Option-drag selects text for Cmd+C even while tmux owns the mouse
     theme: state.palette ? { background: state.palette.sky ? 'rgba(0,0,0,0)' : state.palette.bg, foreground: state.palette.text, cursor: state.palette.cursor, selectionBackground: state.palette.sel } : undefined,
   });
   const fit = new FitAddon.FitAddon();
@@ -616,6 +654,8 @@ function attachTab(t, { user = false, activate = true } = {}) {
   // Do not focus on tab activation: that would pop up the keyboard just by opening a session.
   wrap.addEventListener('click', () => { if (mobileLayout.matches) term.focus(); });
   touchScroll(wrap, term, t.name);
+  macEditingKeys(term, t.name);
+  clipboardFromTmux(term);
   state.tabs.set(t.name, { name: t.name, term, fit, ws: null, wrap, closed: false, ready: false, openedAt: Date.now() });
   if (mobileLayout.matches) document.fonts.load(`${fontSize}px "Source Code Pro"`).then(() => {
     const tab = state.tabs.get(t.name);

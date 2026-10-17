@@ -544,3 +544,6 @@ html, body { overscroll-behavior-y: none; }
 #summary.hidden { display: none; }
 #mem-free { border: 1px solid var(--border); padding: 4px 8px; font-size: 11px; white-space: nowrap; }
 #mem-free.hidden { display: none; }
+
+#toast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 8px); background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 12px; opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s; z-index: 100; }
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
