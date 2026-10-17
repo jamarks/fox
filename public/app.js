@@ -428,12 +428,19 @@ const pill = $('#dictation-pill');
 let pillTimer = null;
 // Voice level for the mic orb: a second, silent look at the mic (Chrome shares the permission with speech
 // recognition). Sets --lvl (0..1) on the button; its rings grow with your voice.
-const meter = { stream: null, ctx: null, raf: 0 };
+// One request at a time: the status updates many times while you speak, and every mic stream opened has to be
+// stopped, or the phone keeps showing the mic as in use. `gen` changes on every stop, so a request that
+// resolves after it is closed at once.
+const meter = { stream: null, ctx: null, raf: 0, starting: false, gen: 0 };
 async function startMeter() {
-  if (meter.stream || !navigator.mediaDevices?.getUserMedia) return;
+  if (meter.stream || meter.starting || !navigator.mediaDevices?.getUserMedia) return;
+  meter.starting = true;
+  const gen = meter.gen;
   try {
-    meter.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    if (!dictation.active) return stopMeter();
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    meter.starting = false;
+    if (gen !== meter.gen || !dictation.active) { stream.getTracks().forEach((t) => t.stop()); if (dictation.active) startMeter(); return; }
+    meter.stream = stream;
     meter.ctx = new AudioContext();
     const analyser = meter.ctx.createAnalyser();
     analyser.fftSize = 512;
@@ -450,9 +457,10 @@ async function startMeter() {
     };
     dictationButton.classList.add('metered');
     tick();
-  } catch { stopMeter(); } // no meter is fine: the orb keeps breathing on its own
+  } catch { meter.starting = false; stopMeter(); } // no meter is fine: the orb keeps breathing on its own
 }
 function stopMeter() {
+  meter.gen++;
   cancelAnimationFrame(meter.raf);
   meter.stream?.getTracks().forEach((t) => t.stop());
   meter.ctx?.close().catch(() => {});
