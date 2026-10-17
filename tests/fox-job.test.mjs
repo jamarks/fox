@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { parseDays, parseAdd } from '../bin/fox-job.mjs';
+import { parseDays, parseAdd, defaultTz } from '../bin/fox-job.mjs';
 import { withFoxBlock, ensureFoxNotes, foxNotes } from '../notes.mjs';
 const run = promisify(execFile);
 const cli = new URL('../bin/fox-job.mjs', import.meta.url).pathname;
@@ -17,6 +17,12 @@ test('days read the way people write them', () => {
   assert.deepEqual(parseDays('mon,thu'), [1, 4]);
   assert.deepEqual(parseDays('all'), [1, 2, 3, 4, 5, 6, 7]);
   assert.throws(() => parseDays('monday-someday'), /Unknown days/);
+});
+
+test('the default time zone comes from the environment, then fox\'s server config', () => {
+  assert.equal(defaultTz({ FOX_DEFAULT_TZ: 'Europe/Berlin' }, () => ''), 'Europe/Berlin');
+  assert.equal(defaultTz({}, () => 'PORT=4848\nFOX_DEFAULT_TZ=America/Argentina/Buenos_Aires\n'), 'America/Argentina/Buenos_Aires');
+  assert.equal(defaultTz({}, () => { throw new Error('no file'); }), Intl.DateTimeFormat().resolvedOptions().timeZone);
 });
 
 test('add options become the same definition the panel makes', () => {

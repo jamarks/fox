@@ -2,12 +2,20 @@
 // fox-job: manage fox's jobs from a terminal (fx uses it too). Same store and validation as the panel, so a job
 // made here shows up in fox's sidebar at once. See jobs.mjs and schedule.mjs.
 import { join, resolve, relative, isAbsolute } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createJobStore } from '../jobs.mjs';
 import { describeSchedule } from '../schedule.mjs';
 
 const stateDir = process.env.FOX_STATE_DIR || join(homedir(), '.config', 'fox');
 const store = createJobStore({ stateDir });
+// Your time zone: FOX_DEFAULT_TZ, else the one fox's server config sets (an SSH shell does not carry fox's
+// environment), else this machine's.
+export function defaultTz(env = process.env, readEnvFile = () => readFileSync('/etc/fox/fox.env', 'utf8')) {
+  if (env.FOX_DEFAULT_TZ) return env.FOX_DEFAULT_TZ;
+  try { const m = readEnvFile().match(/^FOX_DEFAULT_TZ=(.+)$/m); if (m) return m[1].trim(); } catch {}
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
 const DAYS = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 7 };
 const USAGE = `fox-job: scripts on a schedule, shown in fox
 
@@ -35,7 +43,7 @@ export function parseDays(text = 'all') {
   return [...out].sort();
 }
 
-export function parseAdd(argv, { cwd = process.cwd(), tz = process.env.FOX_DEFAULT_TZ || Intl.DateTimeFormat().resolvedOptions().timeZone } = {}) {
+export function parseAdd(argv, { cwd = process.cwd(), tz = defaultTz() } = {}) {
   const [name, ...rest] = argv;
   const dash = rest.indexOf('--');
   const opts = dash >= 0 ? rest.slice(0, dash) : rest;
@@ -59,7 +67,8 @@ export function parseAdd(argv, { cwd = process.cwd(), tz = process.env.FOX_DEFAU
   };
 }
 
-const when = (ms) => ms ? new Date(ms).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-';
+// Times in the job's own zone, the one its schedule is written in.
+const when = (ms, tz) => ms ? new Date(ms).toLocaleString('en-GB', { timeZone: tz, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-';
 async function byName(name) {
   const job = (await store.list()).find((j) => j.name === name);
   if (!job) throw new Error(`No job named ${name}. fox-job list shows them.`);
@@ -72,7 +81,7 @@ async function main(argv) {
   if (cmd === 'list') {
     const jobs = await store.overview();
     if (!jobs.length) return console.log('No jobs yet.');
-    for (const j of jobs) console.log(`${j.name}\t${j.enabled ? describeSchedule(j.schedule) : 'paused'}\tnext ${j.enabled ? when(j.nextRun) : '-'}\tlast ${j.lastRun ? `${j.lastRun.status}${j.lastRun.summary ? ': ' + j.lastRun.summary : ''}` : 'never'}\t${j.cwd}/${j.script}`);
+    for (const j of jobs) console.log(`${j.name}\t${j.enabled ? describeSchedule(j.schedule) : 'paused'}\tnext ${j.enabled ? when(j.nextRun, j.tz) : '-'}\tlast ${j.lastRun ? `${j.lastRun.status}${j.lastRun.summary ? ': ' + j.lastRun.summary : ''}` : 'never'}\t${j.cwd}/${j.script}`);
     return;
   }
   if (cmd === 'add') {
@@ -80,7 +89,7 @@ async function main(argv) {
     if (def.timeoutMin === undefined) delete def.timeoutMin;
     const job = await store.create(def);
     const [o] = (await store.overview()).filter((j) => j.id === job.id);
-    return console.log(`Created ${job.name}: ${describeSchedule(job.schedule)} (${job.tz})${job.enabled ? `, next ${when(o?.nextRun)}` : ', paused'}.`);
+    return console.log(`Created ${job.name}: ${describeSchedule(job.schedule)} (${job.tz})${job.enabled ? `, next ${when(o?.nextRun, job.tz)}` : ', paused'}.`);
   }
   const job = await byName(rest[0]);
   if (cmd === 'run') { await store.trigger(job.id); return console.log(`${job.name} will start within a few seconds (after any job already running).`); }
@@ -89,7 +98,7 @@ async function main(argv) {
   if (cmd === 'runs') {
     const runs = await store.runs(job.id, 20);
     if (!runs.length) return console.log('No runs yet.');
-    for (const r of runs) console.log(`${r.id}\t${when(r.startedAt)}\t${r.status}\t${r.summary ?? ''}`);
+    for (const r of runs) console.log(`${r.id}\t${when(r.startedAt, job.tz)}\t${r.status}\t${r.summary ?? ''}`);
     return;
   }
   if (cmd === 'log') {
