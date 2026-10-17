@@ -74,6 +74,7 @@ To offer another one, add an entry to `tools.mjs`.
 - **Dictation**: in Chrome, tap the mic by the terminal tabs (or hold ⌥D) and speak. The mic turns into an orange orb whose rings follow your voice, and a pill over the terminal shows the words as they are heard; when you stop, the text lands in fx's input for you to edit. Enter while dictating sends it right away, Esc discards it. Recognition is Chrome's (it may use its online service); fox stores no audio. On a phone, open fox over HTTPS for the mic.
 - **Drop files**: drag images or files onto the terminal to attach them to your next message.
 - **Search everything**: ⌥Space searches names and messages across all sessions.
+- **Metrics**: the tiny bar-chart icon in the sidebar footer opens rolling 7- and 30-day comparisons with the preceding equal-length period: sessions created, user messages and completed turns. Includes archived sessions and subagents in locally retained history; no lifetime cost or token totals are assigned to a period.
 - **Tools for fx**: chips in the new-session panel add MCP servers to fx in one click.
 - **Archive and rename** without touching fx's files.
 - **Git at a glance**: repo, branch and uncommitted files per project.
