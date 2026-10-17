@@ -49,13 +49,35 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
       if (error.code !== 'ENOENT') throw new Error(`Cannot load Fox passkey: ${error.message}`);
   }}
   const pending = new Map(), sessions = new Map(), sockets = new Map();
+  // Signed-in sessions survive a restart (a deploy must not sign you out). Only SHA-256 hashes of the cookie
+  // tokens are stored, with their expiry, bound to the passkey that created them: replacing the passkey
+  // (recovery) drops every old session.
+  const sessionsFile = join(stateDir, 'sessions.json');
+  if (!disabled && credential) {
+    try {
+      const saved = JSON.parse(await readFile(sessionsFile, 'utf8'));
+      if (saved.credential === credential.id) for (const [key, until] of Object.entries(saved.sessions ?? {})) if (/^[0-9a-f]{64}$/.test(key) && Number.isSafeInteger(until) && until > Date.now()) sessions.set(key, until);
+    } catch {}
+  }
+  let persisting = Promise.resolve();
+  const persistSessions = () => {
+    if (disabled) return persisting;
+    const snapshot = JSON.stringify({ credential: credential?.id ?? null, sessions: Object.fromEntries([...sessions].filter(([, until]) => until > Date.now())) });
+    persisting = persisting.then(async () => {
+      await mkdir(stateDir, { recursive: true, mode: 0o700 });
+      const tmp = `${sessionsFile}.${nonce()}.tmp`;
+      await writeFile(tmp, snapshot, { mode: 0o600, flag: 'wx' });
+      await rename(tmp, sessionsFile);
+    }).catch((error) => console.error(`Cannot save fox sessions: ${error.message}`));
+    return persisting;
+  };
   const active = (req) => {
     if (disabled) return true;
     if (!accepts(req)) return false;
     const key = digest(cookieToken(req));
     const session = sessions.get(key);
     if (!session) return false;
-    if (session < Date.now()) { sessions.delete(key); for (const ws of sockets.get(key) ?? []) ws.close(4001, 'session expired'); sockets.delete(key); return false; }
+    if (session < Date.now()) { sessions.delete(key); for (const ws of sockets.get(key) ?? []) ws.close(4001, 'session expired'); sockets.delete(key); persistSessions(); return false; }
     return true;
   };
   const track = (req, ws) => {
@@ -78,8 +100,10 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
     const token = nonce();
     const key = digest(token);
     sessions.set(key, Date.now() + ttl);
+    persistSessions();
     const expiry = setTimeout(() => {
       sessions.delete(key);
+      persistSessions();
       for (const ws of sockets.get(key) ?? []) ws.close(4001, 'session expired');
       sockets.delete(key);
     }, ttl);
@@ -95,6 +119,7 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
     if (path === '/api/auth/logout') {
       const key = digest(cookieToken(req));
       sessions.delete(key);
+      await persistSessions();
       for (const ws of sockets.get(key) ?? []) ws.close(4001, 'signed out');
       sockets.delete(key);
       return json(res, 200, { ok: true }, { 'set-cookie': `fox_session=; HttpOnly; ${remote ? 'Secure; ' : ''}SameSite=Strict; Path=/; Max-Age=0` });

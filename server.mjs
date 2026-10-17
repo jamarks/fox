@@ -27,7 +27,8 @@ const PUBLIC = join(__dirname, 'public');
 const SESSIONS_DIR = join(homedir(), '.fx', 'sessions');
 const PORT = Number(process.env.PORT ?? 4848);
 const FX_BIN = process.env.FX_BIN ?? join(homedir(), '.local', 'bin', 'fx');
-const STATE_DIR = join(homedir(), '.config', 'fox');
+// FOX_STATE_DIR lets a second fox (a test instance on the same machine) keep its own passkey, sessions and settings.
+const STATE_DIR = process.env.FOX_STATE_DIR || join(homedir(), '.config', 'fox');
 const DROP_DIR = join(STATE_DIR, 'drops');
 const DROP_LIMIT = 25 * 1024 * 1024;
 const STATE_FILE = join(STATE_DIR, 'state.json');

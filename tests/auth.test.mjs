@@ -23,7 +23,7 @@ const freePort = () => new Promise((resolve) => {
 });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-test('local passkey gates HTTP and WebSocket, verifies signatures, survives restart and revokes on logout', async () => {
+test('local passkey gates HTTP and WebSocket, verifies signatures, keeps sessions across restarts and revokes on logout', async () => {
   const home = await mkdtemp(join(tmpdir(), 'fox-auth-'));
   const sessionDir = join(home, '.fx', 'sessions', 'sample');
   await mkdir(sessionDir, { recursive: true });
@@ -95,6 +95,17 @@ test('local passkey gates HTTP and WebSocket, verifies signatures, survives rest
     await launch();
     assert.equal((await (await fetch(base + '/api/auth/status')).json()).registered, true);
     assert.equal((await post('/api/auth/register/options', {})).status, 403);
+    // A restart (a deploy) keeps you signed in; signing out is still final.
+    assert.equal((await fetch(base + '/api/overview', { headers: { cookie } })).status, 200);
+    assert.equal(await ws(cookie), 'open');
+    assert.equal((await fetch(base + '/api/overview', { headers: { cookie: cookie2 } })).status, 401);
+    const stored = await readFile(join(home, '.config', 'fox', 'sessions.json'), 'utf8');
+    assert.ok(!stored.includes(cookie.split('=')[1]), 'only hashes of the tokens are stored');
+    // A new passkey (recovery) drops every session made with the old one.
+    await stop();
+    const swapped = JSON.parse(await readFile(join(home, '.config', 'fox', 'passkey.json'), 'utf8'));
+    await writeFile(join(home, '.config', 'fox', 'passkey.json'), JSON.stringify({ ...swapped, id: b64(randomBytes(16)) }));
+    await launch();
     assert.equal((await fetch(base + '/api/overview', { headers: { cookie } })).status, 401);
   } finally {
     if (child && child.exitCode === null) await stop();

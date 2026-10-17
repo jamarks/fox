@@ -7,7 +7,7 @@ import { createEnrollment, parsePublicOrigin } from '../enrollment.mjs';
 try {
   const origin = parsePublicOrigin(process.env.FOX_PUBLIC_ORIGIN);
   if (!origin) throw new Error('Set FOX_PUBLIC_ORIGIN=https://fox.your-domain before running this command');
-  const stateDir = join(homedir(), '.config', 'fox');
+  const stateDir = process.env.FOX_STATE_DIR || join(homedir(), '.config', 'fox');
   try {
     await readFile(join(stateDir, 'passkey.json'));
     throw new Error('A passkey is already registered. Enrollment is only for first setup.');
