@@ -536,7 +536,17 @@ function terminalFontFamily() {
 // open through its preview hostname (fox-5173.example.com, set with FOX_PREVIEW_URL), and only for the
 // ports that have one. Anything else stays plain text.
 let foxConfig = { preview: null, remote: false };
-fetch('/api/config').then((r) => r.ok ? r.json() : null).then((c) => { if (c) foxConfig = c; }).catch(() => {});
+fetch('/api/config').then((r) => r.ok ? r.json() : null).then((c) => { if (c) { foxConfig = c; showVersion(c); } }).catch(() => {});
+// "release 29772b0 · 17 Oct 14:02": the commit running now and when it was made; the full story on hover.
+function showVersion({ version: v, startedAt }) {
+  const el = $('#version');
+  if (!v?.commit) return;
+  const fmt = (ms) => new Date(ms).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  el.textContent = `${v.branch ?? 'fox'} ${v.commit.slice(0, 7)} · ${fmt(Date.parse(v.date))}`;
+  el.title = `${v.subject ?? ''}\ncommitted ${fmt(Date.parse(v.date))}${v.deployedAt ? `\ndeployed ${fmt(Date.parse(v.deployedAt))}` : ''}\nrunning since ${fmt(startedAt)}`;
+  if (v.repo) el.href = `https://github.com/${v.repo}/commit/${v.commit}`; else el.removeAttribute('href');
+  el.classList.remove('hidden');
+}
 const LOCAL_URL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(?::(\d{2,5}))?(\/[^\s'"<>)\]]*)?/g;
 function previewUrl(raw, port, path) {
   if (!foxConfig.remote) return raw.replace('0.0.0.0', 'localhost');
@@ -1863,7 +1873,8 @@ $('#ws-delete-folder').addEventListener('click', () => deleteWorkspace(true));
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#wsdialog').classList.contains('hidden')) closeWorkspaceDialog(); });
 
 // ---------- jobs: a script on a schedule (see jobs.mjs) ----------
-state.jobs = []; state.jobView = null;
+// One line in the sidebar ("Jobs · 3 · next Mon 09:00"); the list and each job open in the center.
+state.jobs = []; state.jobView = null; // null: closed · 'list' · a job id
 const runDur = (r) => r.endedAt ? jobDur(r.endedAt - r.startedAt) : jobDur(Date.now() - r.startedAt);
 function jobDur(ms) { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s} s` : s < 3600 ? `${Math.floor(s / 60)} m ${String(s % 60).padStart(2, '0')} s` : `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} m`; }
 function whenText(ms) {
@@ -1876,32 +1887,57 @@ function whenText(ms) {
   return days === 0 ? `today ${hm}` : days === 1 ? `tomorrow ${hm}` : days === -1 ? `yesterday ${hm}` : `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} ${hm}`;
 }
 const jobState = (j) => j.lastRun?.status === 'running' ? 'running' : !j.enabled ? 'paused' : j.lastRun?.status ?? 'none';
+const BAD = ['failed', 'timeout', 'interrupted'];
+const linkChips = (links = []) => links.filter((l) => /^https?:\/\//.test(l.url)).map((l) => `<a class="run-link" href="${esc(l.url)}" target="_blank" rel="noopener" data-link>${esc(l.label)}</a>`).join('');
 async function loadJobs() {
   try { state.jobs = await (await fetch('/api/jobs')).json(); } catch { return; }
-  renderJobs();
-  if (state.jobView) renderJobView();
+  renderJobsEntry();
+  if (state.jobView === 'list') renderJobList();
+  else if (state.jobView) renderJobView();
 }
-function renderJobs() {
-  const list = $('#jobs-list');
-  if (!state.jobs.length) { list.innerHTML = '<div class="jobs-empty">A script on a schedule. + to make one.</div>'; return; }
-  list.innerHTML = state.jobs.map((j) => {
-    const st = jobState(j);
-    const right = st === 'running' ? `<span class="jnext running">running ${runDur(j.lastRun)}</span>` : !j.enabled ? '<span class="jnext">paused</span>' : `<span class="jnext">${esc(whenText(j.nextRun))}</span>`;
-    return `<div class="job-row ${state.jobView === j.id ? 'active' : ''}" data-job="${j.id}" role="button" tabindex="0"><span class="jdot ${st}" title="${esc(st === 'none' ? 'never ran' : st)}"></span><span class="jname">${esc(j.name)}</span>${right}<span class="jwhen">${esc(j.scheduleText)}</span></div>`;
+function renderJobsEntry() {
+  const jobs = state.jobs, btn = $('#jobs-entry');
+  // The dot says what needs a look: one running, else one whose last run failed, else all fine.
+  const worst = jobs.some((j) => jobState(j) === 'running') ? 'running' : jobs.some((j) => BAD.includes(jobState(j))) ? 'failed' : jobs.some((j) => jobState(j) === 'ok') ? 'ok' : 'none';
+  const next = jobs.filter((j) => j.enabled && j.nextRun).map((j) => j.nextRun).sort((a, b) => a - b)[0];
+  btn.classList.toggle('active', Boolean(state.jobView));
+  btn.innerHTML = jobs.length
+    ? `<span class="jdot ${worst}"></span><span class="jtitle">Jobs</span><span>${jobs.length}</span><span class="jnext">${worst === 'running' ? 'running' : next ? 'next ' + esc(whenText(next)) : ''}</span>`
+    : '<span class="jdot none"></span><span class="jtitle">Jobs</span><span class="jnext">scripts on a schedule</span>';
+}
+function renderJobList() {
+  const box = $('#job-list');
+  if (!state.jobs.length) { box.innerHTML = '<div class="jobs-none">No jobs yet. A job is a script on a schedule: New job to make one, or ask fx.</div>'; return; }
+  box.innerHTML = state.jobs.map((j) => {
+    const st = jobState(j), r = j.lastRun;
+    const right = st === 'running' ? `<span class="jnext running">running ${runDur(r)}</span>` : !j.enabled ? '<span class="jnext">paused</span>' : `<span class="jnext">${esc(whenText(j.nextRun))}</span>`;
+    const last = r ? `<div class="jlast ${BAD.includes(r.status) ? 'bad' : ''}"><span>${esc(whenText(r.startedAt))} · ${esc(r.summary ?? r.status)}</span>${linkChips(r.links)}</div>` : '<div class="jlast"><span>never ran</span></div>';
+    return `<div class="jl-row" data-job="${j.id}" role="listitem"><span class="jdot ${st}"></span><span class="jname">${esc(j.name)}</span><span class="jwhen">${esc(j.scheduleText)}</span>${right}${last}</div>`;
   }).join('');
 }
-$('#jobs-list').addEventListener('click', (e) => { const row = e.target.closest('[data-job]'); if (row) openJob(row.dataset.job); });
-function openJob(id) {
-  state.jobView = id; state.openRun = null;
+$('#jobs-entry').addEventListener('click', () => (state.jobView ? closeJob() : openJobs()));
+$('#job-list').addEventListener('click', (e) => { if (e.target.closest('[data-link]')) return; const row = e.target.closest('[data-job]'); if (row) openJob(row.dataset.job); });
+function showJobView(mode) {
   $('#job-view').classList.remove('hidden');
-  renderJobs(); renderJobView();
+  $('#job-view').dataset.mode = mode;
   if (mobileLayout.matches) showMobileView('terminal');
 }
-function closeJob() { state.jobView = null; $('#job-view').classList.add('hidden'); renderJobs(); }
+function openJobs() {
+  state.jobView = 'list'; state.openRun = null;
+  $('#job-name').textContent = 'Jobs';
+  showJobView('list'); renderJobsEntry(); renderJobList();
+}
+function openJob(id) {
+  state.jobView = id; state.openRun = null;
+  showJobView('detail'); renderJobsEntry(); renderJobView();
+}
+function closeJob() { state.jobView = null; $('#job-view').classList.add('hidden'); renderJobsEntry(); }
 $('#job-close').addEventListener('click', closeJob);
+$('#job-back').addEventListener('click', openJobs);
+$('#job-new').addEventListener('click', () => openJobDialog());
 async function renderJobView() {
   const j = state.jobs.find((x) => x.id === state.jobView);
-  if (!j) return closeJob();
+  if (!j) return openJobs();
   $('#job-name').textContent = j.name;
   $('#job-when').textContent = j.enabled ? j.scheduleText : `${j.scheduleText} · paused`;
   $('#job-pause').textContent = j.enabled ? 'Pause' : 'Resume';
@@ -1910,17 +1946,19 @@ async function renderJobView() {
   if (state.jobView !== j.id) return;
   const box = $('#job-runs');
   if (!runs.length) { box.innerHTML = '<div class="jobs-none">No runs yet. Run now to try it.</div>'; return; }
-  const bad = (r) => ['failed', 'timeout', 'interrupted'].includes(r.status);
-  box.innerHTML = runs.map((r) => `<div class="run-row" data-run="${r.id}" role="listitem"><span class="jdot ${r.status}" title="${esc(r.status)}"></span><span class="rwhen">${esc(whenText(r.startedAt))}${r.reason === 'manual' ? ' · now' : ''}</span><span class="rsum ${bad(r) ? 'bad' : r.summary ? '' : 'quiet'}">${esc(r.summary ?? (r.status === 'running' ? 'running…' : r.status))}</span><span class="rdur">${runDur(r)}</span></div>${state.openRun === r.id ? '<div class="run-detail" id="run-detail"></div>' : ''}`).join('');
+  box.innerHTML = runs.map((r) => `<div class="run-row" data-run="${r.id}" role="listitem"><span class="jdot ${r.status}" title="${esc(r.status)}"></span><span class="rwhen">${esc(whenText(r.startedAt))}${r.reason === 'manual' ? ' · now' : ''}</span><span class="rsum ${BAD.includes(r.status) ? 'bad' : r.summary ? '' : 'quiet'}">${esc(r.summary ?? (r.status === 'running' ? 'running…' : r.status))}</span><span class="rlinks">${linkChips(r.links)}</span><span class="rdur">${runDur(r)}</span></div>${state.openRun === r.id ? '<div class="run-detail" id="run-detail"></div>' : ''}`).join('');
   if (state.openRun) showRunDetail(j.id, runs.find((r) => r.id === state.openRun));
 }
+// Logs are plain text; web addresses in them become links (escaped first, so nothing else turns into HTML).
+const linkify = (text) => esc(text).replace(/https?:\/\/[^\s<>"'`)]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
 async function showRunDetail(jobId, run) {
   const box = $('#run-detail'); if (!box || !run) return;
   const files = (run.outputs ?? []).map((o) => `<a href="/api/jobs/${jobId}/runs/${run.id}/files/${encodeURIComponent(o.name)}" target="_blank" rel="noopener">${esc(o.name)}</a>`).join('');
   const log = await (await fetch(`/api/jobs/${jobId}/runs/${run.id}/log`)).text().catch(() => '');
-  box.innerHTML = `${files ? `<div class="run-files">${files}</div>` : ''}<pre>${esc(log || '(no output)')}</pre>`;
+  box.innerHTML = `${files ? `<div class="run-files">${files}</div>` : ''}<pre>${log ? linkify(log) : '(no output)'}</pre>`;
 }
 $('#job-runs').addEventListener('click', (e) => {
+  if (e.target.closest('[data-link]') || e.target.closest('.run-detail')) return;
   const row = e.target.closest('[data-run]'); if (!row) return;
   state.openRun = state.openRun === row.dataset.run ? null : row.dataset.run;
   renderJobView();
@@ -1931,7 +1969,6 @@ $('#job-pause').addEventListener('click', async () => {
   await post(`/api/jobs/${j.id}`, { enabled: !j.enabled }, 'PATCH'); loadJobs();
 });
 $('#job-edit').addEventListener('click', () => openJobDialog(state.jobView));
-$('#new-job').addEventListener('click', () => openJobDialog());
 loadJobs();
 setInterval(loadJobs, 5000);
 
@@ -2026,7 +2063,7 @@ $('#jd-delete-no').addEventListener('click', () => $('#jd-delete').classList.add
 $('#jd-delete-yes').addEventListener('click', async () => {
   const r = await fetch(`/api/jobs/${jd.id}`, { method: 'DELETE' });
   if (!r.ok) { $('#jd-error').textContent = (await r.json().catch(() => ({}))).error || 'Could not delete the job.'; return; }
-  closeJobDialog(); closeJob(); loadJobs();
+  closeJobDialog(); openJobs(); loadJobs();
 });
 
 // ---------- memory (servers): how full the machine is, and a way to free it ----------

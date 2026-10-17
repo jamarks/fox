@@ -28,6 +28,20 @@ import { ensureFoxNotes, foxNotes } from './notes.mjs';
 const execFileP = promisify(execFile);
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
+// Which fox is running: the release fox-update deployed (it writes VERSION.json, since a release folder has
+// no .git), else the checkout this runs from.
+const STARTED_AT = Date.now();
+async function readVersion() {
+  try { return JSON.parse(await readFile(join(__dirname, 'VERSION.json'), 'utf8')); } catch {}
+  try {
+    const { stdout } = await execFileP('git', ['-C', __dirname, 'log', '-1', '--format=%H%n%cI%n%s'], { timeout: 3000 });
+    const [commit, date, subject] = stdout.trim().split('\n');
+    const remote = await execFileP('git', ['-C', __dirname, 'remote', 'get-url', 'origin'], { timeout: 3000 }).then((r) => r.stdout.trim()).catch(() => '');
+    const repo = remote.match(/github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?$/)?.[1] ?? null;
+    return { commit, date, subject, repo, branch: null };
+  } catch { return null; }
+}
+const VERSION = readVersion();
 const PUBLIC = join(__dirname, 'public');
 const SESSIONS_DIR = join(homedir(), '.fx', 'sessions');
 const PORT = Number(process.env.PORT ?? 4848);
@@ -616,7 +630,7 @@ async function handlePanelRequest(req, res) {
       } catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
     }
     // What the page needs to know about where fox runs: remote or local, and the dev-server preview hostnames.
-    if (p === '/api/config' && req.method === 'GET') return send(res, 200, { remote: Boolean(process.env.FOX_PUBLIC_ORIGIN), preview: PREVIEW });
+    if (p === '/api/config' && req.method === 'GET') return send(res, 200, { remote: Boolean(process.env.FOX_PUBLIC_ORIGIN), preview: PREVIEW, version: await VERSION, startedAt: STARTED_AT });
     // Workspaces: folders made of GitHub repos (see workspaces.mjs).
     if (p === '/api/repos' && req.method === 'GET') {
       try { return send(res, 200, await repoCatalog.list({ refresh: url.searchParams.get('refresh') === '1' })); }

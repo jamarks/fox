@@ -549,7 +549,6 @@ html, body { overscroll-behavior-y: none; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 
 /* Jobs: sidebar list, job view, editor */
-#jobs-section { border-top: 1px solid var(--border); padding: 4px 0 8px; }
 .jobs-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .job-row { padding: 6px 12px 6px 14px; cursor: pointer; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 8px; align-items: center; }
 .job-row:hover, .job-row.active { background: var(--panel-2); }
@@ -615,3 +614,32 @@ body.metrics-page { display: block; height: auto; min-height: 100%; }
 .metrics-table thead { color: var(--muted); font-size: 11px; }
 .metrics-table th:first-child { text-align: left; }
 .metrics-content > .muted { font-size: 12px; }
+/* Jobs: one line in the sidebar, the list and each job in the center */
+#jobs-entry { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 12px; border-top: 1px solid var(--border); border-radius: 0; text-align: left; color: var(--muted); font-size: 12px; }
+#jobs-entry:hover, #jobs-entry.active { background: var(--panel-2); color: var(--text); }
+#jobs-entry .jtitle { color: var(--text); }
+#jobs-entry .jnext { margin-left: auto; font-family: var(--mono); font-size: 11px; }
+#job-view[data-mode=list] #job-back, #job-view[data-mode=list] #job-run, #job-view[data-mode=list] #job-pause, #job-view[data-mode=list] #job-edit, #job-view[data-mode=list] #job-runs, #job-view[data-mode=list] #job-when, #job-view[data-mode=list] #job-meta { display: none; }
+#job-view[data-mode=detail] #job-new, #job-view[data-mode=detail] #job-list { display: none; }
+#job-back { margin-right: 4px; }
+#job-list { overflow-y: auto; flex: 1; }
+.jl-row { display: grid; grid-template-columns: 10px minmax(0, max-content) minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.jl-row:hover { background: var(--panel-2); }
+.jl-row .jname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jl-row .jwhen, .jl-row .jnext { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+.jl-row .jwhen { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.jl-row .jnext.running { color: var(--warn); }
+.jl-row .jlast { grid-column: 2 / 5; font-size: 12px; color: var(--muted); display: flex; gap: 8px; align-items: center; min-width: 0; }
+.jl-row .jlast span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jl-row .jlast.bad span { color: var(--err); }
+.run-link { flex: none; font-family: var(--mono); font-size: 11px; color: var(--accent); text-decoration: none; border: 1px solid var(--accent); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.run-link:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.run-row .rlinks { display: flex; gap: 6px; }
+.run-row { grid-template-columns: 10px 150px minmax(0, 1fr) auto auto; }
+.run-detail pre a { color: var(--accent); }
+
+/* The running release, above the memory meter */
+.sidebar-footer { flex-wrap: wrap; }
+#version { flex-basis: 100%; font-family: var(--mono); font-size: 11px; color: var(--muted); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#version:hover { color: var(--text); }
+#version.hidden { display: none; }

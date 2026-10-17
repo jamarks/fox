@@ -42,6 +42,9 @@ test('a due job runs once, with its log, summary and output files', async () => 
     console.error('a warning');
     await writeFile(process.env.FOX_JOB_OUTPUT + '/report.md', '# hi\\n');
     console.log('FOX_SUMMARY: wrote report.md');
+    console.log('FOX_LINK: PR #7 https://github.com/o/r/pull/7');
+    console.log('FOX_LINK: https://example.com/report');
+    console.log('FOX_LINK: not a link javascript:alert(1)');
   ` });
   const job = await store.create({ name: 'report', cwd: work, script: 'jobs/report.mjs', schedule: daily('08:00'), tz });
   let clock = Date.parse('2026-10-17T05:59:00Z'); // 07:59 Berlin
@@ -56,6 +59,7 @@ test('a due job runs once, with its log, summary and output files', async () => 
   assert.equal(runs[0].reason, 'schedule');
   assert.equal(runs[0].summary, 'wrote report.md');
   assert.deepEqual(runs[0].outputs, [{ name: 'report.md', size: 5 }]);
+  assert.deepEqual(runs[0].links, [{ label: 'PR #7', url: 'https://github.com/o/r/pull/7' }, { label: 'example.com', url: 'https://example.com/report' }]);
   const log = await store.readLog(job.id, runs[0].id);
   assert.match(log, /gathering data/);
   assert.match(log, /a warning/);

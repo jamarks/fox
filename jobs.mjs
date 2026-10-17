@@ -6,6 +6,7 @@
 //   <stateDir>/jobs/triggers/<id>         "Run now" requests, written by fox, taken by the runner
 //
 // A script prints "FOX_SUMMARY: <one line>" to say what the run did; the last such line is its summary.
+// "FOX_LINK: <label> <https://…>" adds a link to the run (a pull request, a report); up to 5, http(s) only.
 // Times missed while the runner was down are skipped, not caught up in a burst.
 import { readFile, writeFile, mkdir, rename, readdir, rm, stat, open } from 'node:fs/promises';
 import { existsSync, createWriteStream } from 'node:fs';
@@ -215,9 +216,15 @@ export function createRunner({ store, now = () => Date.now(), spawn = nodeSpawn,
     current = { job, run };
     const logStream = createWriteStream(join(dir, 'output.log'), { mode: 0o600 });
     let written = 0, truncated = false, carry = '';
+    run.links = [];
+    const readLine = (line) => {
+      const m = line.match(/^FOX_SUMMARY:\s*(.*)$/); if (m) run.summary = m[1].slice(0, 300);
+      const l = line.match(/^FOX_LINK:\s*(?:(.*?)\s+)?(https?:\/\/\S+)\s*$/);
+      if (l && run.links.length < 5) run.links.push({ label: (l[1] || new URL(l[2]).hostname).slice(0, 60), url: l[2].slice(0, 500) });
+    };
     const take = (chunk) => {
       const text = chunk.toString('utf8');
-      for (const line of (carry + text).split('\n').slice(0, -1)) { const m = line.match(/^FOX_SUMMARY:\s*(.*)$/); if (m) run.summary = m[1].slice(0, 300); }
+      for (const line of (carry + text).split('\n').slice(0, -1)) readLine(line);
       carry = (carry + text).split('\n').pop().slice(-2000);
       if (written >= LOG_LIMIT) { if (!truncated) { truncated = true; logStream.write('\n[fox] output limit reached; the rest is not saved\n'); } return; }
       written += chunk.length; logStream.write(chunk);
@@ -244,7 +251,7 @@ export function createRunner({ store, now = () => Date.now(), spawn = nodeSpawn,
         done(timedOut ? { status: 'timeout', exitCode: code, signal } : { status: code === 0 ? 'ok' : 'failed', exitCode: code, signal });
       });
     });
-    if (carry) { const m = carry.match(/^FOX_SUMMARY:\s*(.*)$/); if (m) run.summary = m[1].slice(0, 300); }
+    if (carry) readLine(carry);
     await new Promise((r) => logStream.end(r));
     Object.assign(run, result, { endedAt: now() });
     delete run.pid;

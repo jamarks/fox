@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // fox-job: manage fox's jobs from a terminal (fx uses it too). Same store and validation as the panel, so a job
-// made here shows up in fox's sidebar at once. See jobs.mjs and schedule.mjs.
+// made here shows up on fox's Jobs page at once. See jobs.mjs and schedule.mjs.
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';

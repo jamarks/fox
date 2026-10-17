@@ -6,7 +6,7 @@ Built from the handoff in `2026-10-16-cloud-only-hetzner.md` (section "Handoff â
 
 A script (`.py`, `.mjs`/`.js`, `.sh`, or any executable) in a folder, usually a workspace, with a schedule. Inside, the script does what it needs, including `fx ask` one or more times; for fox it is always a script. Keep as much as possible deterministic: when there is nothing to do, the script ends without calling fx.
 
-The script prints `FOX_SUMMARY: <one line>` to say what the run did, and writes any report to `$FOX_JOB_OUTPUT`. Every run keeps its log (stdout and stderr), start, end, duration, status and those files; the last 50 runs per job.
+The script prints `FOX_SUMMARY: <one line>` to say what the run did, `FOX_LINK: <label> <url>` for things to open (up to 5, shown as buttons), and writes any report to `$FOX_JOB_OUTPUT`. Every run keeps its log (stdout and stderr), start, end, duration, status and those files; the last 50 runs per job.
 
 ## Schedules (no cron syntax)
 

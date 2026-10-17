@@ -38,7 +38,7 @@ export function foxNotes({ preview = null } = {}) {
 ${preview ? `- The user is not on this machine: give them ${preview.url.replace('{port}', '<port>')} (for example ${example}), never localhost. Those links are private to them.` : '- The user is on this machine: give them the `http://localhost:<port>` link.'}
 
 ### Scheduled jobs
-fox runs scripts on a schedule on this machine ("jobs"); the user sees them in fox's sidebar. Manage them with the \`fox-job\` command:
+fox runs scripts on a schedule on this machine ("jobs"); the user sees them on fox's Jobs page. Manage them with the \`fox-job\` command:
 - \`fox-job list\` · \`fox-job runs <name>\` · \`fox-job log <name> [<run>]\`
 - \`fox-job add <name> --script <path> [--cwd <dir>] (--every <hours> --from HH:MM --to HH:MM | --daily HH:MM | --once YYYY-MM-DD HH:MM) [--days mon-fri|sat,sun|mon,thu|all] [--tz Area/City] [--timeout <minutes>] [--paused] [-- <script arguments>]\`
 - \`fox-job run <name>\` (now) · \`fox-job pause|resume <name>\` · \`fox-job remove <name>\`
