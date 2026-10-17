@@ -417,7 +417,7 @@ async function listTools() {
 }
 
 // ---------- HTTP ----------
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.map': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.map': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2' };
 
 function readBody(req) {
   return new Promise((resolve) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => resolve(b)); });
@@ -719,12 +719,14 @@ async function handleView(req, res, path) {
   return send(res, 404, 'not found', 'text/plain; charset=utf-8');
 }
 
+// The icon and app manifest, served before sign-in too: a phone adding fox to its home screen fetches them on its own.
+const OPEN_ASSETS = new Set(['/fox.svg', '/icon-180.png', '/icon-512.png', '/manifest.webmanifest']);
 const server = http.createServer(async (req, res) => {
   if (process.env.FOX_SHARE_PORT !== undefined && !localHost(req.headers.host)) return send(res, 403, { error: 'use the paired gateway for remote access' });
   const path = new URL(req.url, 'http://localhost').pathname;
   if (!auth.accepts(req) && process.env.FOX_AUTH_DISABLED !== '1') {
     if (!process.env.FOX_PUBLIC_ORIGIN && localHost(req.headers.host) && req.method === 'GET' &&
-        (path === '/' || path === '/login.html' || path === '/login.css' || path === '/login.js' || path === '/fox.svg')) {
+        (path === '/' || path === '/login.html' || path === '/login.css' || path === '/login.js' || OPEN_ASSETS.has(path))) {
       return serveStatic(res, PUBLIC, path === '/' ? '/login.html' : path);
     }
     return send(res, 403, { error: 'host not allowed' });
@@ -736,11 +738,11 @@ const server = http.createServer(async (req, res) => {
     if (path.startsWith('/api/auth/')) return auth.handle(req, res);
     const enrollment = Boolean(process.env.FOX_PUBLIC_ORIGIN && !auth.registered);
     if (req.method === 'GET' && enrollment &&
-        (path === '/' || path === '/enroll.html' || path === '/enroll.css' || path === '/enroll.js' || path === '/fox.svg')) {
+        (path === '/' || path === '/enroll.html' || path === '/enroll.css' || path === '/enroll.js' || OPEN_ASSETS.has(path))) {
       return serveStatic(res, PUBLIC, path === '/' ? '/enroll.html' : path);
     }
     if (req.method === 'GET' && !enrollment &&
-        (path === '/' || path === '/login.html' || path === '/login.css' || path === '/login.js' || path === '/fox.svg')) {
+        (path === '/' || path === '/login.html' || path === '/login.css' || path === '/login.js' || OPEN_ASSETS.has(path))) {
       return serveStatic(res, PUBLIC, path === '/' ? '/login.html' : path);
     }
     return send(res, 401, { error: 'passkey required' });
