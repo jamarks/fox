@@ -180,7 +180,12 @@ Detectar el modo con `FOX_PUBLIC_ORIGIN`, o con `process.platform !== 'darwin'` 
 - **Decidido por el dueño:** fox se desarrolla desde fox, así que el token incluye `jamarks/fox` con escritura, y lo que llegue a `release` se despliega solo. GitHub no distingue al dueño de su token, así que no hay regla que deje avanzar `release` al dueño y no al agente. Lo que sí hay: un ruleset que bloquea force push y borrado de `main` y `release`, más los tests y el rollback automático del paso 10. Si en algún momento hay más colaboradores, revisar con commits firmados verificados por `fox-update`.
 - Los tokens vencen (30 a 90 días). Se renuevan editando o regenerando el token en GitHub y volviendo a cargarlo con el mismo comando.
 
-### 12. Recuperar un passkey perdido
+### 12. Memoria: sesiones que duermen y herramientas sin npx
+Medido en el CX23 (4 GB): fx ocupa unos 15 MB por sesión; sus herramientas Browser (Playwright MCP) y DevTools (chrome-devtools-mcp) ocupan el resto, unos 500 MB por sesión lanzadas con `npx`, aunque la sesión solo espere.
+- **Sesiones que duermen:** `FOX_IDLE_SLEEP_MIN=30` en `/etc/fox/fox.env`. fox cierra la sesión de tmux de una terminal que espera input, que nadie tiene abierta y lleva 30 minutos sin actividad. La conversación queda en disco, y al abrirla fox la retoma con `fx session resume` (unos segundos). Nunca duerme una sesión trabajando, una que pide input ni una abierta en pantalla. Lo que fx haya dejado corriendo en primer plano en esa terminal se detiene; los dev servers en segundo plano siguen.
+- **Herramientas sin npx:** instaladas en `~/.local/lib/fox-tools` (usuario `fox`), y la config de MCP de fx las lanza con `/usr/bin/node <ruta del cli>`. Eso elimina los dos procesos `npm exec` (unos 80 MB cada uno). Una sesión nueva pasó de unos 500 MB a 322 MB. Ya no se actualizan solas como con `npx …@latest`: `cd ~/.local/lib/fox-tools && npm update` cada tanto. Copia de la config anterior: `<fx mcp path>.bak-npx`.
+
+### 13. Recuperar un passkey perdido
 `bin/fox-enroll.mjs` se niega a emitir un código si ya existe `~/.config/fox/passkey.json`, así que no alcanza con volver a correrlo. Procedimiento manual por SSH desde `admin`:
 1. `sudo systemctl stop fox`.
 2. Respaldar `/home/fox/.config/fox/passkey.json` en un lugar protegido y sacarlo de la ruta activa.
