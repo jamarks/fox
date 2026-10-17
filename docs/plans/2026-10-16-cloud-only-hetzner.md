@@ -168,7 +168,7 @@ Detectar el modo con `FOX_PUBLIC_ORIGIN`, o con `process.platform !== 'darwin'` 
 
 **Límites, a dejar claros:** el rollback automático detecta lo que miden los tests y el chequeo de salud (que fox arranque y sirva la página). Un bug de la UI con fox arrancando bien no lo detecta: para eso está `sudo fox-update --rollback`, que vuelve a `previous` a mano.
 
-**Ciclo con fx:** si fox se desarrolla con fx desde este mismo servidor, fx trabaja sobre un clon en el HOME de `fox`, hace push a `main`, y el dueño revisa y avanza `release`. El agente nunca toca `/opt/fox` ni puede avanzar `release` solo: el token de GitHub de `fox` no debe tener permiso de push a `release` (proteger la rama).
+**Ciclo con fx:** si fox se desarrolla con fx desde este mismo servidor, fx trabaja sobre un clon en el HOME de `fox` (`~/workspaces/fox/fox`), hace push a `main`, y `release` se avanza solo cuando el dueño lo pide. El agente nunca toca `/opt/fox`. **Decisión vigente (paso 11):** el token de `fox` tiene escritura en `jamarks/fox`, así que técnicamente puede avanzar `release`; GitHub no distingue al dueño de su token. Lo que protege es la regla de no promover sin pedido del dueño, más el ruleset (sin force push ni borrado), los tests y el rollback, que no detectan todos los bugs funcionales.
 
 ### 11. GitHub: un token por dueño
 **Decidido y hecho en el VPS.** Un token fine-grained por dueño (usuario u org), cada uno con solo los repos elegidos y **Contents** + **Pull requests** en Read and write. Un token fine-grained no puede tener dos dueños.
@@ -196,13 +196,10 @@ Medido en el CX23 (4 GB): fx ocupa unos 15 MB por sesión; sus herramientas Brow
 
 No automatizar el borrado de credenciales. Restaurar un backup que todavía contiene `passkey.json` devuelve la credencial vieja; no es una forma de recuperar el acceso.
 
-## Pendiente de verificar
+## Estado de las verificaciones (actualizado 2026-10-17)
 
-- Que fx funcione en Linux (paso 2).
-- Que cloudflared preserve Host y Origin (paso 4).
-- Que el WebSocket de la terminal funcione detrás de Access y cómo se comporta cuando vence la sesión (paso 5).
-- Que tmux como servicio de usuario aparte funcione con fox y sobreviva a un restart de fox (paso 3).
-- Que el script de actualización y el rollback funcionen de punta a punta, incluido el primer despliegue y un reinicio del VPS a mitad de una actualización (paso 10).
+- **Verificado:** fx funciona en Linux x64 (paso 2). cloudflared preserva Host y Origin: fox rechaza otro Host con 403 y el login funciona (paso 4). El WebSocket de la terminal funciona detrás de Access, desde la Mac y el teléfono (paso 5). tmux como servicio de usuario aparte sobrevive a `systemctl restart fox`: probado con una sesión de prueba y con sesiones reales en cada despliegue (paso 3). El primer despliegue y varios despliegues automáticos desde `release` funcionaron, con tests en el servidor y chequeo de salud (paso 10).
+- **Sin probar:** el rollback automático con una versión que no arranca, un reinicio del VPS a mitad de una actualización, y qué pasa con la terminal cuando vence la sesión de Access (30 días).
 
 ## Seguridad: no negociable
 
@@ -211,3 +208,96 @@ No automatizar el borrado de credenciales. Restaurar un backup que todavía cont
 - No publicar el hostname ni compartir la URL hasta que pase toda la verificación del paso 7. La URL no es un secreto: la seguridad la dan Access y el passkey.
 - No dejar secretos en el repo, en el chat, en la unidad systemd ni en el cloud-init. El Gateway key vive en la config de fx.
 - Este fox es de una sola persona: no darle a nadie más acceso a este fox, a este Access ni al usuario `fox`.
+
+## Anexo — revisión de avance y sugerencia de continuidad (2026-10-17)
+
+Esta revisión se agrega sin reescribir las decisiones anteriores. Es una **evaluación y propuesta**, no una autorización para desplegar, reiniciar servicios, cambiar permisos o avanzar `release`. Referencia del checkout revisado: `45a4404`.
+
+### Dónde estamos y qué evidencia tenemos
+
+La base ya no es solamente un diseño: hay infraestructura activa y funcionalidades implementadas para trabajar en la nube. La etapa siguiente debería ser cerrar confiabilidad y fricciones del uso real, no volver a diseñar el hosting.
+
+| Área | Estado y alcance de la evidencia |
+| --- | --- |
+| Infraestructura | `systemctl is-active fox cloudflared fox-update.timer` devolvió tres `active` (salida 0). Existe `/usr/local/sbin/fox-update`. Esto no demuestra que el updater, el rollback o el arranque después de un reboot funcionen de punta a punta. |
+| Passkey remoto | Implementado; los tests cubren código de alta, origen exacto, cookie segura y autenticación HTTP/WebSocket. No reemplazan la prueba real detrás de Access. |
+| Previews | Implementados. Este plan ya registra Vite 8 y hot reload verificados por el túnel. Next.js sigue pendiente de prueba. |
+| Workspaces | Implementados en `47e725d` y refinados en `ed5f146`: varios repos por carpeta, espacios vacíos, edición, reintentos y borrado con comprobaciones. Ver `2026-10-17-espacios-design.md`. Esto resuelve el caso principal de «nuevo proyecto» del paso 8.4; no equivale a aceptar cualquier URL de git. |
+| Inicio del trabajo | Una sola pantalla para crear espacios o usar carpetas existentes. No hace falta un selector nativo en Linux para cubrir el flujo básico. |
+| Persistencia del login | `23658ed` conserva la sesión de autenticación del browser entre reinicios de fox e incorpora `FOX_STATE_DIR` para instancias separadas. No significa que los procesos de fx sobrevivan a reiniciar el VPS, ni prueba todavía la recuperación propuesta en el paso 8.7. |
+| Tests del checkout | En la revisión de esta sesión, `npm test` terminó con salida 0: 42 tests aprobados, 0 fallidos, 0 omitidos. Es evidencia automatizada del checkout, no una certificación de la infraestructura desplegada. |
+
+No se verificaron en esta revisión los permisos reales del servidor, firewall, bloqueo de metadata, backups, restauración, alertas ni fallos inducidos del despliegue. Deben quedar como **sin confirmar**, no como hechos ni como ausentes.
+
+### Crítica al plan actual
+
+1. **Mezcla diseño, instrucciones de instalación, bitácora y pendientes.** «Pendiente de verificar» quedó desfasado respecto de lo que el propio documento registra como usado o probado. Conviene mantener una tabla de estado con evidencia, fecha y próximo paso; distinguir siempre «implementado», «activo», «verificado en producción» y «sin confirmar». No conviene inventar un porcentaje de avance sobre tareas tan distintas.
+2. **Hay una contradicción sobre `release`.** El paso 10 dice que el token del agente no debe poder avanzar esa rama; el paso 11 registra la decisión posterior de aceptar que el mismo token puede hacerlo. Tomar el paso 11 como la decisión vigente, explicitar el riesgo y mantener la promoción como una acción que requiere pedido del dueño. Bloquear force push y borrado no impide promover código defectuoso; los tests y el rollback tampoco garantizan detectar un bug funcional.
+3. **El chequeo de salud es necesario pero insuficiente.** Servir el HTML de login no prueba que funcionen la autenticación, la apertura de terminales ni la reconexión. Sumar pruebas funcionales aisladas y una comprobación manual del recorrido crítico antes de promover; no debilitar el passkey ni crear un bypass de producción para probarlo.
+4. **«Sin nada local» todavía tiene una excepción importante.** Los callbacks de login requieren hoy un túnel SSH manual. El plan propone una ruta de callback, pero no demuestra que el proveedor acepte cambiar el redirect URI ni que el flujo funcione con Access y cookies `SameSite=Strict`. Hace falta una prueba de viabilidad y un diseño acotado antes de implementarlo.
+5. **El aislamiento tiene límites.** Separar el código desplegado y quitar sudo reduce el daño, pero un agente bajo `fox` puede alcanzar repos y credenciales de ese mismo usuario. Access y el passkey protegen la entrada remota; no aíslan entre sí a los agentes ni protegen secretos frente a código ejecutado con su identidad. Mantener tokens mínimos y no presentar el VPS como sandbox de repos no confiables.
+6. **La recuperación está descrita, pero no cerrada con evidencia.** La existencia de servicios activos no prueba rollback ni restauración. Un backup sin prueba de restore no alcanza, y revertir código no revierte necesariamente cambios incompatibles en archivos de estado. Los cambios de formato deben conservar compatibilidad con la versión anterior o tener una estrategia de recuperación explícita.
+7. **El backlog no separa riesgos de mejoras opcionales.** Backups, acceso de rescate y recuperación deben tener prioridad sobre `setup-vps.sh`, un explorador de carpetas o ampliar plataformas. La RAM y los límites deben decidirse con mediciones, no dar por demostrado que cierto tamaño alcanza o no alcanza.
+
+### Cómo seguir — orden sugerido
+
+#### 1. Cerrar la línea de base operativa, sin provocar cortes
+
+- Registrar versión del checkout y versión realmente desplegada por separado; no asumir que coinciden.
+- Revisar con acceso autorizado los puntos de seguridad del paso 7 y registrar resultado, fecha y evidencia sin secretos.
+- Confirmar acceso SSH de rescate, estado de backups y destino de alertas. Si falta backup, acordar una solución y probar una restauración aislada antes de ensayar fallos.
+- Armar una lista única de aceptación, enlazada desde este anexo, con responsable y estado. No hace falta otra ronda de diseño de infraestructura.
+
+**Criterio de cierre:** sabemos qué corre, cómo entrar si fox falla, qué datos se respaldan y qué comprobaciones siguen pendientes.
+
+#### 2. Corregir el caché de modelos — siguiente cambio pequeño sugerido
+
+- Refrescar por antigüedad y/o cambio de proveedores conectados; conservar el último resultado útil si fx o la red fallan.
+- Evitar refrescos simultáneos y restaurar el proveedor original aun ante errores, porque la consulta actual cambia de proveedor para enumerar modelos.
+- Cubrir caché vigente, vencido, proveedor nuevo, fallo y concurrencia con tests deterministas.
+
+**Criterio de cierre:** conectar un proveedor se refleja en el selector sin borrar archivos ni reiniciar fox, y un fallo de refresh no inutiliza el diálogo.
+
+#### 3. Resolver callbacks de login como trabajo separado de seguridad
+
+- Primero reproducir Codex y un MCP con puerto dinámico; comprobar qué redirect URIs acepta cada flujo. No prometer una solución universal basada solo en leer un link de terminal.
+- Si es viable, vincular cada callback a un login iniciado explícitamente por fox: destino loopback y puerto registrado, vencimiento corto, uso único y validación del estado del flujo cuando corresponda.
+- No crear un proxy arbitrario a puertos locales. No registrar códigos, tokens ni URLs completas de callback en logs, historial del panel o mensajes del agente.
+- Probar el regreso desde el proveedor con Access, passkey y cookies reales, además de rechazos de puertos no registrados, callbacks vencidos y repetidos. Si un proveedor no lo permite, documentar la excepción y conservar el túnel SSH como alternativa explícita.
+
+**Criterio de cierre:** el flujo soportado termina desde el browser sin copiar códigos ni callbacks a mano y sin ampliar el acceso a servicios internos.
+
+#### 4. Demostrar recuperación y despliegue seguro
+
+- Probar primero en una instancia aislada con `FOX_STATE_DIR`, puertos y tmux separados. Esa variable por sí sola no aísla todos los recursos: las sesiones de fx y otros servicios compartidos requieren cuidado adicional.
+- Verificar restart de fox sin perder procesos de fx ni login del browser; probar por separado reboot y reanudación de conversaciones, que no conservan los procesos.
+- Ensayar actualización sana, actualización fallida, rollback, alerta y compatibilidad del estado persistido. No introducir un commit roto en `release` de producción como primera prueba.
+- Acordar ventana y acceso de rescate antes de reinicios o pruebas disruptivas en el VPS real. Registrar también la reconexión tras vencer Access y una carga de dos agentes más browser/dev server.
+
+**Criterio de cierre:** hay evidencia reproducible de recuperación, no solo un servicio activo o una página que responde 200.
+
+#### 5. Cerrar documentación y pulido de nube
+
+- Ajustar el README: «Nothing leaves your machine» describe el modo local, no el uso remoto ni el procesamiento por proveedores de modelos.
+- Revisar acciones exclusivas de macOS y ocultarlas o dar alternativas claras; mantener escribir una ruta como opción suficiente antes de construir otro explorador.
+- Probar Next.js y documentar solo los ajustes realmente necesarios.
+- Mantener JWT de Access, instalador VPS, worktrees y nuevas funciones como trabajos separados; no convertirlos en requisitos implícitos para cerrar este hito.
+
+**Sugerencia de foco:** terminar primero la línea de base de recuperación; después sacar el arreglo pequeño de modelos y abordar los callbacks con diseño y pruebas propios. El objetivo del próximo hito debería ser «trabajo diario en la nube con recuperación demostrada», no sumar más superficie de producto.
+
+### Actualización posterior al anexo (2026-10-17, tarde)
+
+El anexo revisó `45a4404`. Desde entonces, en `main` y desplegado desde `release`:
+
+| Cambio | Commit | Verificación |
+| --- | --- | --- |
+| Scroll con el dedo en la terminal desde el teléfono (sin recargar la página) | `e684ba8` | En local, vista de teléfono con eventos táctiles sobre tmux real: vuelve 140 líneas, sale solo del modo copia al final, un toque corto sigue abriendo el teclado. |
+| Reconexión automática de la terminal (código 1006) con espera creciente | `f20aba7` | Corte simulado en local: reconecta y la entrada no se duplica. En producción, 5 de 5 sesiones abrieron al primer clic (antes fallaban de forma intermitente en unos 20 ms, sin llegar al túnel). |
+| Sesiones inactivas que duermen (`FOX_IDLE_SLEEP_MIN=30`) | `9fde941` | En local: duerme la que nadie mira y respeta la abierta en pantalla. En producción, sesiones dormidas visibles en la barra lateral. |
+| Aviso "Waking up…" al despertar una sesión, y círculo gris hueco para las dormidas | `4a99944`, `ead4903` | En local, con un fx que tarda 4 s en arrancar. |
+| Memoria en el pie de la barra lateral, botón "Free memory" y liberación automática desde el 85%, empezando por la sesión usada hace más tiempo | `bf98c38`, `049d9e8` | En producción: medidor visible (53%, verde). La liberación automática no se observó todavía con memoria alta. |
+| Herramientas Browser y DevTools lanzadas sin `npx` (paso 12) | configuración del servidor | Una sesión nueva bajó de unos 500 MB a 322 MB. Las dos herramientas probadas de punta a punta. |
+
+**Seguridad verificada durante la instalación (2026-10-16), no re-verificada desde entonces:** desde afuera solo responde el 22 (80, 443, 4848 y los puertos de preview cerrados); SSH sin root ni contraseñas; `fox` sin sudo y sin escritura en `/opt/fox`; metadata de Hetzner bloqueada para `fox` (root sí llega); credenciales de cloudflared ilegibles para `fox`; sin sesión de Access, todos los hostnames (fox, fox-dev y los 6 previews) redirigen al login de Cloudflare.
+
+**Decisiones del dueño (2026-10-17):** backups y notificaciones al teléfono quedan para más adelante. Los callbacks de login (punto 3 del orden sugerido) son de baja prioridad mientras el túnel SSH manual alcance. No pasar a un servidor más grande: la memoria se resuelve durmiendo sesiones.
