@@ -20,7 +20,7 @@ function setPinned(name, on) {
 // ---------- utils ----------
 const fmtTime = (ms) => (ms ? new Date(ms).toLocaleString('en', { dateStyle: 'short', timeStyle: 'short' }) : '');
 const fmtTokens = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n ?? 0));
-const shortPath = (p) => (p ?? '').replace(/^\/Users\/[^/]+/, '~');
+const shortPath = (p) => (p ?? '').replace(/^\/(?:Users|home)\/[^/]+/, '~'); // macOS and Linux homes
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const briefArgs = (args) => {
   if (!args || typeof args !== 'object') return String(args ?? '');
@@ -517,6 +517,35 @@ function terminalFontFamily() {
   return mobileLayout.matches ? '"Source Code Pro", ui-monospace, "SF Mono", Menlo, monospace' : 'ui-monospace, "SF Mono", Menlo, monospace';
 }
 
+// Links to a dev server fx started (http://localhost:5173/...). Locally they open as they are; on a server they
+// open through its preview hostname (fox-5173.example.com, set with FOX_PREVIEW_URL), and only for the
+// ports that have one. Anything else stays plain text.
+let foxConfig = { preview: null, remote: false };
+fetch('/api/config').then((r) => r.ok ? r.json() : null).then((c) => { if (c) foxConfig = c; }).catch(() => {});
+const LOCAL_URL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(?::(\d{2,5}))?(\/[^\s'"<>)\]]*)?/g;
+function previewUrl(raw, port, path) {
+  if (!foxConfig.remote) return raw.replace('0.0.0.0', 'localhost');
+  const p = foxConfig.preview;
+  if (!p || !port || !p.ports.includes(Number(port))) return null;
+  return p.url.replace('{port}', port) + (path || '/');
+}
+function localServerLinks(term) {
+  return {
+    provideLinks(y, callback) {
+      const line = term.buffer.active.getLine(y - 1);
+      if (!line) return callback(undefined);
+      const text = line.translateToString(true), links = [];
+      for (const m of text.matchAll(LOCAL_URL)) {
+        const url = previewUrl(m[0], m[1], m[2]);
+        if (!url) continue;
+        links.push({ text: m[0], range: { start: { x: m.index + 1, y }, end: { x: m.index + m[0].length, y } },
+          decorations: { underline: true, pointerCursor: true }, activate: () => window.open(url, '_blank', 'noopener') });
+      }
+      callback(links.length ? links : undefined);
+    },
+  };
+}
+
 function attachTab(t, { user = false, activate = true } = {}) {
   if (state.tabs.has(t.name) && !state.tabs.get(t.name).closed) { if (activate) activateTab(t.name); return; }
   // An unpinned terminal is a preview: opening another one replaces it (its fx keeps running in tmux).
@@ -533,6 +562,7 @@ function attachTab(t, { user = false, activate = true } = {}) {
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
+  term.registerLinkProvider(localServerLinks(term));
   term.open(wrap);
   // On phones, a deliberate tap on the terminal opens the software keyboard via xterm's input.
   // Do not focus on tab activation: that would pop up the keyboard just by opening a session.

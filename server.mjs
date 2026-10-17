@@ -48,6 +48,12 @@ async function saveState(st) {
   await writeFile(STATE_FILE, JSON.stringify(st, null, 2));
 }
 const searchSessions = createSearchIndex(SESSIONS_DIR, loadState);
+// Dev-server previews on a server: FOX_PREVIEW_URL=https://fox-{port}.example.com and FOX_PREVIEW_PORTS=3000,5173.
+// Each hostname is routed to 127.0.0.1:<port> by the tunnel and protected by Access (see docs/plans).
+const PREVIEW = (() => {
+  const url = process.env.FOX_PREVIEW_URL, ports = String(process.env.FOX_PREVIEW_PORTS ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0 && n < 65536);
+  return url && /^https:\/\/[^/]*\{port\}[^/]*$/.test(url) && ports.length ? { url, ports } : null;
+})();
 const workspaces = createWorkspaces({ stateDir: STATE_DIR, rootDir: join(homedir(), 'workspaces') });
 const repoCatalog = createRepoCatalog({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
 // The sidebar polls the overview every few seconds; workspace git state is cheap but not free.
@@ -521,6 +527,8 @@ async function handlePanelRequest(req, res) {
       catch (err) { return send(res, 500, { error: String(err.stderr || err.message).trim() }); }
       return send(res, 200, await listTools());
     }
+    // What the page needs to know about where fox runs: remote or local, and the dev-server preview hostnames.
+    if (p === '/api/config' && req.method === 'GET') return send(res, 200, { remote: Boolean(process.env.FOX_PUBLIC_ORIGIN), preview: PREVIEW });
     // Workspaces: folders made of GitHub repos (see workspaces.mjs).
     if (p === '/api/repos' && req.method === 'GET') {
       try { return send(res, 200, await repoCatalog.list({ refresh: url.searchParams.get('refresh') === '1' })); }
