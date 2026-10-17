@@ -643,3 +643,5 @@ body.metrics-page { display: block; height: auto; min-height: 100%; }
 #version { flex-basis: 100%; font-family: var(--mono); font-size: 11px; color: var(--muted); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #version:hover { color: var(--text); }
 #version.hidden { display: none; }
+/* With the sky theme the background is see-through: hide what is behind Jobs instead of covering the stars */
+#terminals:has(#job-view:not(.hidden)) > :not(#job-view) { visibility: hidden; }
