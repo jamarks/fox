@@ -171,7 +171,17 @@ Detectar el modo con `FOX_PUBLIC_ORIGIN`, o con `process.platform !== 'darwin'` 
 
 **Ciclo con fx:** si fox se desarrolla con fx desde este mismo servidor, fx trabaja sobre un clon en el HOME de `fox`, hace push a `main`, y el dueño revisa y avanza `release`. El agente nunca toca `/opt/fox` ni puede avanzar `release` solo: el token de GitHub de `fox` no debe tener permiso de push a `release` (proteger la rama).
 
-### 11. Recuperar un passkey perdido
+### 11. GitHub: un token por dueño
+**Decidido y hecho en el VPS.** Un token fine-grained por dueño (usuario u org), cada uno con solo los repos elegidos y **Contents** + **Pull requests** en Read and write. Un token fine-grained no puede tener dos dueños.
+- `jamarks`: cargado con `gh auth login` (pegar token). Es el que se usa por defecto.
+- Otras orgs (hoy `hiOrchestra`): `~/.local/bin/fox-git-token <org>` pide el token con entrada oculta y lo guarda en `~/.config/fox-git/tokens/<org>` (`0600`, en minúsculas).
+- `~/.local/bin/fox-git-credential` es el credential helper de git (`credential.https://github.com.useHttpPath=true`): elige el token según el dueño que viene en la ruta del repo, sin importar mayúsculas, y si no hay token para ese dueño usa `gh auth git-credential`.
+- `~/.local/bin/gh` envuelve a `/usr/bin/gh`: toma el dueño de `-R`/`--repo` o del remote `origin` y exporta `GH_TOKEN` con el token que corresponde.
+- Identidad de los commits: `Javier Wasserman <45493+jamarks@users.noreply.github.com>`.
+- **Decidido por el dueño:** fox se desarrolla desde fox, así que el token incluye `jamarks/fox` con escritura, y lo que llegue a `release` se despliega solo. GitHub no distingue al dueño de su token, así que no hay regla que deje avanzar `release` al dueño y no al agente. Lo que sí hay: un ruleset que bloquea force push y borrado de `main` y `release`, más los tests y el rollback automático del paso 10. Si en algún momento hay más colaboradores, revisar con commits firmados verificados por `fox-update`.
+- Los tokens vencen (30 a 90 días). Se renuevan editando o regenerando el token en GitHub y volviendo a cargarlo con el mismo comando.
+
+### 12. Recuperar un passkey perdido
 `bin/fox-enroll.mjs` se niega a emitir un código si ya existe `~/.config/fox/passkey.json`, así que no alcanza con volver a correrlo. Procedimiento manual por SSH desde `admin`:
 1. `sudo systemctl stop fox`.
 2. Respaldar `/home/fox/.config/fox/passkey.json` en un lugar protegido y sacarlo de la ruta activa.
