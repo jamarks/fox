@@ -26,6 +26,8 @@ test('add options become the same definition the panel makes', () => {
   assert.deepEqual(parseAdd(['r', '--script', 'a.py', '--daily', '08:00', '--paused'], { cwd: '/w', tz: 'UTC' }).schedule, { kind: 'daily', at: '08:00', days: [1, 2, 3, 4, 5, 6, 7] });
   assert.deepEqual(parseAdd(['r', '--script', 'a.py', '--once', '2026-10-20', '10:00'], { cwd: '/w', tz: 'UTC' }).schedule, { kind: 'once', date: '2026-10-20', at: '10:00' });
   assert.throws(() => parseAdd(['r', '--script', 'a.py'], { cwd: '/w' }), /Say when/);
+  assert.equal(parseAdd(['r', '--script', '/w/jobs/a.py', '--daily', '08:00'], { cwd: '/w', tz: 'UTC' }).script, 'jobs/a.py', 'a full path inside the folder becomes relative');
+  assert.equal(parseAdd(['r', '--script', '/etc/passwd', '--daily', '08:00'], { cwd: '/w', tz: 'UTC' }).script, '/etc/passwd', 'outside stays as given, and the store rejects it');
 });
 
 test('fox-job manages jobs end to end, sharing the panel\'s store', async () => {

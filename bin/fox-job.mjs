@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // fox-job: manage fox's jobs from a terminal (fx uses it too). Same store and validation as the panel, so a job
 // made here shows up in fox's sidebar at once. See jobs.mjs and schedule.mjs.
-import { join, resolve } from 'node:path';
+import { join, resolve, relative, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { createJobStore } from '../jobs.mjs';
 import { describeSchedule } from '../schedule.mjs';
@@ -49,8 +49,12 @@ export function parseAdd(argv, { cwd = process.cwd(), tz = process.env.FOX_DEFAU
   else if (opts.includes('--once')) { const [date, at] = get('--once', 2) ?? []; schedule = { kind: 'once', date, at }; }
   else throw new Error('Say when: --every <hours> --from HH:MM --to HH:MM, --daily HH:MM, or --once YYYY-MM-DD HH:MM');
   if (schedule.kind === 'hours' && schedule.to === '23:59') schedule.to = '23:00';
+  const dir = resolve(cwd, one('--cwd') ?? '.');
+  // The script may be given relative to the folder or as a full path inside it.
+  let script = one('--script');
+  if (script && isAbsolute(script)) { const rel = relative(dir, script); if (rel && !rel.startsWith('..') && !isAbsolute(rel)) script = rel; }
   return {
-    name, script: one('--script'), cwd: resolve(cwd, one('--cwd') ?? '.'), args, schedule,
+    name, script, cwd: dir, args, schedule,
     tz: one('--tz') ?? tz, timeoutMin: one('--timeout') ? Number(one('--timeout')) : undefined, enabled: !opts.includes('--paused'),
   };
 }
