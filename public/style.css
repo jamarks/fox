@@ -645,3 +645,9 @@ body.metrics-page { display: block; height: auto; min-height: 100%; }
 #version.hidden { display: none; }
 /* With the sky theme the background is see-through: hide what is behind Jobs instead of covering the stars */
 #terminals:has(#job-view:not(.hidden)) > :not(#job-view) { visibility: hidden; }
+
+/* Dialogs: the action row wraps on a phone, and over the see-through sky theme the sheet is solid */
+.ns-actions { flex-wrap: wrap; }
+.ns-actions button.linkish { margin-right: auto; }
+body.night #wsdialog, body.night #jobdialog { background: rgba(3, 5, 12, .7); }
+body.night #wsdialog .sheet, body.night #jobdialog .sheet { background: #0d101c; }

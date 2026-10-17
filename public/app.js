@@ -1714,6 +1714,18 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#newsh
 // "Use an existing folder instead" opens fx in any folder you type (or pick in Finder on a Mac).
 // Edit: add or remove repos (the name is the folder and stays), or delete the workspace.
 const WS_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
+// Names become folders, so they are written the way a folder name can be: as you type, "Mi Finanzas" turns into
+// "mi-finanzas" (lowercase, no accents, spaces to dashes, nothing else).
+const asFolderName = (v) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  .replace(/\s+/g, '-').replace(/[^a-z0-9._-]/g, '').replace(/^[._-]+/, '').slice(0, 63);
+function folderNameInput(input) {
+  input.addEventListener('input', () => {
+    const v = asFolderName(input.value);
+    if (v !== input.value) { input.value = v; input.setSelectionRange(v.length, v.length); }
+  });
+}
+folderNameInput($('#ws-name'));
+folderNameInput($('#jd-name'));
 const repoKey = (r) => `${r.owner}/${r.name}`.toLowerCase();
 const wsDlg = { mode: 'create', id: null, catalog: [], catalogError: null, loading: false, selected: new Map(), initial: new Set(), stage: 'pick', poll: 0, failedDir: null };
 function wsView(view) { // 'create' | 'edit' | 'folder' | 'progress'
