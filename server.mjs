@@ -17,6 +17,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createSearchIndex } from './search.mjs';
 import { latestCompletedReply } from './inbox.mjs';
+import { readMetrics } from './metrics.mjs';
 import { TOOLS, isInstalled, addArgs } from './tools.mjs';
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
@@ -440,6 +441,11 @@ async function handlePanelRequest(req, res) {
   const p = url.pathname;
   try {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !sameOrigin(req)) return send(res, 403, { error: 'same-origin request required' });
+    if (p === '/api/metrics') {
+      const days = Number(url.searchParams.get('days') ?? 7);
+      if (days !== 7 && days !== 30) return send(res, 400, { error: 'days must be 7 or 30' });
+      return send(res, 200, await readMetrics(SESSIONS_DIR, days));
+    }
     if (p === '/api/sessions') return send(res, 200, await listSessions());
     if (p === '/api/search') return send(res, 200, await searchSessions(url.searchParams.get('q')));
     if (p === '/api/overview') {

@@ -598,3 +598,20 @@ select { background: var(--bg); color: var(--text); border: 1px solid var(--bord
 .jd-small { font-size: 11px; color: var(--muted); } .jd-small input { width: auto; } .jd-small input#jd-tz { width: 150px; } .jd-small input#jd-timeout { width: 56px; }
 #jd-delete { display: flex; gap: 8px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 12px; }
 #jd-delete.hidden { display: none; } #jd-delete span { margin-right: auto; } #jd-delete button, #jd-delete-open { border: 1px solid var(--border); padding: 5px 10px; }
+
+.metrics-link { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; color: var(--muted); border-radius: 4px; }
+.metrics-link:hover { color: var(--text); background: var(--panel-2); }
+body.metrics-page { display: block; height: auto; min-height: 100%; }
+.metrics-content { max-width: 760px; margin: 0 auto; padding: 32px 20px; }
+.metrics-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.metrics-head h1 { font-size: 20px; font-weight: 500; margin: 0; }
+.metrics-head a { color: var(--muted); }
+.metrics-periods button { padding: 7px 10px; border: 1px solid var(--border); }
+.metrics-periods button[aria-pressed="true"] { color: var(--text); background: var(--panel-2); }
+.metrics-table-wrap { overflow-x: auto; }
+.metrics-table { width: 100%; border-collapse: collapse; margin: 12px 0 24px; font-variant-numeric: tabular-nums; }
+.metrics-table th, .metrics-table td { text-align: right; padding: 12px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.metrics-table th { font-weight: 400; }
+.metrics-table thead { color: var(--muted); font-size: 11px; }
+.metrics-table th:first-child { text-align: left; }
+.metrics-content > .muted { font-size: 12px; }

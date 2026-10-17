@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Metrics · fox</title>
+  <link rel="icon" href="/fox.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="metrics-page">
+  <main class="metrics-content">
+    <header class="metrics-head"><h1>Metrics</h1><a href="/">Back to fox</a></header>
+    <div class="row metrics-periods" role="group" aria-label="Period">
+      <button type="button" data-days="7" aria-pressed="true">Last 7 days</button>
+      <button type="button" data-days="30" aria-pressed="false">Last 30 days</button>
+    </div>
+    <p id="metrics-range" class="muted"></p>
+    <p id="metrics-status" role="status" aria-live="polite">Loading…</p>
+    <div class="metrics-table-wrap" hidden>
+      <table class="metrics-table">
+        <thead><tr><th scope="col">Metric</th><th scope="col">Current</th><th scope="col">Previous</th><th scope="col">Change</th></tr></thead>
+        <tbody id="metrics-rows"></tbody>
+      </table>
+    </div>
+    <p class="muted">Rolling periods ending now. Includes archived sessions and subagents. Messages and completed turns are counted when recorded, including in older sessions. Only locally retained history is included.</p>
+  </main>
+  <script src="/metrics.js"></script>
+</body>
+</html>
