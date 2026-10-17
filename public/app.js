@@ -248,7 +248,7 @@ function sessionCard(s, index = null) {
   // Only needs-input (and another terminal) still say it in words; no process, nothing.
   const quiet = s.state === 'ready' || s.state === 'working';
   const asleep = foxConfig.remote && s.state === 'idle' && !s.archived;
-  const stateHtml = asleep ? '<span class="st asleep" title="Asleep: its tools are off to save memory. Opening it wakes it up in a few seconds.">asleep</span>' : s.state !== 'idle' ? `<span class="st ${s.state}" title="${s.state === 'external' ? 'open in another terminal; fx allows one process per session' : STATE_LABEL[s.state]}"><i></i>${quiet ? '' : STATE_LABEL[s.state]}</span>` : '';
+  const stateHtml = asleep ? '<span class="st asleep" title="Asleep: its tools are off to save memory. Opening it wakes it up in a few seconds." aria-label="asleep"><i></i></span>' : s.state !== 'idle' ? `<span class="st ${s.state}" title="${s.state === 'external' ? 'open in another terminal; fx allows one process per session' : STATE_LABEL[s.state]}"><i></i>${quiet ? '' : STATE_LABEL[s.state]}</span>` : '';
   el.innerHTML = `
     ${index ? `<span class="idx">${index}</span>` : ''}
     <div class="row">
