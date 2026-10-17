@@ -246,7 +246,8 @@ function sessionCard(s, index = null) {
   // Sidebar state as a dot: green and still when fx waits for you, orange and breathing while it works.
   // Only needs-input (and another terminal) still say it in words; no process, nothing.
   const quiet = s.state === 'ready' || s.state === 'working';
-  const stateHtml = s.state !== 'idle' ? `<span class="st ${s.state}" title="${s.state === 'external' ? 'open in another terminal; fx allows one process per session' : STATE_LABEL[s.state]}"><i></i>${quiet ? '' : STATE_LABEL[s.state]}</span>` : '';
+  const asleep = foxConfig.remote && s.state === 'idle' && !s.archived;
+  const stateHtml = asleep ? '<span class="st asleep" title="Asleep: its tools are off to save memory. Opening it wakes it up in a few seconds.">asleep</span>' : s.state !== 'idle' ? `<span class="st ${s.state}" title="${s.state === 'external' ? 'open in another terminal; fx allows one process per session' : STATE_LABEL[s.state]}"><i></i>${quiet ? '' : STATE_LABEL[s.state]}</span>` : '';
   el.innerHTML = `
     ${index ? `<span class="idx">${index}</span>` : ''}
     <div class="row">
@@ -343,8 +344,39 @@ async function openSession(id) {
   if (s.terminal && state.tabs.has(s.terminal) && !state.tabs.get(s.terminal).closed) { activateTab(s.terminal); return selectSession(id); }
   if (s.terminal) { const t = state.terminals.find((x) => x.name === s.terminal); if (t) { attachTab(t, { user: true }); return selectSession(id); } }
   if (s.archived || s.state === 'external') { selectSession(id); if (mobileLayout.matches) showMobileView('read'); return; }
-  await openTerminal({ cwd: s.workspace, resume: id });
+  // No terminal: fx is not running for this session (it slept, or never ran here). Resuming takes a few seconds.
+  state.waking = { id, title: displayTitle(s), since: Date.now() };
+  updateTermLoading();
+  try { await openTerminal({ cwd: s.workspace, resume: id }); }
+  finally { if (state.waking?.id === id && !state.tabs.get(state.activeTab)) state.waking = null; updateTermLoading(); }
 }
+
+function termHasText(term) {
+  const buf = term?.buffer.active;
+  if (!buf) return false;
+  for (let y = 0; y < buf.length; y++) if (buf.getLine(y)?.translateToString(true).trim()) return true;
+  return false;
+}
+// The center while a terminal comes up. Waking a session shows at once and explains the wait; a plain
+// (re)connection only shows if it takes more than a moment.
+function updateTermLoading() {
+  const box = $('#term-loading');
+  const tab = state.tabs.get(state.activeTab);
+  // Waking ends when fx has drawn something: tmux attaches at once and shows an empty pane until fx starts.
+  if (state.waking && tab?.ready && termHasText(tab.term) && state.terminals.find((t) => t.name === tab.name)?.resume === state.waking.id) state.waking = null;
+  const waking = state.waking;
+  const connecting = !waking && tab && !tab.ready && !tab.closed && Date.now() - (tab.openedAt ?? 0) > 500;
+  box.classList.toggle('hidden', !waking && !connecting);
+  if (!waking && !connecting) return;
+  const secs = (Date.now() - (waking?.since ?? tab.openedAt)) / 1000;
+  $('#term-loading-title').textContent = waking ? `Waking up ${waking.title}` : (tab.attempts ? 'Reconnecting…' : 'Connecting…');
+  $('#term-loading-hint').textContent = waking
+    ? (secs < 20 ? 'This session was asleep to save memory. fx is resuming the conversation; it takes a few seconds.'
+      : secs < 60 ? 'Taking longer than usual: fx is starting its tools.'
+      : 'Still waking up. If nothing happens, open the session again.')
+    : (tab.attempts ? `The connection dropped; trying again (${tab.attempts}).` : '');
+}
+setInterval(updateTermLoading, 500);
 
 function selectSession(id) {
   state.selected = id;
@@ -488,7 +520,7 @@ dictationButton.addEventListener('click', () => {
 updateDictationAvailability();
 async function openTerminal({ cwd, resume, provider, model }) {
   const t = await post('/api/terminals', { cwd, resume, provider, model });
-  if (t.error) { alert(t.error); return; }
+  if (t.error) { state.waking = null; updateTermLoading(); alert(t.error); return; }
   await refresh();
   attachTab(t);
   if (t.resume) selectSession(t.resume);
@@ -583,7 +615,7 @@ function attachTab(t, { user = false, activate = true } = {}) {
   // Do not focus on tab activation: that would pop up the keyboard just by opening a session.
   wrap.addEventListener('click', () => { if (mobileLayout.matches) term.focus(); });
   touchScroll(wrap, term, t.name);
-  state.tabs.set(t.name, { name: t.name, term, fit, ws: null, wrap, closed: false, ready: false });
+  state.tabs.set(t.name, { name: t.name, term, fit, ws: null, wrap, closed: false, ready: false, openedAt: Date.now() });
   if (mobileLayout.matches) document.fonts.load(`${fontSize}px "Source Code Pro"`).then(() => {
     const tab = state.tabs.get(t.name);
     if (tab && !tab.closed) { term.options.fontFamily = terminalFontFamily(); tab.settled = null; safeFit(tab); }
@@ -608,7 +640,7 @@ function connectTab(tab) {
   let reveal = null;
   ws.onmessage = (ev) => {
     term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data));
-    if (!tab.ready) { clearTimeout(reveal); reveal = setTimeout(() => { tab.ready = true; wrap.classList.remove('warming'); }, 120); }
+    if (!tab.ready) { clearTimeout(reveal); reveal = setTimeout(() => { tab.ready = true; wrap.classList.remove('warming'); updateTermLoading(); }, 120); }
   };
   ws.onopen = () => { tab.attempts = 0; updateDictationAvailability(); };
   ws.onclose = (e) => {

@@ -520,3 +520,13 @@ button.linkish { color: var(--accent); padding: 5px 0; margin-right: auto; }
 /* Phones: dragging on the terminal scrolls it (see touchScroll in app.js); the page must not pull-to-refresh. */
 html, body { overscroll-behavior-y: none; }
 .term-wrap { touch-action: none; }
+
+/* While a terminal comes up: waking a session that slept takes a few seconds, and says so. */
+#term-loading { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; gap: 14px; color: var(--muted); background: var(--bg); padding: 24px; text-align: left; }
+#term-loading.hidden { display: none; }
+#term-loading-title { color: var(--text); font-weight: 500; margin-bottom: 4px; }
+#term-loading-hint { font-size: 12px; max-width: 340px; }
+.term-spinner { width: 22px; height: 22px; flex: none; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: term-spin .9s linear infinite; }
+@keyframes term-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .term-spinner { animation-duration: 3s; } }
+.st.asleep { color: var(--muted); font-style: italic; }
