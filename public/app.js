@@ -147,6 +147,8 @@ $('#reply-inbox-list').addEventListener('click', (e) => {
   if (!item) return;
   const s = sessionById(item.dataset.reply);
   if (!s?.latestReply) return;
+  // On a phone the answer is read where you reply: straight to the session's terminal.
+  if (mobileLayout.matches) return openSession(s.id);
   globalMessage = { id: s.id, index: s.latestReply.messageIndex };
   convoShown.add(s.id);
   setTranscript(true);
