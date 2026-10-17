@@ -340,6 +340,7 @@ $('#session-groups').addEventListener('click', async (e) => {
 
 // Click on a session: focus its tab if open, attach to its tmux terminal if running, otherwise start one.
 async function openSession(id) {
+  if (state.jobView) closeJob();
   const s = sessionById(id);
   if (!s) return;
   if (s.terminal && state.tabs.has(s.terminal) && !state.tabs.get(s.terminal).closed) { activateTab(s.terminal); return selectSession(id); }
@@ -1860,6 +1861,173 @@ async function deleteWorkspace(folder) {
 $('#ws-remove-entry').addEventListener('click', () => deleteWorkspace(false));
 $('#ws-delete-folder').addEventListener('click', () => deleteWorkspace(true));
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#wsdialog').classList.contains('hidden')) closeWorkspaceDialog(); });
+
+// ---------- jobs: a script on a schedule (see jobs.mjs) ----------
+state.jobs = []; state.jobView = null;
+const runDur = (r) => r.endedAt ? jobDur(r.endedAt - r.startedAt) : jobDur(Date.now() - r.startedAt);
+function jobDur(ms) { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s} s` : s < 3600 ? `${Math.floor(s / 60)} m ${String(s % 60).padStart(2, '0')} s` : `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} m`; }
+function whenText(ms) {
+  if (!ms) return '';
+  const d = new Date(ms), now = new Date(), diff = ms - Date.now();
+  if (diff > 0 && diff < 3600_000) return `in ${Math.max(1, Math.round(diff / 60_000))} min`;
+  const hm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((day(d) - day(now)) / 86400_000);
+  return days === 0 ? `today ${hm}` : days === 1 ? `tomorrow ${hm}` : days === -1 ? `yesterday ${hm}` : `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} ${hm}`;
+}
+const jobState = (j) => j.lastRun?.status === 'running' ? 'running' : !j.enabled ? 'paused' : j.lastRun?.status ?? 'none';
+async function loadJobs() {
+  try { state.jobs = await (await fetch('/api/jobs')).json(); } catch { return; }
+  renderJobs();
+  if (state.jobView) renderJobView();
+}
+function renderJobs() {
+  const list = $('#jobs-list');
+  if (!state.jobs.length) { list.innerHTML = '<div class="jobs-empty">A script on a schedule. + to make one.</div>'; return; }
+  list.innerHTML = state.jobs.map((j) => {
+    const st = jobState(j);
+    const right = st === 'running' ? `<span class="jnext running">running ${runDur(j.lastRun)}</span>` : !j.enabled ? '<span class="jnext">paused</span>' : `<span class="jnext">${esc(whenText(j.nextRun))}</span>`;
+    return `<div class="job-row ${state.jobView === j.id ? 'active' : ''}" data-job="${j.id}" role="button" tabindex="0"><span class="jdot ${st}" title="${esc(st === 'none' ? 'never ran' : st)}"></span><span class="jname">${esc(j.name)}</span>${right}<span class="jwhen">${esc(j.scheduleText)}</span></div>`;
+  }).join('');
+}
+$('#jobs-list').addEventListener('click', (e) => { const row = e.target.closest('[data-job]'); if (row) openJob(row.dataset.job); });
+function openJob(id) {
+  state.jobView = id; state.openRun = null;
+  $('#job-view').classList.remove('hidden');
+  renderJobs(); renderJobView();
+  if (mobileLayout.matches) showMobileView('terminal');
+}
+function closeJob() { state.jobView = null; $('#job-view').classList.add('hidden'); renderJobs(); }
+$('#job-close').addEventListener('click', closeJob);
+async function renderJobView() {
+  const j = state.jobs.find((x) => x.id === state.jobView);
+  if (!j) return closeJob();
+  $('#job-name').textContent = j.name;
+  $('#job-when').textContent = j.enabled ? j.scheduleText : `${j.scheduleText} · paused`;
+  $('#job-pause').textContent = j.enabled ? 'Pause' : 'Resume';
+  $('#job-meta').textContent = `${shortPath(j.cwd)}/${j.script}${j.args?.length ? ' ' + j.args.join(' ') : ''} · ${j.tz} · stops after ${j.timeoutMin} min${j.enabled && j.nextRun ? ` · next ${whenText(j.nextRun)}` : ''}`;
+  const runs = await (await fetch(`/api/jobs/${j.id}/runs`)).json().catch(() => []);
+  if (state.jobView !== j.id) return;
+  const box = $('#job-runs');
+  if (!runs.length) { box.innerHTML = '<div class="jobs-none">No runs yet. Run now to try it.</div>'; return; }
+  const bad = (r) => ['failed', 'timeout', 'interrupted'].includes(r.status);
+  box.innerHTML = runs.map((r) => `<div class="run-row" data-run="${r.id}" role="listitem"><span class="jdot ${r.status}" title="${esc(r.status)}"></span><span class="rwhen">${esc(whenText(r.startedAt))}${r.reason === 'manual' ? ' · now' : ''}</span><span class="rsum ${bad(r) ? 'bad' : r.summary ? '' : 'quiet'}">${esc(r.summary ?? (r.status === 'running' ? 'running…' : r.status))}</span><span class="rdur">${runDur(r)}</span></div>${state.openRun === r.id ? '<div class="run-detail" id="run-detail"></div>' : ''}`).join('');
+  if (state.openRun) showRunDetail(j.id, runs.find((r) => r.id === state.openRun));
+}
+async function showRunDetail(jobId, run) {
+  const box = $('#run-detail'); if (!box || !run) return;
+  const files = (run.outputs ?? []).map((o) => `<a href="/api/jobs/${jobId}/runs/${run.id}/files/${encodeURIComponent(o.name)}" target="_blank" rel="noopener">${esc(o.name)}</a>`).join('');
+  const log = await (await fetch(`/api/jobs/${jobId}/runs/${run.id}/log`)).text().catch(() => '');
+  box.innerHTML = `${files ? `<div class="run-files">${files}</div>` : ''}<pre>${esc(log || '(no output)')}</pre>`;
+}
+$('#job-runs').addEventListener('click', (e) => {
+  const row = e.target.closest('[data-run]'); if (!row) return;
+  state.openRun = state.openRun === row.dataset.run ? null : row.dataset.run;
+  renderJobView();
+});
+$('#job-run').addEventListener('click', async () => { await post(`/api/jobs/${state.jobView}/run`); toast('Starting…'); setTimeout(loadJobs, 1500); });
+$('#job-pause').addEventListener('click', async () => {
+  const j = state.jobs.find((x) => x.id === state.jobView); if (!j) return;
+  await post(`/api/jobs/${j.id}`, { enabled: !j.enabled }, 'PATCH'); loadJobs();
+});
+$('#job-edit').addEventListener('click', () => openJobDialog(state.jobView));
+$('#new-job').addEventListener('click', () => openJobDialog());
+loadJobs();
+setInterval(loadJobs, 5000);
+
+// The editor: the schedule is built with buttons and drawn on a 24-hour line, with the next runs written out.
+const jd = { id: null, kind: 'hours', days: new Set([1, 2, 3, 4, 5]) };
+function jdSchedule() {
+  const days = [...jd.days].sort();
+  if (jd.kind === 'hours') return { kind: 'hours', every: Number($('#jd-every').value), from: $('#jd-from').value, to: $('#jd-to').value, days };
+  if (jd.kind === 'daily') return { kind: 'daily', at: $('#jd-at').value, days };
+  return { kind: 'once', date: $('#jd-date').value, at: $('#jd-once-at').value };
+}
+function jdRenderWhen() {
+  for (const b of $('#jd-kind').children) b.classList.toggle('on', b.dataset.kind === jd.kind);
+  for (const b of $('#jd-days').children) b.classList.toggle('on', jd.days.has(Number(b.dataset.day)));
+  $('.jd-when').dataset.kind = jd.kind;
+  $('#jd-days').classList.toggle('off', jd.kind === 'once');
+  jdPreview();
+}
+const jdPreview = debounce(async () => {
+  const s = jdSchedule(), strip = $('#jd-strip');
+  const pct = (hhmm) => { const [h, m] = (hhmm || '0:0').split(':').map(Number); return ((h * 60 + m) / 1440) * 100; };
+  let html = '';
+  if (s.kind === 'hours' && s.every > 0) {
+    html += `<div class="band" style="left:${pct(s.from)}%;width:${Math.max(0, pct(s.to) - pct(s.from))}%"></div>`;
+    for (let t = pct(s.from); t <= pct(s.to) + 0.01; t += (s.every * 60 / 1440) * 100) html += `<div class="tick" style="left:${t}%"></div>`;
+  } else if (s.at) html += `<div class="tick" style="left:${pct(s.at)}%"></div>`;
+  strip.innerHTML = html;
+  const r = await post('/api/jobs/preview', { schedule: s, tz: $('#jd-tz').value.trim() }).catch(() => ({}));
+  $('#jd-next').textContent = r.error ? '' : r.next?.length ? `Next: ${r.next.map(whenText).join(' · ')}` : 'No upcoming runs.';
+  $('#jd-summary').textContent = r.text ?? '';
+  $('#jd-error').textContent = r.error ?? '';
+}, 200);
+$('#jd-kind').addEventListener('click', (e) => { const b = e.target.closest('[data-kind]'); if (b) { jd.kind = b.dataset.kind; jdRenderWhen(); } });
+$('#jd-days').addEventListener('click', (e) => { const b = e.target.closest('[data-day]'); if (!b) return; const d = Number(b.dataset.day); jd.days.has(d) ? jd.days.delete(d) : jd.days.add(d); jdRenderWhen(); });
+for (const id of ['#jd-every', '#jd-from', '#jd-to', '#jd-at', '#jd-date', '#jd-once-at', '#jd-tz']) $(id).addEventListener('input', jdPreview);
+async function jdLoadScripts(selected = '') {
+  const cwd = jdCwd(), sel = $('#jd-script');
+  const scripts = cwd ? await (await fetch('/api/jobs/scripts?cwd=' + encodeURIComponent(cwd))).json().catch(() => []) : [];
+  sel.innerHTML = scripts.length ? scripts.map((x) => `<option ${x === selected ? 'selected' : ''}>${esc(x)}</option>`).join('') : '<option value="">No .py, .mjs, .js or .sh scripts here</option>';
+  if (selected && !scripts.includes(selected)) sel.insertAdjacentHTML('afterbegin', `<option selected>${esc(selected)}</option>`);
+}
+const jdCwd = () => $('#jd-folder').value === '__other' ? $('#jd-cwd').value.trim() : $('#jd-folder').value;
+$('#jd-folder').addEventListener('change', () => { $('#jd-cwd').classList.toggle('hidden', $('#jd-folder').value !== '__other'); jdLoadScripts(); });
+$('#jd-cwd').addEventListener('input', debounce(() => jdLoadScripts(), 300));
+async function openJobDialog(id = null) {
+  const j = id ? state.jobs.find((x) => x.id === id) : null;
+  jd.id = j?.id ?? null;
+  $('#jd-title').textContent = j ? `Edit ${j.name}` : 'New job';
+  $('#jd-submit').textContent = j ? 'Save' : 'Create';
+  $('#jd-delete-open').classList.toggle('hidden', !j);
+  $('#jd-delete').classList.add('hidden');
+  $('#jd-error').textContent = '';
+  $('#jd-name').value = j?.name ?? '';
+  const folders = (state.workspaces ?? []).map((w) => [w.dir, w.name]);
+  const cwd = j?.cwd ?? folders[0]?.[0] ?? '';
+  const known = folders.some(([d]) => d === cwd);
+  $('#jd-folder').innerHTML = folders.map(([d, n]) => `<option value="${esc(d)}" ${d === cwd ? 'selected' : ''}>${esc(n)}</option>`).join('') + `<option value="__other" ${cwd && !known ? 'selected' : ''}>Other folder…</option>`;
+  $('#jd-cwd').value = cwd && !known ? cwd : '';
+  $('#jd-cwd').classList.toggle('hidden', !(cwd && !known) && folders.length > 0);
+  if (!folders.length) $('#jd-folder').value = '__other';
+  $('#jd-args').value = (j?.args ?? []).join(' ');
+  const s = j?.schedule ?? { kind: 'hours', every: 2, from: '09:00', to: '19:00', days: [1, 2, 3, 4, 5] };
+  jd.kind = s.kind; jd.days = new Set(s.days ?? [1, 2, 3, 4, 5, 6, 7]);
+  if (s.kind === 'hours') { $('#jd-every').value = s.every; $('#jd-from').value = s.from; $('#jd-to').value = s.to; }
+  if (s.kind === 'daily') $('#jd-at').value = s.at;
+  if (s.kind === 'once') { $('#jd-date').value = s.date; $('#jd-once-at').value = s.at; }
+  if (!$('#jd-date').value) $('#jd-date').value = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
+  $('#jd-tz').value = j?.tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  $('#jd-timeout').value = j?.timeoutMin ?? 30;
+  $('#jobdialog').classList.remove('hidden');
+  await jdLoadScripts(j?.script ?? '');
+  jdRenderWhen();
+  $('#jd-name').focus();
+}
+const closeJobDialog = () => $('#jobdialog').classList.add('hidden');
+$('#jd-cancel').addEventListener('click', closeJobDialog);
+$('#jobdialog').addEventListener('click', (e) => { if (e.target.id === 'jobdialog') closeJobDialog(); });
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#jobdialog').classList.contains('hidden')) closeJobDialog(); });
+$('#jobform').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = { name: $('#jd-name').value.trim(), cwd: jdCwd(), script: $('#jd-script').value, args: $('#jd-args').value.trim() ? $('#jd-args').value.trim().split(/\s+/) : [],
+    schedule: jdSchedule(), tz: $('#jd-tz').value.trim(), timeoutMin: Number($('#jd-timeout').value) };
+  const r = await fetch(jd.id ? `/api/jobs/${jd.id}` : '/api/jobs', { method: jd.id ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('#jd-error').textContent = j.error || 'Could not save the job.'; return; }
+  closeJobDialog();
+  await loadJobs();
+  openJob(j.id);
+});
+$('#jd-delete-open').addEventListener('click', () => $('#jd-delete').classList.remove('hidden'));
+$('#jd-delete-no').addEventListener('click', () => $('#jd-delete').classList.add('hidden'));
+$('#jd-delete-yes').addEventListener('click', async () => {
+  const r = await fetch(`/api/jobs/${jd.id}`, { method: 'DELETE' });
+  if (!r.ok) { $('#jd-error').textContent = (await r.json().catch(() => ({}))).error || 'Could not delete the job.'; return; }
+  closeJobDialog(); closeJob(); loadJobs();
+});
 
 // ---------- memory (servers): how full the machine is, and a way to free it ----------
 const fmtGb = (mb) => (mb / 1024).toFixed(1);

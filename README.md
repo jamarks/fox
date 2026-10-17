@@ -61,6 +61,7 @@ To offer another one, add an entry to `tools.mjs`.
 
 ## What it does
 
+- **Jobs**: a script on a schedule (every few hours in a window, daily, weekly or once, in your time zone), built with buttons and drawn on a 24-hour line. Each run keeps its log, a one-line summary the script prints as `FOX_SUMMARY: …`, and the files it writes to `$FOX_JOB_OUTPUT`. Run now, pause, edit. One job at a time, each with a time limit. On a server the runner is its own service (`bin/fox-jobs.mjs`, `FOX_JOBS_RUNNER=external`), so deploying fox never cuts a job.
 - **Workspaces**: a named folder made of one or more GitHub repos (from your account and your orgs), cloned once and reopened from the sidebar. Sessions in it share the same copy; fox shows each repo's branch, uncommitted changes and commits behind, and warns when another session is working there. Removing one never deletes work: the folder is only deleted on request, and only when every repo is committed and pushed.
 - **Sessions by project**: grouped by workspace, collapsible, reorderable by drag, numbered.
 - **Live state**: a dot per session, orange and breathing while fx works, still green while it waits for you; needs input says so. An optional bell (sound + notification) when an agent finishes.

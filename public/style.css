@@ -547,3 +547,54 @@ html, body { overscroll-behavior-y: none; }
 
 #toast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 8px); background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 12px; opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s; z-index: 100; }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* Jobs: sidebar list, job view, editor */
+#jobs-section { border-top: 1px solid var(--border); padding: 4px 0 8px; }
+.jobs-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.job-row { padding: 6px 12px 6px 14px; cursor: pointer; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 8px; align-items: center; }
+.job-row:hover, .job-row.active { background: var(--panel-2); }
+.job-row .jname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-row .jnext { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+.job-row .jnext.running { color: var(--warn); }
+.job-row .jwhen { grid-column: 2 / 4; font-family: var(--mono); font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jdot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.jdot.ok { background: var(--ok); } .jdot.failed, .jdot.timeout, .jdot.interrupted { background: var(--err); } .jdot.running { background: var(--warn); animation: breathe 1.6s ease-in-out infinite; }
+.jdot.paused, .jdot.none { background: transparent; border: 1px solid var(--muted); box-sizing: border-box; }
+.jobs-empty { padding: 4px 14px; font-size: 11px; color: var(--muted); }
+#job-view { position: absolute; inset: 0; z-index: 6; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
+#job-view.hidden { display: none; }
+.job-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.job-title { display: flex; align-items: center; gap: 10px; min-width: 0; margin-right: auto; }
+#job-name { font-weight: 600; font-size: 14px; }
+.job-chip { font-family: var(--mono); font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; }
+.job-actions { display: flex; gap: 6px; } .job-actions button:not(.icon) { border: 1px solid var(--border); padding: 5px 10px; color: var(--text); }
+#job-meta { padding: 8px 16px; font-size: 11px; font-family: var(--mono); border-bottom: 1px solid var(--border); }
+#job-runs { overflow-y: auto; flex: 1; }
+.run-row { display: grid; grid-template-columns: 10px 150px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--border); cursor: pointer; font-family: var(--mono); font-size: 12px; }
+.run-row:hover { background: var(--panel-2); }
+.run-row .rsum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.run-row .rsum.bad { color: var(--err); } .run-row .rsum.quiet { color: var(--muted); }
+.run-row .rdur, .run-row .rwhen { color: var(--muted); white-space: nowrap; }
+.run-detail { padding: 8px 16px 14px 36px; border-bottom: 1px solid var(--border); background: var(--panel); }
+.run-detail pre { margin: 0; max-height: 50vh; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px; font-family: var(--mono); color: var(--text); }
+.run-files { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.run-files a { font-family: var(--mono); font-size: 12px; color: var(--accent); text-decoration: none; border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; }
+.jobs-none { padding: 20px 16px; color: var(--muted); }
+#jobdialog { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; }
+#jobdialog .sheet { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px 16px; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
+.jd-row { gap: 8px; flex-wrap: wrap; align-items: center; } .jd-row select, .jd-row > input { flex: 1; min-width: 160px; }
+select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; }
+.jd-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.jd-chips button { border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; color: var(--muted); }
+.jd-chips button.on { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.jd-when input[type=number] { width: 52px; } .jd-when input[type=time], .jd-when input[type=date] { width: auto; }
+.jd-when > span { display: none; color: var(--muted); } .jd-when[data-kind=hours] .jd-hours, .jd-when[data-kind=daily] .jd-daily, .jd-when[data-kind=once] .jd-once { display: inline; }
+.jd-days.off { display: none; }
+.jd-strip { position: relative; height: 22px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); margin-top: 8px; overflow: hidden; }
+.jd-strip .band { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.jd-strip .tick { position: absolute; top: 3px; bottom: 3px; width: 2px; border-radius: 1px; background: var(--accent); }
+.jd-hours-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); font-family: var(--mono); }
+#jd-next { font-size: 11px; min-height: 14px; }
+.jd-small { font-size: 11px; color: var(--muted); } .jd-small input { width: auto; } .jd-small input#jd-tz { width: 150px; } .jd-small input#jd-timeout { width: 56px; }
+#jd-delete { display: flex; gap: 8px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 12px; }
+#jd-delete.hidden { display: none; } #jd-delete span { margin-right: auto; } #jd-delete button, #jd-delete-open { border: 1px solid var(--border); padding: 5px 10px; }

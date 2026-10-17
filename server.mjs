@@ -21,6 +21,8 @@ import { TOOLS, isInstalled, addArgs } from './tools.mjs';
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
 import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
+import { createJobStore, createRunner } from './jobs.mjs';
+import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 const execFileP = promisify(execFile);
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -75,6 +77,26 @@ ${PREVIEW ? `- The user is not on this machine and cannot open localhost. When s
 `}`;
 }
 const workspaces = createWorkspaces({ stateDir: STATE_DIR, rootDir: join(homedir(), 'workspaces'), agentNotes: workspaceAgentNotes });
+// Jobs (see jobs.mjs). On a server the runner is its own service (FOX_JOBS_RUNNER=external), so deploying fox
+// never kills a job mid-run; on a laptop it runs inside fox.
+const jobStore = createJobStore({ stateDir: STATE_DIR });
+const inlineRunner = process.env.FOX_JOBS_RUNNER === 'external' ? null : createRunner({ store: jobStore });
+inlineRunner?.start().catch((err) => console.error(`fox: jobs runner failed: ${err.message}`));
+// Scripts a job can run in a folder: .py, .mjs, .js, .sh up to three levels deep, skipping dependencies and dot folders.
+async function jobScripts(cwd) {
+  const out = [];
+  async function walk(dir, rel, depth) {
+    if (depth > 3 || out.length >= 200) return;
+    for (const e of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+      if (e.name.startsWith('.') || e.name === 'node_modules' || e.name === '__pycache__' || e.name === 'venv') continue;
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) await walk(join(dir, e.name), r, depth + 1);
+      else if (/\.(py|mjs|js|sh)$/.test(e.name)) out.push(r);
+    }
+  }
+  await walk(cwd, '', 0);
+  return out.sort();
+}
 const repoCatalog = createRepoCatalog({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
 // The sidebar polls the overview every few seconds; workspace git state is cheap but not free.
 let workspacesCache = { at: 0, list: [] };
@@ -555,6 +577,41 @@ async function handlePanelRequest(req, res) {
       if (slept.length) await new Promise((r) => setTimeout(r, 1500)); // let the processes exit
       const after = await memory();
       return send(res, 200, { slept: slept.length, freedMb: before && after ? Math.max(0, before.usedMb - after.usedMb) : null, memory: after });
+    }
+    // ---------- jobs ----------
+    if (p === '/api/jobs' && req.method === 'GET') return send(res, 200, await jobStore.overview());
+    if (p === '/api/jobs' && req.method === 'POST') {
+      try { return send(res, 200, await jobStore.create(JSON.parse(await readBody(req) || '{}'))); }
+      catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
+    }
+    if (p === '/api/jobs/preview' && req.method === 'POST') {
+      const { schedule, tz } = JSON.parse(await readBody(req) || '{}');
+      const error = scheduleError(schedule, tz);
+      return send(res, 200, { error, text: error ? '' : describeSchedule(schedule), next: error ? [] : nextRuns(schedule, tz, Date.now(), 5) });
+    }
+    if (p === '/api/jobs/scripts' && req.method === 'GET') {
+      const cwd = resolve(String(url.searchParams.get('cwd') ?? '').replace(/^~/, homedir()));
+      return send(res, 200, (await stat(cwd).catch(() => null))?.isDirectory() ? await jobScripts(cwd) : []);
+    }
+    if ((m = p.match(/^\/api\/jobs\/([0-9a-f-]{36})(?:\/(run|runs)(?:\/([0-9A-Za-z_-]+)(?:\/(log|files)(?:\/([^/]+))?)?)?)?$/))) {
+      const [, id, sub, runId, part, file] = m;
+      try {
+        if (!sub && req.method === 'PATCH') return send(res, 200, await jobStore.update(id, JSON.parse(await readBody(req) || '{}')));
+        if (!sub && req.method === 'DELETE') { await jobStore.remove(id); return send(res, 200, { ok: true }); }
+        if (sub === 'run' && !runId && req.method === 'POST') { await jobStore.trigger(id); inlineRunner?.tick().catch(() => {}); return send(res, 200, { ok: true }); }
+        if (sub === 'runs' && !runId && req.method === 'GET') return send(res, 200, await jobStore.runs(id));
+        if (sub === 'runs' && part === 'log' && req.method === 'GET') return send(res, 200, await jobStore.readLog(id, runId), 'text/plain; charset=utf-8');
+        if (sub === 'runs' && part === 'files' && file && req.method === 'GET') {
+          const path = await jobStore.outputPath(id, runId, decodeURIComponent(file));
+          if (!path) return send(res, 404, { error: 'not a file of this run' });
+          const ext = extname(path).toLowerCase();
+          const type = PREVIEW_TYPES[ext] ?? (['.md', '.txt', '.csv', '.json', '.log'].includes(ext) ? 'text/plain; charset=utf-8' : 'application/octet-stream');
+          // A job wrote it: shown sandboxed, like files of a session (opaque origin, no access to fox).
+          res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': 'sandbox allow-scripts allow-forms allow-popups allow-modals' });
+          return res.end(await readFile(path));
+        }
+        return send(res, 405, { error: 'method not allowed' });
+      } catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
     }
     // What the page needs to know about where fox runs: remote or local, and the dev-server preview hostnames.
     if (p === '/api/config' && req.method === 'GET') return send(res, 200, { remote: Boolean(process.env.FOX_PUBLIC_ORIGIN), preview: PREVIEW });

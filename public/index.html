@@ -38,6 +38,10 @@
       <div id="reply-inbox-list" class="hidden"></div>
     </div>
     <div id="session-groups"></div>
+    <div id="jobs-section">
+      <div class="jobs-head"><span>Jobs</span><button type="button" id="new-job" class="icon" title="New job: a script on a schedule" aria-label="New job">+</button></div>
+      <div id="jobs-list"></div>
+    </div>
     <footer class="sidebar-footer">
       <div id="mem" class="hidden" title="Memory in use on this machine, page cache counted as free"><span id="mem-text"></span><span class="mem-bar"><i id="mem-fill"></i></span></div>
       <button type="button" id="mem-free" class="hidden" title="Put to sleep the sessions that wait for you, nobody has open and were idle for 3 minutes or more. Opening one wakes it up.">Free memory</button>
@@ -89,11 +93,42 @@
       <div class="row ns-actions"><button type="button" id="ws-delete-open" class="danger hidden">Delete workspace…</button><button type="button" id="ws-mode" class="linkish">Use an existing folder instead</button><span class="muted ns-hint" id="ws-summary"></span><button type="button" id="ws-cancel">Cancel</button><button type="submit" class="primary" id="ws-submit">Create and open</button></div>
     </form>
   </div>
+  <div id="jobdialog" class="hidden">
+    <form class="sheet" id="jobform" autocomplete="off">
+      <div class="ns-head" id="jd-title">New job</div>
+      <label class="ns-label" for="jd-name">Name</label>
+      <input id="jd-name" placeholder="linear-bugfix" spellcheck="false" />
+      <label class="ns-label" for="jd-folder">Runs in</label>
+      <div class="row jd-row"><select id="jd-folder"></select><input id="jd-cwd" class="hidden" placeholder="~/path/to/folder" spellcheck="false" /></div>
+      <label class="ns-label" for="jd-script">Script</label>
+      <div class="row jd-row"><select id="jd-script"></select><input id="jd-args" placeholder="arguments (optional)" spellcheck="false" /></div>
+      <label class="ns-label">When</label>
+      <div class="jd-chips" id="jd-kind"><button type="button" data-kind="once">Once</button><button type="button" data-kind="daily">Every day</button><button type="button" data-kind="hours">Every few hours</button></div>
+      <div class="row jd-row jd-when">
+        <span class="jd-hours">every <input id="jd-every" type="number" min="1" max="24" value="2" /> h, between <input id="jd-from" type="time" value="09:00" /> and <input id="jd-to" type="time" value="19:00" /></span>
+        <span class="jd-daily">at <input id="jd-at" type="time" value="08:00" /></span>
+        <span class="jd-once">on <input id="jd-date" type="date" /> at <input id="jd-once-at" type="time" value="10:00" /></span>
+      </div>
+      <div class="jd-chips jd-days" id="jd-days"><button type="button" data-day="1">Mon</button><button type="button" data-day="2">Tue</button><button type="button" data-day="3">Wed</button><button type="button" data-day="4">Thu</button><button type="button" data-day="5">Fri</button><button type="button" data-day="6">Sat</button><button type="button" data-day="7">Sun</button></div>
+      <div class="jd-strip" id="jd-strip" aria-hidden="true"></div>
+      <div class="jd-hours-axis" aria-hidden="true"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
+      <div id="jd-next" class="muted mono"></div>
+      <div class="row jd-row jd-small"><label>Time zone <input id="jd-tz" spellcheck="false" /></label><label>Stop after <input id="jd-timeout" type="number" min="1" max="240" value="30" /> min</label></div>
+      <div id="jd-error" class="hint err" role="alert"></div>
+      <div id="jd-delete" class="hidden"><span class="muted">Delete this job and its run history? The script stays.</span><button type="button" id="jd-delete-yes" class="danger">Delete</button><button type="button" id="jd-delete-no">Keep it</button></div>
+      <div class="row ns-actions"><button type="button" id="jd-delete-open" class="danger hidden">Delete job…</button><span class="muted ns-hint" id="jd-summary"></span><button type="button" id="jd-cancel">Cancel</button><button type="submit" class="primary" id="jd-submit">Create</button></div>
+    </form>
+  </div>
   <div class="resizer" id="rs-left" title="Drag to resize"></div>
   <main id="center">
     <div id="tabbar"><div id="tabs"></div><div id="mobile-terminal-title" role="heading" aria-level="2">Terminal</div><button type="button" id="dictation" class="icon" aria-label="Start dictation" title="Dictate to the active terminal" disabled><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><rect x="5.5" y="1.5" width="5" height="9" rx="2.5"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5m-2.5 0h5"/></svg></button><button id="toggle-transcript" class="icon">⇥</button></div>
     <div id="terminals">
       <div id="dictation-pill" class="hidden" role="status" aria-live="polite"><span class="dict-text"><span class="dict-final"></span> <span class="dict-interim"></span></span><span class="dict-hint"></span></div>
+      <section id="job-view" class="hidden" aria-label="Job">
+        <header class="job-head"><div class="job-title"><span id="job-name"></span><span id="job-when" class="job-chip"></span></div><div class="job-actions"><button type="button" id="job-run">Run now</button><button type="button" id="job-pause">Pause</button><button type="button" id="job-edit">Edit</button><button type="button" id="job-close" class="icon" aria-label="Close">×</button></div></header>
+        <div id="job-meta" class="muted"></div>
+        <div id="job-runs" role="list"></div>
+      </section>
       <div id="term-loading" class="hidden" role="status" aria-live="polite"><span class="term-spinner" aria-hidden="true"></span><div><div id="term-loading-title"></div><div id="term-loading-hint"></div></div></div>
       <div id="empty-state">
         <h2>No terminal open</h2>
