@@ -649,10 +649,13 @@ fetch('/api/config').then((r) => r.ok ? r.json() : null).then((c) => { if (c) { 
 function showVersion({ version: v, startedAt }) {
   if (!v?.commit) return;
   const fmt = (ms) => new Date(ms).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  const sv = $('#settings-version'); // the only place it shows: Settings → Running
-  sv.textContent = `${v.branch ?? 'fox'} ${v.commit.slice(0, 7)} · ${fmt(Date.parse(v.date))}`;
-  sv.title = `${v.subject ?? ''}\ncommitted ${fmt(Date.parse(v.date))}${v.deployedAt ? `\ndeployed ${fmt(Date.parse(v.deployedAt))}` : ''}\nrunning since ${fmt(startedAt)}`;
-  if (v.repo) sv.href = `https://github.com/${v.repo}/commit/${v.commit}`; else sv.removeAttribute('href');
+  // Settings → Running in full; the sidebar's footer says it short (branch and commit), the rest on hover.
+  const title = `${v.subject ?? ''}\ncommitted ${fmt(Date.parse(v.date))}${v.deployedAt ? `\ndeployed ${fmt(Date.parse(v.deployedAt))}` : ''}\nrunning since ${fmt(startedAt)}`;
+  for (const [el, text] of [[$('#settings-version'), `${v.branch ?? 'fox'} ${v.commit.slice(0, 7)} · ${fmt(Date.parse(v.date))}`], [$('#footer-version'), `${v.branch ?? 'fox'} ${v.commit.slice(0, 7)}`]]) {
+    el.textContent = text;
+    el.title = title;
+    if (v.repo) el.href = `https://github.com/${v.repo}/commit/${v.commit}`; else el.removeAttribute('href');
+  }
 }
 const LOCAL_URL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(?::(\d{2,5}))?(\/[^\s'"<>)\]]*)?/g;
 // Links to other sites. Opened from the iPhone Home Screen icon, a new tab would be iOS's in-app browser, which
