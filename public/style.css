@@ -733,3 +733,4 @@ body.night .global-search-box { background: #0d101c; }
 .seg button { border: 0; padding: 5px 9px; font-size: 12px; color: var(--muted); background: transparent; cursor: pointer; }
 .seg button + button { border-left: 1px solid var(--border); }
 .seg button.on { background: var(--accent); color: #0b0d12; }
+.ws-repo .gh-mark { flex: none; color: var(--muted); margin-right: -2px; }

@@ -1797,6 +1797,8 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#newsh
 // "Use an existing folder instead" opens fx in any folder you type (or pick in Finder on a Mac).
 // Edit: add or remove repos (the name is the folder and stays), or delete the workspace.
 const WS_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
+// The GitHub mark next to each repo, so the list reads as "your GitHub repos" at a glance.
+const GITHUB_MARK = '<svg class="gh-mark" viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
 // Names become folders, so they are written the way a folder name can be: as you type, "Mi Finanzas" turns into
 // "mi-finanzas" (lowercase, no accents, spaces to dashes, nothing else).
 const asFolderName = (v) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
@@ -1856,7 +1858,7 @@ function renderWsRepos() {
   const box = $('#ws-repos');
   const raw = $('#ws-search').value.trim(), q = raw.toLowerCase();
   const known = new Set(wsDlg.catalog.flatMap((g) => g.repos.map(repoKey)));
-  const row = (r, extra = '') => `<label class="ws-repo"><input type="checkbox" data-owner="${esc(r.owner)}" data-name="${esc(r.name)}" ${wsDlg.selected.has(repoKey(r)) ? 'checked' : ''}><span>${esc(r.name)}</span>${r.private ? '<span class="ws-lock" title="private">private</span>' : ''}${extra}</label>`;
+  const row = (r, extra = '') => `<label class="ws-repo"><input type="checkbox" data-owner="${esc(r.owner)}" data-name="${esc(r.name)}" ${wsDlg.selected.has(repoKey(r)) ? 'checked' : ''}>${GITHUB_MARK}<span>${esc(r.name)}</span>${r.private ? '<span class="ws-lock" title="private">private</span>' : ''}${extra}</label>`;
   const matches = (r) => !q || repoKey(r).includes(q) || (r.description ?? '').toLowerCase().includes(q);
   let html = '';
   const extra = [...wsDlg.selected.values()].filter((r) => !known.has(repoKey(r)));
