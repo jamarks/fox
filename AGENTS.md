@@ -31,7 +31,7 @@ Docs: `README.md` for users; `docs/plans/` for designs and the server setup (`20
 ## Tests and shipping
 
 - `npm test` runs everything (`node --test`). Run it before every commit and check the exit code, not only the summary.
-- `main` is development. `release` is what runs: a server deploys every new `release` commit within a minute, runs `npm ci && npm test` first and rolls back if fox does not answer. Never push to `release` on your own, and never push to `main` from an unattended job: open a pull request and the user merges it. A merged pull request reaches `release` on its own (`.github/workflows/publish-merged.yml`).
+- Commit to `main` directly, agents included: no pull requests, no review step. The owner wants the models trusted and the bureaucracy out; the protection is `npm test` before the push and the server's rollback. The server deploys the branch chosen in Settings → Deploy within a minute (`main` by default), running `npm ci && npm test` first and rolling back if fox does not answer. `release` only exists for the other setting: a merged pull request reaches it on its own (`.github/workflows/publish-merged.yml`). Never push to `release` by hand.
 - Keep fox's dependencies minimal; adding one needs a reason.
 
 ## Conventions
