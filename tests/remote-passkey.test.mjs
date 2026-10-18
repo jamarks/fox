@@ -66,7 +66,7 @@ test('HTTPS passkey enrollment needs SSH code and exact origin; session has Secu
     assert.equal((await request('/api/auth/status', { host: 'localhost:4848' })).status, 403);
     assert.equal((await post('/api/auth/register/options', { code: 'bad' })).status, 403);
     const { stdout } = await execFileP(process.execPath, ['bin/fox-enroll.mjs'], { cwd: new URL('..', import.meta.url), env });
-    const code = stdout.match(/\b[A-Za-z0-9_-]{43}\b/)[0];
+    const code = stdout.match(/^([A-Za-z0-9_-]{43})$/m)[1]; // its own line; it may start or end with - or _
     assert.equal((await post('/api/auth/register/options', { code }, { browserOrigin: 'http://fox.example.test' })).status, 403);
     const { id, options } = await (await post('/api/auth/register/options', { code })).json();
     assert.equal(options.rp.id, 'fox.example.test');
