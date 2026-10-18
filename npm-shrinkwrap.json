@@ -21,7 +21,8 @@
         "ws": "^8.22.0"
       },
       "bin": {
-        "fox": "bin/fox.mjs"
+        "fox": "bin/fox.mjs",
+        "fox-job": "bin/fox-job.mjs"
       },
       "engines": {
         "node": ">=20"

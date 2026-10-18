@@ -95,6 +95,14 @@ test('HTTPS passkey enrollment needs SSH code and exact origin; session has Secu
       socket.once('error', () => resolve('error'));
     });
     assert.equal(ws, 'open');
+    // A cookie another subdomain set (an app, a preview) does not hide the real one.
+    assert.equal((await request('/api/overview', { cookie: `fox_session=junk; ${cookie}` })).status, 200);
+    // The branch the server deploys: what fox-update reads, and only release or main.
+    assert.deepEqual(await (await request('/api/deploy', { cookie })).json(), { available: true, branch: 'release' });
+    assert.equal((await post('/api/deploy', { branch: 'evil; rm -rf /' }, { cookie })).status, 400);
+    assert.deepEqual(await (await post('/api/deploy', { branch: 'main' }, { cookie })).json(), { available: true, branch: 'main' });
+    assert.equal(await readFile(join(home, '.config', 'fox', 'deploy-branch'), 'utf8'), 'main\n');
+    assert.equal((await post('/api/deploy', { branch: 'main' })).status, 401, 'needs the passkey');
     const login = await (await post('/api/auth/login/options', {})).json();
     const getClient = Buffer.from(JSON.stringify({ type: 'webauthn.get', challenge: login.options.challenge, origin }));
     const signedAuth = Buffer.concat([hash('fox.example.test'), Buffer.from([0x05, 0, 0, 0, 1])]);

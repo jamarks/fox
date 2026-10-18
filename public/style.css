@@ -629,6 +629,7 @@ body.metrics-page { display: block; height: auto; min-height: 100%; }
 .jl-row .jwhen, .jl-row .jnext { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
 .jl-row .jwhen { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .jl-row .jnext.running { color: var(--warn); }
+.jl-row .jnext.approve { color: var(--accent); }
 .jl-row .jlast { grid-column: 2 / 5; font-size: 12px; color: var(--muted); display: flex; gap: 8px; align-items: center; min-width: 0; }
 .jl-row .jlast span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .jl-row .jlast.bad span { color: var(--err); }

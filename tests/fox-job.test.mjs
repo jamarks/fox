@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { parseDays, parseAdd, defaultTz } from '../bin/fox-job.mjs';
 import { withFoxBlock, ensureFoxNotes, foxNotes } from '../notes.mjs';
+import { createJobStore } from '../jobs.mjs';
 const run = promisify(execFile);
 const cli = new URL('../bin/fox-job.mjs', import.meta.url).pathname;
 
@@ -42,7 +43,13 @@ test('fox-job manages jobs end to end, sharing the panel\'s store', async () => 
   await writeFile(join(base, 'work', 'jobs', 'report.py'), 'print("hi")\n');
   const env = { ...process.env, FOX_STATE_DIR: join(base, 'state'), FOX_DEFAULT_TZ: 'Europe/Berlin' };
   const fox = (...args) => run(process.execPath, [cli, ...args], { env, cwd: join(base, 'work') }).then((r) => r.stdout);
-  assert.match(await fox('add', 'report', '--script', 'jobs/report.py', '--daily', '08:00', '--days', 'mon-fri'), /Created report: Mon–Fri 08:00 \(Europe\/Berlin\), next/);
+  assert.match(await fox('add', 'report', '--script', 'jobs/report.py', '--daily', '08:00', '--days', 'mon-fri'), /Created report: Mon–Fri 08:00 \(Europe\/Berlin\)\. It waits for the user to approve it/);
+  assert.match(await fox('list'), /report\twaiting for approval\tnext -\tlast never/);
+  await assert.rejects(fox('resume', 'report'), /approve it on fox's Jobs page/);
+  await assert.rejects(fox('run', 'report'), /approve it on fox's Jobs page/);
+  // The user approves it on fox's page; from then on the terminal manages it.
+  const [job] = JSON.parse(await readFile(join(base, 'state', 'jobs.json'), 'utf8'));
+  await createJobStore({ stateDir: join(base, 'state') }).update(job.id, { enabled: true });
   assert.match(await fox('list'), /report\tMon–Fri 08:00\tnext .*\tlast never/);
   await fox('pause', 'report');
   assert.match(await fox('list'), /report\tpaused/);

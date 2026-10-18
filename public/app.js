@@ -260,8 +260,8 @@ function sessionCard(s, index = null) {
       <div class="title" title="${esc(s.title)}">${esc(displayTitle(s))}</div>
       <div class="actions">
         ${s.terminal ? `<button class="icon ${state.pinned.has(s.terminal) ? 'on' : ''}" data-pin="${esc(s.terminal)}" title="${state.pinned.has(s.terminal) ? 'Unpin tab' : 'Pin as tab'}">${ICON.pin}</button>` : ''}
-        <button class="icon" data-rename="${s.id}" title="Rename">${ICON.rename}</button>
-        <button class="icon" data-${s.archived ? 'unarchive' : 'archive'}="${s.id}" title="${s.archived ? 'Restore' : (s.terminal ? 'Archive (stops the fx process)' : 'Archive')}">${s.archived ? ICON.restore : ICON.archive}</button>
+        <button class="icon" data-rename="${esc(s.id)}" title="Rename">${ICON.rename}</button>
+        <button class="icon" data-${s.archived ? 'unarchive' : 'archive'}="${esc(s.id)}" title="${s.archived ? 'Restore' : (s.terminal ? 'Archive (stops the fx process)' : 'Archive')}">${s.archived ? ICON.restore : ICON.archive}</button>
       </div>
     </div>
     ${s.firstPrompt ? `<div class="prompt">${esc(s.firstPrompt)}</div>` : ''}
@@ -283,7 +283,7 @@ function childrenHtml(parent) {
   const parts = [`${kids.length} subagent${kids.length === 1 ? '' : 's'}`];
   if (working) parts.push(`<span class="st working" title="${working} working"><i></i>${working}</span>`);
   if (waiting) parts.push(`<span class="st ready"><i></i>${waiting} waiting</span>`);
-  return `<div class="children-count" data-child="${kids[0].id}" title="open the subagent board">${ICON.threads} ${parts.join(' · ')}</div>`;
+  return `<div class="children-count" data-child="${esc(kids[0].id)}" title="open the subagent board">${ICON.threads} ${parts.join(' · ')}</div>`;
 }
 
 // Drag a project header to reorder groups.
@@ -397,7 +397,7 @@ function selectSession(id) {
 
 async function renameInline(id) {
   const s = sessionById(id);
-  const titleEl = document.querySelector(`.session[data-id="${id}"] .title`);
+  const titleEl = document.querySelector(`.session[data-id="${CSS.escape(id)}"] .title`);
   if (!titleEl) return;
   const input = document.createElement('input');
   input.className = 'rename';
@@ -1029,7 +1029,7 @@ function agentsBoard(parent, { selectedId = null } = {}) {
           ? rounds.map((r, k) => `<div class="agent-note">round ${k + 1} · ${esc(r.message.slice(0, 160))}</div><div class="agent-answer">${esc(r.text)}</div>`).join('')
           : res ? `<div class="agent-answer">${esc(res)}</div>` : ''}`;
     const selected = c.id === selectedId;
-    return `<div class="agent ${open ? 'open' : ''} ${selected ? 'selected' : ''}" data-agent="${c.id}" title="${open ? '' : esc(task)}">${head}${body}${open && !selected ? `<a class="agent-open" href="#" data-child="${c.id}">its conversation →</a>` : ''}</div>`;
+    return `<div class="agent ${open ? 'open' : ''} ${selected ? 'selected' : ''}" data-agent="${esc(c.id)}" title="${open ? '' : esc(task)}">${head}${body}${open && !selected ? `<a class="agent-open" href="#" data-child="${esc(c.id)}">its conversation →</a>` : ''}</div>`;
   };
   // A header only where it says something: the same task on several models, or a named agent.
   const html = [...groups.values()].map((g) => {
@@ -1141,7 +1141,7 @@ async function markdownView(text) {
     code.classList.add('hljs');
   }
   const css = getComputedStyle(document.body), v = (n) => css.getPropertyValue(n).trim();
-  const page = `<!doctype html><meta charset="utf-8"><base target="_blank"><style>
+  const page = `<!doctype html><meta charset="utf-8"><meta name="referrer" content="no-referrer"><base target="_blank"><style>
     :root{color-scheme:dark;--bg:${v('--bg').startsWith('rgba') ? '#0b0d14' : v('--bg')};--text:${v('--text')};--muted:${v('--muted')};--border:${v('--border')};--panel:${v('--panel-2')};--accent:${v('--accent')};--ok:${v('--ok')};--warn:${v('--warn')};--err:${v('--err')};}
     ${MD_CSS}</style><article>${doc.innerHTML}</article>`;
   return `<iframe class="doc-frame" sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc="${esc(page)}"></iframe>`;
@@ -1382,7 +1382,7 @@ async function loadTranscript(id, quiet = false) {
   // No title on a desktop: the session is highlighted on the left. A subagent gets a way back to its parent;
   // on a phone, where the list is another screen, the name and model stay.
   $('#transcript-title').innerHTML = isChild
-    ? `<a href="#" class="crumb" data-goto="${parent.id}">← ${esc(displayTitle(parent))}</a>`
+    ? `<a href="#" class="crumb" data-goto="${esc(parent.id)}">← ${esc(displayTitle(parent))}</a>`
     : mobileLayout.matches ? esc(displayTitle(s)) : '';
   const u = s.usage;
   const tokens = u.input + u.output ? `${fmtTokens(u.input)} in · ${fmtTokens(u.output)} out · ${fmtTokens(u.cacheRead)} cache` : '';
@@ -1399,7 +1399,7 @@ async function loadTranscript(id, quiet = false) {
   // or when global search or the replies inbox pointed at one message.
   const showConvo = isChild || convoShown.has(id) || mobileLayout.matches;
   if (mobileLayout.matches) html.push('<div class="section-title">conversation</div>');
-  else if (!isChild && showConvo) html.push(`<div class="section-title">conversation · <a href="#" data-hide-convo="${id}">hide</a></div>`);
+  else if (!isChild && showConvo) html.push(`<div class="section-title">conversation · <a href="#" data-hide-convo="${esc(id)}">hide</a></div>`);
   let messageIndex = 0;
   for (const ev of showConvo ? events : []) {
     if (mobileLayout.matches && ev.kind !== 'user' && ev.kind !== 'assistant') continue;
@@ -1632,7 +1632,22 @@ function openSettings() {
   renderThemeDots();
   loadTools();
   loadFxSettings();
+  loadDeploy();
 }
+// On a server: the branch fox-update deploys. release = merged pull requests; main = every push, fx's too.
+const DEPLOY_SUB = { release: 'merged pull requests go live', main: 'every push goes live within a minute' };
+function renderDeploy(d) {
+  $('#settings-deploy').classList.toggle('hidden', !d?.available);
+  if (!d?.available) return;
+  for (const b of document.querySelectorAll('#deploy-seg [data-deploy]')) b.classList.toggle('on', b.dataset.deploy === d.branch);
+  $('#deploy-sub').textContent = DEPLOY_SUB[d.branch];
+}
+async function loadDeploy() { try { renderDeploy(await (await fetch('/api/deploy')).json()); } catch {} }
+$('#deploy-seg').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-deploy]'); if (!b || b.classList.contains('on')) return;
+  const r = await fetch('/api/deploy', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ branch: b.dataset.deploy }) });
+  if (r.ok) renderDeploy(await r.json()); else toast('Could not change it');
+});
 function closeSettings() {
   if (!settingsOpen()) return;
   $('#settings-view').classList.add('hidden');
@@ -2023,6 +2038,8 @@ function whenText(ms) {
   return days === 0 ? `today ${hm}` : days === 1 ? `tomorrow ${hm}` : days === -1 ? `yesterday ${hm}` : `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} ${hm}`;
 }
 const jobState = (j) => j.lastRun?.status === 'running' ? 'running' : !j.enabled ? 'paused' : j.lastRun?.status ?? 'none';
+// Added from a terminal (fx, with fox-job): it waits for your OK before it ever runs.
+const pausedText = (j) => j.pendingApproval ? 'needs your OK' : 'paused';
 const BAD = ['failed', 'timeout', 'interrupted'];
 const linkChips = (links = []) => links.filter((l) => /^https?:\/\//.test(l.url)).map((l) => `<a class="run-link" href="${esc(l.url)}" target="_blank" rel="noopener" data-link>${esc(l.label)}</a>`).join('');
 async function loadJobs() {
@@ -2046,7 +2063,7 @@ function renderJobList() {
   if (!state.jobs.length) { box.innerHTML = '<div class="jobs-none">No jobs yet. A job is a script on a schedule: New job to make one, or ask fx.</div>'; return; }
   box.innerHTML = state.jobs.map((j) => {
     const st = jobState(j), r = j.lastRun;
-    const right = st === 'running' ? `<span class="jnext running">running ${runDur(r)}</span>` : !j.enabled ? '<span class="jnext">paused</span>' : `<span class="jnext">${esc(whenText(j.nextRun))}</span>`;
+    const right = st === 'running' ? `<span class="jnext running">running ${runDur(r)}</span>` : !j.enabled ? `<span class="jnext${j.pendingApproval ? ' approve' : ''}">${pausedText(j)}</span>` : `<span class="jnext">${esc(whenText(j.nextRun))}</span>`;
     const last = r ? `<div class="jlast ${BAD.includes(r.status) ? 'bad' : ''}"><span>${esc(whenText(r.startedAt))} · ${esc(r.summary ?? r.status)}</span>${linkChips(r.links)}</div>` : '<div class="jlast"><span>never ran</span></div>';
     return `<div class="jl-row" data-job="${j.id}" role="listitem"><span class="jdot ${st}"></span><span class="jname">${esc(j.name)}</span><span class="jwhen">${esc(j.scheduleText)}</span>${right}${last}</div>`;
   }).join('');
@@ -2077,8 +2094,8 @@ async function renderJobView() {
   const j = state.jobs.find((x) => x.id === state.jobView);
   if (!j) return openJobs();
   $('#job-name').textContent = j.name;
-  $('#job-when').textContent = j.enabled ? j.scheduleText : `${j.scheduleText} · paused`;
-  $('#job-pause').textContent = j.enabled ? 'Pause' : 'Resume';
+  $('#job-when').textContent = j.enabled ? j.scheduleText : `${j.scheduleText} · ${pausedText(j)}`;
+  $('#job-pause').textContent = j.enabled ? 'Pause' : j.pendingApproval ? 'Approve' : 'Resume';
   $('#job-meta').textContent = `${shortPath(j.cwd)}/${j.script}${j.args?.length ? ' ' + j.args.join(' ') : ''} · ${j.tz} · stops after ${j.timeoutMin} min${j.enabled && j.nextRun ? ` · next ${whenText(j.nextRun)}` : ''}`;
   const runs = await (await fetch(`/api/jobs/${j.id}/runs`)).json().catch(() => []);
   if (state.jobView !== j.id) return;

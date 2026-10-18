@@ -8,6 +8,7 @@ import { join, resolve, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID, createHash } from 'node:crypto';
+import { SAFE_GIT } from './gitsync.mjs';
 const execFileP = promisify(execFile);
 
 export const WORKSPACE_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
@@ -68,7 +69,7 @@ export function createWorkspaces({
     const base = { owner: r.owner, name: r.name, dir: r.dir };
     if (cloning.has(k)) return { ...base, status: 'cloning' };
     if (!existsSync(join(dir, '.git'))) return { ...base, status: errors.has(k) ? 'error' : 'missing', error: errors.get(k) ?? null };
-    const run = (args) => git(['-C', dir, ...args], { timeout: 5000 }).catch(() => '');
+    const run = (args) => git(['-C', dir, ...SAFE_GIT, ...args], { timeout: 5000 }).catch(() => '');
     const [branch, porcelain, counts] = await Promise.all([
       run(['rev-parse', '--abbrev-ref', 'HEAD']), run(['status', '--porcelain']),
       run(['rev-list', '--left-right', '--count', '@{u}...HEAD']),
@@ -141,11 +142,14 @@ export function createWorkspaces({
       const repoDirs = new Set(ws.repos.map((r) => r.dir));
       for (const r of ws.repos) {
         const dir = join(ws.dir, r.dir);
-        if (!existsSync(join(dir, '.git'))) continue;
-        const run = (args) => git(['-C', dir, ...args], { timeout: 10000 });
+        if (!existsSync(dir)) continue; // never cloned: nothing to lose
+        // A repo folder without .git (a failed clone, or .git removed) is plain files: nothing says they are pushed.
+        if (!existsSync(join(dir, '.git'))) { if ((await readdir(dir).catch(() => [])).length) out.push(`${r.dir}: files outside git`); continue; }
+        const run = (args) => git(['-C', dir, ...SAFE_GIT, ...args], { timeout: 10000 });
         const dirty = await run(['status', '--porcelain']).catch(() => 'unknown');
         if (dirty) out.push(`${r.dir}: uncommitted changes`);
-        const unpushed = await run(['log', '--branches', '--not', '--remotes', '--oneline']).catch(() => 'unknown');
+        // Commits on any ref (a detached HEAD and a stash too) that no remote has.
+        const unpushed = await run(['log', '--all', '--not', '--remotes', '--oneline', '-n', '1']).catch(() => 'unknown');
         if (unpushed) out.push(`${r.dir}: commits not pushed`);
       }
       for (const entry of await readdir(ws.dir).catch(() => [])) {

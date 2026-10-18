@@ -8,7 +8,7 @@ Every session, every subagent, one terminal that never dies. Nothing leaves your
 <p align="center"><sub>Independent project, not affiliated with Vercel. fx is <a href="https://github.com/vercel-labs/fx">vercel-labs/fx</a>, Apache-2.0.</sub></p>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jamarks/fox/main/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jamarks/fox/release/setup.sh | bash
 ```
 
 <p align="center"><sub>Checks Node 20+, tmux and <a href="https://fx.sh">fx</a> (offers to install the last two), installs fox and opens http://127.0.0.1:4848. Details in <a href="#install-and-run">Install and run</a>.</sub></p>
@@ -91,13 +91,13 @@ You need Node 20+, [fx](https://fx.sh) and tmux (`brew install tmux`).
 One command checks what is missing, installs fox and starts it ([setup.sh](setup.sh); `FOX_NO_START=1` only installs):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jamarks/fox/main/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jamarks/fox/release/setup.sh | bash
 ```
 
 Or with npm, if Node, tmux and fx are already there:
 
 ```bash
-npm install -g https://github.com/jamarks/fox/archive/refs/heads/main.tar.gz && fox
+npm install -g https://github.com/jamarks/fox/archive/refs/heads/release.tar.gz && fox
 ```
 
 Or run from a checkout without installing a global command:

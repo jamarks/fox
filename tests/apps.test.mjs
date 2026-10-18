@@ -41,3 +41,22 @@ test('the router forwards by name, as localhost, and says when an app is missing
     assert.equal((await get('gone.jwass.xyz')).status, 502);
   } finally { router.close(); app.close(); }
 });
+
+test('the router keeps Cloudflare Access proof from the app, and never reaches a port fox denies', async () => {
+  const reg = createAppRegistry({ stateDir: await mkdtemp(join(tmpdir(), 'fox-apps-')) });
+  const app = http.createServer((req, res) => res.end(JSON.stringify({ cookie: req.headers.cookie ?? null, jwt: req.headers['cf-access-jwt-assertion'] ?? null })));
+  await new Promise((r) => app.listen(0, '127.0.0.1', r));
+  await reg.set('folio', app.address().port);
+  const router = createAppRouter({ registry: reg, domain: 'jwass.xyz' });
+  const guarded = createAppRouter({ registry: reg, domain: 'jwass.xyz', denyPorts: [app.address().port] });
+  await new Promise((r) => router.listen(0, '127.0.0.1', r));
+  await new Promise((r) => guarded.listen(0, '127.0.0.1', r));
+  const get = (port, headers) => new Promise((resolve, reject) => http.get({ host: '127.0.0.1', port, path: '/', headers: { host: 'folio.jwass.xyz', ...headers } }, (res) => {
+    let body = ''; res.on('data', (c) => (body += c)); res.on('end', () => resolve({ status: res.statusCode, body }));
+  }).on('error', reject));
+  try {
+    const r = await get(router.address().port, { cookie: 'CF_Authorization=secret; theme=dark', 'cf-access-jwt-assertion': 'secret' });
+    assert.deepEqual(JSON.parse(r.body), { cookie: 'theme=dark', jwt: null });
+    assert.equal((await get(guarded.address().port, {})).status, 404, 'apps.json pointing at fox is not followed');
+  } finally { router.close(); guarded.close(); app.close(); }
+});

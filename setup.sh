@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # fox installer: checks Node, tmux and fx, installs fox from GitHub and starts it.
-#   curl -fsSL https://raw.githubusercontent.com/jamarks/fox/main/setup.sh | bash
-# FOX_NO_START=1 installs without starting fox.
+#   curl -fsSL https://raw.githubusercontent.com/jamarks/fox/release/setup.sh | bash
+# FOX_NO_START=1 installs without starting fox. FOX_REF=<commit, branch or tag> installs that instead of release.
 set -euo pipefail
 
+# What gets installed is one exact commit: the one `release` points to (what the server runs, after its tests),
+# never whatever `main` has at that moment. Its dependencies are the ones npm-shrinkwrap.json pins.
 # The tarball, not "github:jamarks/fox": npm fails installing a git dependency globally when it has
 # install scripts (node-pty), with "spawn sh ENOENT".
-REPO="https://github.com/jamarks/fox/archive/refs/heads/main.tar.gz"
+REF="${FOX_REF:-release}"
+COMMIT="$(curl -fsSL -H 'Accept: application/vnd.github.sha' "https://api.github.com/repos/jamarks/fox/commits/$REF" 2>/dev/null || true)"
+[[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || COMMIT="$REF" # GitHub's API is rate-limited: fall back to the name
+REPO="https://github.com/jamarks/fox/archive/$COMMIT.tar.gz"
 bold=$'\033[1m'; dim=$'\033[2m'; red=$'\033[31m'; green=$'\033[32m'; reset=$'\033[0m'
 step() { printf '%s›%s %s\n' "$bold" "$reset" "$1"; }
 ok() { printf '  %s✓%s %s\n' "$green" "$reset" "$1"; }
@@ -46,7 +51,7 @@ step "fox"
 npm install -g "$REPO" --no-fund --no-audit --loglevel=error \
   || fail "npm could not install globally. If it is a permissions error, use a Node from nvm or Homebrew instead of the system one."
 FOX="$(command -v fox || echo "$(npm prefix -g)/bin/fox")"
-ok "installed $FOX"
+ok "installed $FOX (${COMMIT:0:12})"
 
 if [ "${FOX_NO_START:-}" = "1" ]; then
   printf '\nRun %sfox%s to start it.\n' "$bold" "$reset"

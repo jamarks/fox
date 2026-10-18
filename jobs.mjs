@@ -8,7 +8,9 @@
 // A script prints "FOX_SUMMARY: <one line>" to say what the run did; the last such line is its summary.
 // "FOX_LINK: <label> <https://…>" adds a link to the run (a pull request, a report); up to 5, http(s) only.
 // Times missed while the runner was down are skipped, not caught up in a burst.
-import { readFile, writeFile, mkdir, rename, readdir, rm, stat, open } from 'node:fs/promises';
+// A job added from a terminal (fox-job, which is how fx adds one) starts paused and waits for the user's OK on
+// fox's page (`pendingApproval`): until then nothing runs it, and the terminal cannot resume or run it.
+import { readFile, writeFile, mkdir, rename, readdir, rm, stat, lstat, open } from 'node:fs/promises';
 import { existsSync, createWriteStream } from 'node:fs';
 import { fastForward } from './gitsync.mjs';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +25,7 @@ export const JOB_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
 const KEEP_RUNS = 50;
 const LOG_LIMIT = 5 * 1024 * 1024;
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
+const APPROVE_FIRST = 'This job waits for the user to approve it on fox\'s Jobs page.';
 
 export function createJobStore({ stateDir }) {
   const file = join(stateDir, 'jobs.json');
@@ -30,6 +33,21 @@ export function createJobStore({ stateDir }) {
   const runsDir = (id) => join(root, id, 'runs');
   const triggers = join(root, 'triggers');
 
+  // fox (the page) and fox-job (a terminal) both edit jobs.json: one writer at a time, or one's change is lost.
+  // The lock is a folder (mkdir is atomic); one left by a process that died is taken over after 10 s.
+  const lockDir = `${file}.lock`;
+  async function locked(fn) {
+    await mkdir(stateDir, { recursive: true, mode: 0o700 });
+    for (let i = 0; ; i++) {
+      try { await mkdir(lockDir); break; } catch (err) {
+        if (err.code !== 'EEXIST') throw err;
+        const age = Date.now() - ((await stat(lockDir).catch(() => null))?.mtimeMs ?? Date.now());
+        if (age > 10_000 || i > 200) { await rm(lockDir, { recursive: true, force: true }); continue; }
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    }
+    try { return await fn(); } finally { await rm(lockDir, { recursive: true, force: true }); }
+  }
   async function load() { try { const d = JSON.parse(await readFile(file, 'utf8')); return Array.isArray(d) ? d : []; } catch { return []; } }
   async function save(list) {
     await mkdir(stateDir, { recursive: true, mode: 0o700 });
@@ -76,36 +94,43 @@ export function createJobStore({ stateDir }) {
     load,
     async list() { return load(); },
     async get(id) { return (await load()).find((j) => j.id === id) ?? null; },
-    async create(def) {
+    create: (def, { from = 'page' } = {}) => locked(async () => {
       const all = await load();
       const job = clean({ args: [], enabled: true, timeoutMin: 30, ...def });
+      if (from === 'terminal') Object.assign(job, { enabled: false, pendingApproval: true });
       if (!job.name) throw fail('Name the job.');
       if (all.some((j) => j.name === job.name)) throw fail(`A job named ${job.name} already exists.`, 409);
       await checkTarget(job.cwd, job.script);
       Object.assign(job, { id: randomUUID(), createdAt: Date.now() });
       all.push(job); await save(all);
       return job;
-    },
-    async update(id, def) {
+    }),
+    update: (id, def, { from = 'page' } = {}) => locked(async () => {
       const all = await load();
       const i = all.findIndex((j) => j.id === id);
       if (i < 0) throw fail('Job not found.', 404);
+      if (all[i].pendingApproval && from === 'terminal' && def.enabled) throw fail(APPROVE_FIRST, 403);
       const job = clean(def, all[i]);
+      if (from === 'page' && job.enabled) delete job.pendingApproval; // turning it on in fox is the OK
       if (all.some((j) => j.id !== id && j.name === job.name)) throw fail(`A job named ${job.name} already exists.`, 409);
       if (def.cwd !== undefined || def.script !== undefined) await checkTarget(job.cwd, job.script);
       all[i] = { ...job, updatedAt: Date.now() };
       await save(all);
       return all[i];
-    },
+    }),
     async remove(id) {
-      const all = await load();
-      if (!all.some((j) => j.id === id)) throw fail('Job not found.', 404);
-      await save(all.filter((j) => j.id !== id));
+      await locked(async () => {
+        const all = await load();
+        if (!all.some((j) => j.id === id)) throw fail('Job not found.', 404);
+        await save(all.filter((j) => j.id !== id));
+      });
       await rm(join(root, id), { recursive: true, force: true });
       await rm(join(triggers, id), { force: true });
     },
-    async trigger(id) {
-      if (!(await store.get(id))) throw fail('Job not found.', 404);
+    async trigger(id, { from = 'page' } = {}) {
+      const job = await store.get(id);
+      if (!job) throw fail('Job not found.', 404);
+      if (job.pendingApproval && from === 'terminal') throw fail(APPROVE_FIRST, 403);
       await mkdir(triggers, { recursive: true, mode: 0o700 });
       await writeFile(join(triggers, id), String(Date.now()));
     },
@@ -143,7 +168,8 @@ export function createJobStore({ stateDir }) {
       if (!/^[0-9A-Za-z_-]+$/.test(runId)) return null;
       const run = (await store.runs(id)).find((r) => r.id === runId);
       if (!run?.outputs?.some((o) => o.name === name)) return null;
-      return join(runsDir(id), runId, 'out', basename(name));
+      const path = join(runsDir(id), runId, 'out', basename(name));
+      return (await lstat(path).catch(() => null))?.isFile() ? path : null; // never through a symlink
     },
     // Definitions with their next run, last run and plain-words schedule, for the page.
     async overview(now = Date.now()) {
@@ -163,7 +189,8 @@ export function commandFor(script, args = []) {
   if (ext === '.py') return ['python3', ['-u', script, ...args]];
   if (ext === '.mjs' || ext === '.js' || ext === '.cjs') return [process.execPath, [script, ...args]];
   if (ext === '.sh') return ['bash', [script, ...args]];
-  return [script, args];
+  // A bare name ("deploy") would be looked up on PATH; run the file in the job's folder instead.
+  return [script.includes('/') ? script : `./${script}`, args];
 }
 
 // Before each run, the job's folder is brought up to date when it is a clean checkout (see gitsync.mjs).
@@ -193,7 +220,7 @@ export function createRunner({ store, now = () => Date.now(), spawn = nodeSpawn,
     if (stopped) return;
     // A new version was deployed: restart now if idle, otherwise after the run in progress (see afterRun).
     if (!running && restartFile && existsSync(restartFile)) { await rm(restartFile, { force: true }); log('fox-jobs: restarting for a new version'); stopped = true; return onRestart(); }
-    const jobs = await store.load();
+    const jobs = (await store.load()).filter((j) => !j.pendingApproval);
     await plan(jobs);
     for (const id of await store.takeTriggers()) if (!queue.some((q) => q.id === id)) queue.push({ id, reason: 'manual' });
     const t = now();
@@ -232,9 +259,12 @@ export function createRunner({ store, now = () => Date.now(), spawn = nodeSpawn,
     const readLine = (line) => {
       const m = line.match(/^FOX_SUMMARY:\s*(.*)$/); if (m) run.summary = m[1].slice(0, 300);
       const l = line.match(/^FOX_LINK:\s*(?:(.*?)\s+)?(https?:\/\/\S+)\s*$/);
-      if (l && run.links.length < 5) run.links.push({ label: (l[1] || new URL(l[2]).hostname).slice(0, 60), url: l[2].slice(0, 500) });
+      // Any output can look like this line (a test printing it), so a bad URL is skipped, never thrown.
+      if (l && run.links.length < 5 && URL.canParse(l[2])) run.links.push({ label: (l[1] || new URL(l[2]).hostname).slice(0, 60), url: l[2].slice(0, 500) });
     };
+    let ended = false;
     const take = (chunk) => {
+      if (ended) return;
       const text = chunk.toString('utf8');
       for (const line of (carry + text).split('\n').slice(0, -1)) readLine(line);
       carry = (carry + text).split('\n').pop().slice(-2000);
@@ -254,25 +284,32 @@ export function createRunner({ store, now = () => Date.now(), spawn = nodeSpawn,
       } catch (err) { return done({ status: 'failed', error: err.message }); }
       run.pid = child.pid; write();
       child.stdout.on('data', take); child.stderr.on('data', take);
-      let timedOut = false;
+      let timedOut = false, watchdog = null;
       const limit = setTimeout(() => {
         timedOut = true;
         try { process.kill(-child.pid, 'SIGTERM'); } catch {}
         setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }, 10_000).unref?.();
+        // Something that left the process group can keep the output open, and the run would never end:
+        // a little after the kill the run is over anyway, so the next job is not held up.
+        watchdog = setTimeout(() => done({ status: 'timeout', exitCode: null, signal: 'SIGKILL' }), 15_000);
+        watchdog.unref?.();
       }, (job.timeoutMin ?? 30) * minuteMs);
-      child.once('error', (err) => { clearTimeout(limit); done({ status: 'failed', error: err.message }); });
+      child.once('error', (err) => { clearTimeout(limit); clearTimeout(watchdog); done({ status: 'failed', error: err.message }); });
       child.once('close', (code, signal) => {
-        clearTimeout(limit);
+        clearTimeout(limit); clearTimeout(watchdog);
+        // What the script left running in the background ends with the run: the time limit covers all of it.
+        try { process.kill(-child.pid, 'SIGTERM'); } catch {}
         done(timedOut ? { status: 'timeout', exitCode: code, signal } : { status: code === 0 ? 'ok' : 'failed', exitCode: code, signal });
       });
     });
+    ended = true;
     if (carry) readLine(carry);
     await new Promise((r) => logStream.end(r));
     Object.assign(run, result, { endedAt: now() });
     delete run.pid;
     run.outputs = [];
     for (const name of await readdir(outDir).catch(() => [])) {
-      const s = await stat(join(outDir, name)).catch(() => null);
+      const s = await lstat(join(outDir, name)).catch(() => null);
       if (s?.isFile()) run.outputs.push({ name, size: s.size });
     }
     if (!run.summary && run.status !== 'ok') run.summary = result.error ?? (run.status === 'timeout' ? `stopped after ${job.timeoutMin ?? 30} min` : `exit code ${result.exitCode ?? result.signal}`);
