@@ -24,6 +24,9 @@ test('add arguments: local command or remote HTTP server', () => {
   assert.deepEqual(addArgs(TOOLS.find((t) => t.id === 'browser')), ['mcp', 'add', 'playwright', 'npx', '@playwright/mcp@latest']);
   assert.deepEqual(addArgs(TOOLS.find((t) => t.id === 'docs')), ['mcp', 'add', '--transport', 'http', 'docs', 'https://mcp.context7.com/mcp']);
   assert.deepEqual(addArgs(TOOLS.find((t) => t.id === 'vercel')), ['mcp', 'add', '--transport', 'http', 'vercel', 'https://mcp.vercel.com']);
+  const linear = TOOLS.find((t) => t.id === 'linear');
+  assert.deepEqual(addArgs(linear), ['mcp', 'add', '--transport', 'http', 'linear', 'https://mcp.linear.app/mcp']);
+  assert.ok(isInstalled(linear, { mcp: { work: { type: 'http', url: 'https://mcp.linear.app/mcp', bearer_token_env: 'LINEAR_API_KEY' } } }), 'a Linear set up by hand with a key counts as installed');
 });
 
 test('a tool turns off and on through its enabled flag, keeping its own setup', async () => {

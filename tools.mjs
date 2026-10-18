@@ -36,6 +36,17 @@ export const TOOLS = [
     auth: 'oauth',
     match: /mcp\.vercel\.com/,
   },
+  {
+    // Sign in is OAuth. A Linear API key works too, without signing in: put it in an environment variable fx
+    // sessions get (on a server, a root-only EnvironmentFile) and set "bearer_token_env" on this entry in fx's mcp.json.
+    id: 'linear',
+    name: 'linear',
+    label: 'Linear',
+    description: 'Read, create and move your Linear issues',
+    url: 'https://mcp.linear.app/mcp',
+    auth: 'oauth',
+    match: /mcp\.linear\.app/,
+  },
 ];
 
 // Arguments for `fx mcp ...add`: a local command, or a remote server over HTTP.
