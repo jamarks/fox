@@ -713,3 +713,19 @@ a.set-val[href]:hover { color: var(--text); }
 .md table { border-collapse: collapse; font-size: .92em; min-width: 100%; }
 .md th, .md td { text-align: left; vertical-align: top; padding: 6px 10px 6px 0; border-bottom: 1px solid var(--border); }
 .md th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+/* Search: solid over the sky theme; on a phone, a full screen of its own */
+#global-search-cancel { display: none; color: var(--accent); font-size: 15px; padding: 6px 0 6px 6px; background: none; border: 0; }
+body.night #global-search { background: rgba(3, 5, 12, .75); }
+body.night .global-search-box { background: #0d101c; }
+@media (max-width: 1100px) {
+  #global-search { padding: 0; background: var(--panel); align-items: stretch; }
+  body.night #global-search { background: #0d101c; }
+  .global-search-box { width: 100%; max-height: none; height: 100%; border: 0; border-radius: 0; box-shadow: none; }
+  .global-search-head { padding: calc(env(safe-area-inset-top) + 10px) 16px 10px; }
+  .global-search-head input { font-size: 17px; min-width: 0; flex: 1; }
+  .global-search-head kbd, .global-search-footer { display: none; }
+  #global-search-cancel { display: block; }
+  #global-search-results { flex: 1; padding: 4px 6px; }
+  .global-search-result { padding: 12px 10px; border-bottom: 1px solid var(--border); border-radius: 0; }
+  .global-search-result .gs-text { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+}

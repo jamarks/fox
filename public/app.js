@@ -1270,7 +1270,10 @@ function closeGlobalSearch() {
   clearTimeout(globalTimer);
   globalRequest++; // discard responses from the previous query/opening
 }
+// Messages are Markdown; a one-line preview reads better without the marks (**, `, #, table bars).
+const plainSnippet = (text) => text.replace(/\*\*|__|`/g, '').replace(/^\s*(#{1,6}|>)\s*/gm, '').replace(/\s*\|\s*/g, ' · ').replace(/^ · | · $/g, '').replace(/\s+/g, ' ').trim();
 function markedMatch(text, query) {
+  text = plainSnippet(text);
   const at = text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
   return at < 0 ? esc(text) : esc(text.slice(0, at)) + '<mark>' + esc(text.slice(at, at + query.length)) + '</mark>' + esc(text.slice(at + query.length));
 }
@@ -1316,6 +1319,7 @@ function chooseGlobalHit(hit) {
 }
 $('#global-search-open').addEventListener('click', openGlobalSearch);
 globalSearch.addEventListener('click', (e) => { if (e.target === globalSearch) closeGlobalSearch(); });
+$('#global-search-cancel').addEventListener('click', closeGlobalSearch);
 globalResults.addEventListener('click', (e) => chooseGlobalHit(globalHits[Number(e.target.closest('[data-result]')?.dataset.result)]));
 globalQuery.addEventListener('input', () => {
   clearTimeout(globalTimer);
