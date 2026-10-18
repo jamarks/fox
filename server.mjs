@@ -23,8 +23,9 @@ import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
 import { createAppRegistry, createAppRouter } from './apps.mjs';
 import { createFxSettings } from './fxsettings.mjs';
+import { fastForward } from './gitsync.mjs';
 import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
-import { createJobStore, createRunner } from './jobs.mjs';
+import { createJobStore, createRunner, updateJobRepo } from './jobs.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 import { ensureFoxNotes, foxNotes } from './notes.mjs';
 const execFileP = promisify(execFile);
@@ -105,7 +106,7 @@ if (APPS) {
 if ((process.env.FOX_FX_NOTES ?? (process.env.FOX_PUBLIC_ORIGIN ? '1' : '0')) === '1') {
   ensureFoxNotes(join(homedir(), '.fx', 'AGENTS.md'), foxNotes({ preview: PREVIEW, apps: APPS })).catch((err) => console.error(`fox: could not update fx instructions: ${err.message}`));
 }
-const inlineRunner = process.env.FOX_JOBS_RUNNER === 'external' ? null : createRunner({ store: jobStore });
+const inlineRunner = process.env.FOX_JOBS_RUNNER === 'external' ? null : createRunner({ store: jobStore, beforeRun: updateJobRepo });
 inlineRunner?.start().catch((err) => console.error(`fox: jobs runner failed: ${err.message}`));
 // Scripts a job can run in a folder: .py, .mjs, .js, .sh up to three levels deep, skipping dependencies and dot folders.
 async function jobScripts(cwd) {
@@ -895,10 +896,22 @@ function passHyperlinks() {
 }
 passHyperlinks(); // for sessions that already run (a browser attaching later picks it up)
 
+// fx starts on current code: the workspace's clean repos on their default branch are fast-forwarded first (see
+// gitsync.mjs). Never more than a few seconds; a repo with work in progress is left alone.
+async function updateWorkspaceRepos(cwd) {
+  const ws = await workspaces.forPath(cwd).catch(() => null);
+  if (!ws?.repos?.length) return;
+  const all = Promise.all(ws.repos.map((r) => fastForward(join(ws.dir, r.dir)).then((x) => {
+    if (x.status === 'updated') console.log(`fox: ${ws.name}/${r.dir} updated ${x.from}..${x.to}`);
+  })));
+  await Promise.race([all, new Promise((r) => setTimeout(r, 8000))]);
+}
+
 async function createTerminal({ cwd, resume, provider = null, model = null }) {
   const name = resume ? `${TMUX_PREFIX}${resume}` : `${TMUX_PREFIX}new-${Date.now().toString(36)}`;
   const existing = (await listTerminals()).find((t) => t.name === name);
   if (existing) return existing;
+  await updateWorkspaceRepos(cwd);
   // New sessions can start on a chosen provider/model; resumed ones keep what the session already has.
   const flags = resume ? '' : `${provider ? ` --provider ${provider}` : ''}${model ? ` --model ${model}` : ''}`;
   const cmd = resume ? `${FX_BIN} session resume ${resume}` : `${FX_BIN}${flags}`;

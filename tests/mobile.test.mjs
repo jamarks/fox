@@ -12,7 +12,7 @@ const freePort = () => new Promise((resolve, reject) => {
   server.listen(0, '127.0.0.1', () => { const port = server.address().port; server.close(() => resolve(port)); });
 });
 async function ready(url) {
-  for (let attempt = 0; attempt < 80; attempt++) {
+  for (let attempt = 0; attempt < 200; attempt++) { // up to 10 s: a busy machine (all tests at once) starts fox slower
     try { return await fetch(url); } catch { await new Promise((r) => setTimeout(r, 50)); }
   }
   throw new Error('mobile server did not start');

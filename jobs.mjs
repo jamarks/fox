@@ -10,6 +10,7 @@
 // Times missed while the runner was down are skipped, not caught up in a burst.
 import { readFile, writeFile, mkdir, rename, readdir, rm, stat, open } from 'node:fs/promises';
 import { existsSync, createWriteStream } from 'node:fs';
+import { fastForward } from './gitsync.mjs';
 import { join, resolve, sep, extname, isAbsolute, basename } from 'node:path';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID, randomBytes } from 'node:crypto';
@@ -162,7 +163,15 @@ export function commandFor(script, args = []) {
   return [script, args];
 }
 
-export function createRunner({ store, now = () => Date.now(), spawn = nodeSpawn, tickMs = 15_000, minuteMs = 60_000, log = console.log, restartFile = null, onRestart = () => {} }) {
+// Before each run, the job's folder is brought up to date when it is a clean checkout (see gitsync.mjs).
+export async function updateJobRepo(job) {
+  const r = await fastForward(job.cwd);
+  if (r.status === 'updated') return `updated ${job.cwd} ${r.from}..${r.to}`;
+  if (r.status === 'skipped' && r.reason !== 'not a git repo') return `${job.cwd} not updated: ${r.reason}`;
+  return null;
+}
+
+export function createRunner({ store, now = () => Date.now(), spawn = nodeSpawn, tickMs = 15_000, minuteMs = 60_000, log = console.log, restartFile = null, onRestart = () => {}, beforeRun = null }) {
   let running = null, current = null, timer = null, stopped = false; // running: the promise; current: what runs
   const queue = [];                 // [{ id, reason }]
   const next = new Map();            // id -> { at, sig }
@@ -230,6 +239,8 @@ export function createRunner({ store, now = () => Date.now(), spawn = nodeSpawn,
       written += chunk.length; logStream.write(chunk);
     };
     log(`fox-jobs: ${job.name} started (${item.reason}), run ${id}`);
+    // For example, bring the job's repo up to date (see gitsync.mjs); what it says goes at the top of the log.
+    if (beforeRun) await Promise.resolve(beforeRun(job)).then((note) => { if (note) logStream.write(`[fox] ${note}\n`); }, () => {});
     const [cmd, args] = commandFor(job.script, job.args ?? []);
     const result = await new Promise((done) => {
       let child;

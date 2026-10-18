@@ -4,11 +4,11 @@
 // is idle and systemd starts it again on the new version.
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { createJobStore, createRunner } from '../jobs.mjs';
+import { createJobStore, createRunner, updateJobRepo } from '../jobs.mjs';
 
 const stateDir = process.env.FOX_STATE_DIR || join(homedir(), '.config', 'fox');
 const store = createJobStore({ stateDir });
-const runner = createRunner({ store, restartFile: join(stateDir, 'jobs', 'restart-requested'), onRestart: () => process.exit(0) });
+const runner = createRunner({ store, restartFile: join(stateDir, 'jobs', 'restart-requested'), onRestart: () => process.exit(0), beforeRun: updateJobRepo });
 await runner.start();
 console.log(`fox-jobs: watching ${join(stateDir, 'jobs.json')}`);
 // Stopping waits for a run in progress (systemd gives it time): a job is never cut in half on purpose.

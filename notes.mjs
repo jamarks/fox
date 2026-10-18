@@ -37,6 +37,10 @@ export function foxNotes({ preview = null, apps = null } = {}) {
 - Check your own work with the browser tool at \`http://localhost:<port>\` (it runs on this machine): take a screenshot, read console errors, fix what you see before saying it works.
 ${preview ? `- The user is not on this machine: give them ${preview.url.replace('{port}', '<port>')} (for example ${example}), never localhost. Those links are private to them.` : '- The user is on this machine: give them the `http://localhost:<port>` link.'}${apps ? `\n- For something the user will keep using (a dashboard, an app), give it a name: \`fox-expose <name> <port>\` publishes it at ${apps.url.replace('{name}', '<name>')}, private to them like the previews; any port works, and \`fox-expose list\` shows what is published. Write the full address in your answer.` : ''}
 
+### Repos
+- Start with \`git pull\` in the repo you work in (fox fast-forwards clean checkouts when a session starts, not ones with work in progress), and read its AGENTS.md before proposing changes: what you remember of a project may be old.
+- Changes that will be deployed go through a pull request the user merges. Never push to a branch that deploys.
+
 ### Scheduled jobs
 fox runs scripts on a schedule on this machine ("jobs"); the user sees them on fox's Jobs page. Manage them with the \`fox-job\` command:
 - \`fox-job list\` · \`fox-job runs <name>\` · \`fox-job log <name> [<run>]\`
@@ -48,5 +52,6 @@ Rules:
 - A job is a script: keep it in the workspace (for example \`jobs/<name>.py\`) and commit it. Do as much as possible in plain code; when there is nothing to do, exit early without calling a model.
 - Print \`FOX_SUMMARY: <one line>\` with what the run did; write reports or files for the user to \`$FOX_JOB_OUTPUT\`.
 - To use a model inside a job, call \`fx ask --no-save --json "<prompt>"\` and read \`final_output\`. Validate what comes back; never run a model's output as shell commands.
-- One job runs at a time, each with a time limit (\`--timeout\`, 30 minutes by default).`;
+- One job runs at a time, each with a time limit (\`--timeout\`, 30 minutes by default). Before each run fox fast-forwards the job's folder if it is a clean checkout, so a script pushed from another copy is what runs.
+- A job that changes code works in its own checkout and opens a pull request; it never pushes to main or to a deploy branch.`;
 }
