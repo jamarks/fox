@@ -861,6 +861,20 @@ async function memory() {
   return memoryFromMeminfo(await readFile('/proc/meminfo', 'utf8').catch(() => ''));
 }
 
+// fx writes links as terminal hyperlinks (OSC 8: the text shows, the address travels with it). tmux keeps them,
+// but only passes them on to terminals it knows support them; xterm.js does. Once per tmux server.
+let hyperlinksOn = null;
+function passHyperlinks() {
+  hyperlinksOn ??= tmux('show-options', '-s', 'terminal-features')
+    .then((out) => {
+      if (!out) { hyperlinksOn = null; return; } // no tmux server yet: try again with the next session
+      if (!out.includes('hyperlinks')) return tmux('set-option', '-as', 'terminal-features', ',xterm*:hyperlinks');
+    })
+    .catch(() => { hyperlinksOn = null; });
+  return hyperlinksOn;
+}
+passHyperlinks(); // for sessions that already run (a browser attaching later picks it up)
+
 async function createTerminal({ cwd, resume, provider = null, model = null }) {
   const name = resume ? `${TMUX_PREFIX}${resume}` : `${TMUX_PREFIX}new-${Date.now().toString(36)}`;
   const existing = (await listTerminals()).find((t) => t.name === name);
@@ -869,6 +883,7 @@ async function createTerminal({ cwd, resume, provider = null, model = null }) {
   const flags = resume ? '' : `${provider ? ` --provider ${provider}` : ''}${model ? ` --model ${model}` : ''}`;
   const cmd = resume ? `${FX_BIN} session resume ${resume}` : `${FX_BIN}${flags}`;
   await tmux('new-session', '-d', '-s', name, '-x', '140', '-y', '40', '-c', cwd, cmd);
+  await passHyperlinks();
   await tmux('set-option', '-t', name, 'status', 'off');
   await tmux('set-option', '-t', name, 'mouse', 'on');
   await tmux('set-option', '-t', name, 'history-limit', '20000');

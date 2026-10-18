@@ -67,7 +67,8 @@ else appendFileSync(${JSON.stringify(tmuxLog)}, JSON.stringify([command, ...args
     assert.equal((await reply('missing-session', 'hello')).status, 404);
     assert.equal((await reply(id, '\u0001')).status, 400);
     assert.equal((await reply(id, 'first line\nsecond line')).status, 202);
-    const commands = (await readFile(tmuxLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    const commands = (await readFile(tmuxLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+      .filter((args) => !(args[0] === 'set-option' && args.includes('terminal-features'))); // server-wide, once at start (hyperlinks)
     assert.deepEqual(commands.map((args) => args[0]), ['set-buffer', 'paste-buffer', 'send-keys']);
     assert.equal(commands[0].at(-1), 'first line\nsecond line');
     assert.equal(commands[2].at(-1), 'Enter');

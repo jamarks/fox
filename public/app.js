@@ -578,6 +578,7 @@ function showVersion({ version: v, startedAt }) {
   if (v.repo) sv.href = el.href;
 }
 const LOCAL_URL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(?::(\d{2,5}))?(\/[^\s'"<>)\]]*)?/g;
+const WEB_URL = /\bhttps?:\/\/[^\s'"<>)\]]+/g;
 function previewUrl(raw, port, path) {
   if (!foxConfig.remote) return raw.replace('0.0.0.0', 'localhost');
   const p = foxConfig.preview;
@@ -590,6 +591,13 @@ function localServerLinks(term) {
       const line = term.buffer.active.getLine(y - 1);
       if (!line) return callback(undefined);
       const text = line.translateToString(true), links = [];
+      // Any other web address printed as text opens as is.
+      for (const m of text.matchAll(WEB_URL)) {
+        if (LOCAL_URL.test(m[0])) { LOCAL_URL.lastIndex = 0; continue; }
+        const url = m[0].replace(/[.,;:!?]+$/, '');
+        links.push({ text: url, range: { start: { x: m.index + 1, y }, end: { x: m.index + url.length, y } },
+          decorations: { underline: true, pointerCursor: true }, activate: () => window.open(url, '_blank', 'noopener') });
+      }
       for (const m of text.matchAll(LOCAL_URL)) {
         const url = previewUrl(m[0], m[1], m[2]);
         if (!url) continue;
@@ -685,6 +693,8 @@ function attachTab(t, { user = false, activate = true } = {}) {
   const term = new Terminal({
     cursorBlink: true, fontSize, fontFamily: terminalFontFamily(), scrollback: 5000, allowTransparency: true,
     macOptionClickForcesSelection: true, // Option-drag selects text for Cmd+C even while tmux owns the mouse
+    // fx's hyperlinks (a word that carries an address): web addresses open in a new tab, nothing else opens.
+    linkHandler: { activate: (e, uri) => { if (/^https?:\/\//i.test(uri)) window.open(uri, '_blank', 'noopener'); } },
     theme: state.palette ? { background: state.palette.sky ? 'rgba(0,0,0,0)' : state.palette.bg, foreground: state.palette.text, cursor: state.palette.cursor, selectionBackground: state.palette.sel } : undefined,
   });
   const fit = new FitAddon.FitAddon();
