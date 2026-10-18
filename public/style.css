@@ -45,7 +45,6 @@ input { width: 100%; background: var(--bg); color: var(--text); border: 1px soli
 .session .actions { display: flex; gap: 2px; opacity: 0; flex: none; }
 .session:hover .actions, .session.active .actions { opacity: 1; }
 .session .row .title { flex: 1; min-width: 0; }
-.session .prompt { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 .session.is-archived { opacity: .7; }
 .session input.rename { font: inherit; font-weight: 600; padding: 1px 4px; }
 .group h3.clickable { cursor: pointer; } .group h3.clickable:hover { color: var(--text); }
@@ -385,7 +384,7 @@ a.section-title.fold:hover { color: var(--text); }
   .group h3 .icon { width: 44px; height: 44px; font-size: 19px; }
   .session { margin-left: 16px; padding: 14px 12px 14px 38px; min-height: 72px; }
   .session .title { font-size: 15px; }
-  .session .sub, .session .prompt { font-size: 12px; }
+  .session .sub { font-size: 12px; }
   .session .actions { opacity: 1; }
   .session .actions .icon { width: 44px; height: 44px; }
   #reply-inbox-toggle { min-height: 44px; }
@@ -534,16 +533,15 @@ html, body { overscroll-behavior-y: none; }
 
 /* Memory in the sidebar footer (servers only) */
 .sidebar-footer { gap: 10px; }
-#mem { margin-right: auto; display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); min-width: 0; }
+#mem { margin-right: auto; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); min-width: 0; }
 #mem.hidden { display: none; }
 #mem-text { white-space: nowrap; font-family: var(--mono); }
-.mem-bar { display: block; width: 120px; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.mem-bar { display: block; width: 64px; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
 .mem-bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .4s; }
 #mem.ok .mem-bar i { background: var(--ok); }
 #mem.warm .mem-bar i { background: var(--warn); } #mem.warm #mem-text { color: var(--warn); }
 #mem.high .mem-bar i { background: var(--err); } #mem.high #mem-text { color: var(--err); }
 #summary.hidden { display: none; }
-#mem-free { border: 1px solid var(--border); padding: 4px 8px; font-size: 11px; white-space: nowrap; }
 #mem-free.hidden { display: none; }
 
 #toast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 8px); background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font-size: 12px; opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s; z-index: 100; }
@@ -641,10 +639,7 @@ body.metrics-page { display: block; height: auto; min-height: 100%; }
 .run-detail pre a { color: var(--accent); }
 
 /* The running release, above the memory meter */
-.sidebar-footer { flex-wrap: wrap; }
-#version { flex-basis: 100%; font-family: var(--mono); font-size: 11px; color: var(--muted); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#version:hover { color: var(--text); }
-#version.hidden { display: none; }
+.sidebar-footer { flex-wrap: nowrap; }
 /* With the sky theme the background is see-through: hide what is behind Jobs instead of covering the stars */
 #terminals:has(#job-view:not(.hidden)) > :not(#job-view) { visibility: hidden; }
 
@@ -740,3 +735,10 @@ body.night .global-search-box { background: #0d101c; }
 .seg button + button { border-left: 1px solid var(--border); }
 .seg button.on { background: var(--accent); color: #0b0d12; }
 .ws-repo .gh-mark { flex: none; color: var(--muted); margin-right: -2px; }
+
+/* jobs: last run on the list, merged mark on pull request links */
+.jl-row .jlast .ok { color: var(--ok); } .jl-row .jlast .bad { color: var(--err); }
+.run-link.merged { border-color: #8957e5; color: #c3a6ff; }
+.run-link.merged::before { content: '✓ '; }
+.run-link.closed { opacity: .55; text-decoration: line-through; }
+.ws-line .gh-mark { margin-right: 4px; vertical-align: -2px; opacity: .8; }
