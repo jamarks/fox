@@ -530,6 +530,22 @@ dictationButton.addEventListener('click', () => {
   else if (!dictationButton.disabled) dictation.start(state.activeTab);
 });
 updateDictationAvailability();
+// Paste on a phone (see #pastesheet). The text goes in as a paste, like ⌘V: it waits in fx's input, nothing is sent.
+function pasteIntoTerminal(text) {
+  const tab = state.tabs.get(state.activeTab);
+  if (!text || !tab || tab.closed || tab.ws?.readyState !== WebSocket.OPEN) { toast('Open a terminal to paste into'); return false; }
+  tab.term.paste(text);
+  return true;
+}
+function closePasteSheet() { $('#pastesheet').classList.add('hidden'); $('#paste-text').value = ''; }
+$('#paste').addEventListener('click', async () => {
+  try { const text = await navigator.clipboard?.readText?.(); if (text) return pasteIntoTerminal(text); } catch {} // iOS asks with its own Paste bubble
+  $('#pastesheet').classList.remove('hidden');
+  $('#paste-text').focus();
+});
+$('#pasteform').addEventListener('submit', (e) => { e.preventDefault(); if (pasteIntoTerminal($('#paste-text').value)) closePasteSheet(); });
+$('#paste-cancel').addEventListener('click', closePasteSheet);
+$('#pastesheet').addEventListener('click', (e) => { if (e.target.id === 'pastesheet') closePasteSheet(); });
 async function openTerminal({ cwd, resume, provider, model }) {
   const t = await post('/api/terminals', { cwd, resume, provider, model });
   if (t.error) { state.waking = null; updateTermLoading(); alert(t.error); return; }

@@ -651,3 +651,14 @@ body.metrics-page { display: block; height: auto; min-height: 100%; }
 .ns-actions button.linkish { margin-right: auto; }
 body.night #wsdialog, body.night #jobdialog, body.night #newsheet { background: rgba(3, 5, 12, .7); }
 body.night #wsdialog .sheet, body.night #jobdialog .sheet, body.night #newsheet .sheet { background: #0d101c; }
+
+/* Paste on a phone: iOS offers no Paste over the terminal, so a button asks for the clipboard, and this sheet
+   (a real text box, where holding a finger does offer Paste) is the fallback */
+#paste { display: none; }
+@media (max-width: 1100px) { #paste { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 44px; height: 44px; margin-left: 4px; color: var(--muted); } }
+#pastesheet { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; }
+#pastesheet.hidden { display: none; }
+#pastesheet .sheet { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px 16px; width: min(560px, calc(100vw - 32px)); box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
+#paste-text { width: 100%; box-sizing: border-box; resize: vertical; font: 16px/1.4 var(--mono); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+body.night #pastesheet { background: rgba(3, 5, 12, .7); }
+body.night #pastesheet .sheet { background: #0d101c; }
