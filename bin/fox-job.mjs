@@ -22,7 +22,7 @@ const USAGE = `fox-job: scripts on a schedule, shown in fox
   fox-job list
   fox-job add <name> --script <path> [--cwd <dir>]
               (--every <hours> --from HH:MM --to HH:MM | --daily HH:MM | --once YYYY-MM-DD HH:MM)
-              [--days mon-fri|sat,sun|mon,thu|all] [--tz Area/City] [--timeout <minutes>] [--paused]
+              [--days mon-fri|sat,sun|mon,thu|all] [--tz Area/City] [--timeout <minutes>] [--model <id>] [--effort low|medium|high] [--paused]
               [-- <script arguments>]
   fox-job run <name>         run now
   fox-job pause <name> | resume <name> | remove <name>
@@ -63,7 +63,8 @@ export function parseAdd(argv, { cwd = process.cwd(), tz = defaultTz() } = {}) {
   if (script && isAbsolute(script)) { const rel = relative(dir, script); if (rel && !rel.startsWith('..') && !isAbsolute(rel)) script = rel; }
   return {
     name, script, cwd: dir, args, schedule,
-    tz: one('--tz') ?? tz, timeoutMin: one('--timeout') ? Number(one('--timeout')) : undefined, enabled: !opts.includes('--paused'),
+    tz: one('--tz') ?? tz, timeoutMin: one('--timeout') ? Number(one('--timeout')) : undefined,
+    ...(one('--model') ? { model: one('--model') } : {}), ...(one('--effort') ? { effort: one('--effort') } : {}), enabled: !opts.includes('--paused'),
   };
 }
 

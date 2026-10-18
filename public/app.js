@@ -346,16 +346,18 @@ $('#session-groups').addEventListener('click', async (e) => {
 async function openSession(id) {
   if (state.jobView) closeJob();
   closeSettings();
+  if (state.waking?.id !== id) state.waking = null; // the person moved on: the other session keeps waking, unseen
   const s = sessionById(id);
   if (!s) return;
   if (s.terminal && state.tabs.has(s.terminal) && !state.tabs.get(s.terminal).closed) { activateTab(s.terminal); return selectSession(id); }
   if (s.terminal) { const t = state.terminals.find((x) => x.name === s.terminal); if (t) { attachTab(t, { user: true }); return selectSession(id); } }
   if (s.archived || s.state === 'external') { selectSession(id); if (mobileLayout.matches) showMobileView('read'); return; }
   // No terminal: fx is not running for this session (it slept, or never ran here). Resuming takes a few seconds.
-  state.waking = { id, title: displayTitle(s), since: Date.now() };
+  const wake = state.waking = { id, title: displayTitle(s), since: Date.now() };
   updateTermLoading();
-  try { await openTerminal({ cwd: s.workspace, resume: id }); }
-  finally { if (state.waking?.id === id && !state.tabs.get(state.activeTab)) state.waking = null; updateTermLoading(); }
+  // Only the session still wanted takes the center when it is up; one the person left keeps running in tmux.
+  try { await openTerminal({ cwd: s.workspace, resume: id }, () => state.waking === wake); }
+  finally { if (state.waking === wake && !state.tabs.get(state.activeTab)) state.waking = null; updateTermLoading(); }
 }
 
 function termHasText(term) {
@@ -371,7 +373,8 @@ function updateTermLoading() {
   const tab = state.tabs.get(state.activeTab);
   // Waking ends when fx has drawn something: tmux attaches at once and shows an empty pane until fx starts.
   if (state.waking && tab?.ready && termHasText(tab.term) && state.terminals.find((t) => t.name === tab.name)?.resume === state.waking.id) state.waking = null;
-  const waking = state.waking;
+  // Waking covers the center only while no other terminal is in front: a tab the person switched to is never hidden.
+  const waking = state.waking && (!tab || tab.closed || state.terminals.find((t) => t.name === tab.name)?.resume === state.waking.id) ? state.waking : null;
   const connecting = !waking && tab && !tab.ready && !tab.closed && Date.now() - (tab.openedAt ?? 0) > 500;
   box.classList.toggle('hidden', !waking && !connecting);
   if (!waking && !connecting) return;
@@ -622,10 +625,12 @@ $('#paste').addEventListener('click', async () => {
 $('#pasteform').addEventListener('submit', (e) => { e.preventDefault(); if (agentDraft) { if (!$('#pasteform button[type="submit"]').disabled) void insertAgentDraft(); } else if (pasteIntoTerminal($('#paste-text').value)) closePasteSheet(); });
 $('#paste-cancel').addEventListener('click', closePasteSheet);
 $('#pastesheet').addEventListener('click', (e) => { if (e.target.id === 'pastesheet') closePasteSheet(); });
-async function openTerminal({ cwd, resume, provider, model }) {
+async function openTerminal({ cwd, resume, provider, model }, stillWanted = () => true) {
   const t = await post('/api/terminals', { cwd, resume, provider, model });
+  if (!stillWanted()) return refresh();
   if (t.error) { state.waking = null; updateTermLoading(); alert(t.error); return; }
   await refresh();
+  if (!stillWanted()) return;
   attachTab(t);
   if (t.resume) selectSession(t.resume);
 }
@@ -872,18 +877,43 @@ function renderTabs() {
   updateDictationAvailability();
 }
 
-// Keep the address bar in sync so a refresh (or a bookmark) lands on the same session.
-function syncUrl() {
+// Keep the address bar in sync so a refresh (or a bookmark) lands on the same place: the session, and the page over
+// it (?view=settings, ?view=jobs, ?job=<id>&run=<id>, &edit=<id|new> for the job editor). Opening a page is a step in
+// the browser's history (push), so Back and Forward move between them; following the open session only replaces.
+let applyingUrl = false;
+function syncUrl(push = false) {
+  if (applyingUrl) return;
   const t = state.terminals.find((x) => x.name === state.activeTab);
   const sel = state.selected;
   const q = new URLSearchParams();
+  if (settingsOpen()) q.set('view', 'settings');
+  else if (state.jobView === 'list') q.set('view', 'jobs');
+  else if (state.jobView) { q.set('job', state.jobView); if (state.openRun) q.set('run', state.openRun); }
+  if (state.jobDialog) q.set('edit', state.jobDialog);
   if (t?.resume) q.set('open', t.resume);
   if (sel && sel !== t?.resume) q.set('session', sel);
-  const url = q.toString() ? `?${q}` : location.pathname;
-  if (location.search !== (q.toString() ? `?${q}` : '')) history.replaceState(null, '', url);
+  const search = q.toString() ? `?${q}` : '';
+  if (location.search === search) return;
+  history[push ? 'pushState' : 'replaceState'](null, '', search || location.pathname);
 }
+// Back, Forward, or a link: show the page the address names. The session part is left as it is.
+async function applyUrl() {
+  applyingUrl = true;
+  try {
+    const q = new URLSearchParams(location.search);
+    const view = q.get('view'), job = q.get('job'), edit = q.get('edit');
+    if (view === 'settings') openSettings(); else closeSettings();
+    if (job) { openJob(job); state.openRun = q.get('run'); renderJobView(); }
+    else if (view === 'jobs') openJobs();
+    else if (state.jobView) closeJob();
+    if (edit) { if (state.jobDialog !== edit) await openJobDialog(edit === 'new' ? null : edit); }
+    else if (state.jobDialog) closeJobDialog();
+  } finally { applyingUrl = false; }
+}
+window.addEventListener('popstate', applyUrl);
 function activateTab(name) {
   if (state.activeTab !== name) dictation.cancel();
+  if (state.waking && state.terminals.find((x) => x.name === name)?.resume !== state.waking.id) state.waking = null;
   state.activeTab = name;
   try { localStorage.setItem('fox.active', name); } catch {}
   for (const [n, t] of state.tabs) t.wrap.classList.toggle('active', n === name);
@@ -1694,7 +1724,7 @@ $('#theme-dots').addEventListener('click', (e) => {
 $('#theme').addEventListener('change', renderThemeDots);
 // Settings: a page in the center, like Jobs (the gear opens and closes it).
 function openSettings() {
-  if (state.jobView) closeJob();
+  if (state.jobView) closeJob({ sync: false });
   dictation.cancel();
   $('#settings-view').classList.remove('hidden');
   $('#settings').classList.add('active'); $('#settings').setAttribute('aria-expanded', 'true');
@@ -1703,6 +1733,7 @@ function openSettings() {
   loadTools();
   loadFxSettings();
   loadDeploy();
+  syncUrl(true);
 }
 // On a server: the branch fox-update deploys. release = merged pull requests; main = every push, fx's too.
 const DEPLOY_SUB = { release: 'merged pull requests go live', main: 'every push goes live within a minute' };
@@ -1718,11 +1749,13 @@ $('#deploy-seg').addEventListener('click', async (e) => {
   const r = await fetch('/api/deploy', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ branch: b.dataset.deploy }) });
   if (r.ok) renderDeploy(await r.json()); else toast('Could not change it');
 });
-function closeSettings() {
+// sync: false when another page takes its place, so that opening it is one step in the history, not two.
+function closeSettings({ sync = true } = {}) {
   if (!settingsOpen()) return;
   $('#settings-view').classList.add('hidden');
   requestAnimationFrame(fitActive); // the session's bar is back on a phone
   $('#settings').classList.remove('active'); $('#settings').setAttribute('aria-expanded', 'false');
+  if (sync) syncUrl(true);
 }
 const settingsOpen = () => !$('#settings-view').classList.contains('hidden');
 $('#settings').addEventListener('click', () => (settingsOpen() ? closeSettings() : openSettings()));
@@ -2142,7 +2175,7 @@ function renderJobList() {
 $('#jobs-entry').addEventListener('click', () => (state.jobView ? closeJob() : openJobs()));
 $('#job-list').addEventListener('click', (e) => { if (e.target.closest('[data-link]')) return; const row = e.target.closest('[data-job]'); if (row) openJob(row.dataset.job); });
 function showJobView(mode) {
-  closeSettings();
+  closeSettings({ sync: false });
   dictation.cancel();
   $('#job-view').classList.remove('hidden');
   $('#job-view').dataset.mode = mode;
@@ -2152,12 +2185,14 @@ function openJobs() {
   state.jobView = 'list'; state.openRun = null;
   $('#job-name').textContent = 'Jobs';
   showJobView('list'); renderJobsEntry(); renderJobList();
+  syncUrl(true);
 }
 function openJob(id) {
   state.jobView = id; state.openRun = null;
   showJobView('detail'); renderJobsEntry(); renderJobView();
+  syncUrl(true);
 }
-function closeJob() { state.jobView = null; $('#job-view').classList.add('hidden'); renderJobsEntry(); requestAnimationFrame(fitActive); }
+function closeJob({ sync = true } = {}) { state.jobView = null; state.openRun = null; $('#job-view').classList.add('hidden'); renderJobsEntry(); requestAnimationFrame(fitActive); if (sync) syncUrl(true); }
 $('#job-close').addEventListener('click', closeJob);
 $('#job-back').addEventListener('click', openJobs);
 $('#job-new').addEventListener('click', () => openJobDialog());
@@ -2167,7 +2202,7 @@ async function renderJobView() {
   $('#job-name').textContent = j.name;
   $('#job-when').textContent = j.enabled ? j.scheduleText : `${j.scheduleText} · ${pausedText(j)}`;
   $('#job-pause').textContent = j.enabled ? 'Pause' : j.pendingApproval ? 'Approve' : 'Resume';
-  $('#job-meta').textContent = `${shortPath(j.cwd)}/${j.script}${j.args?.length ? ' ' + j.args.join(' ') : ''} · ${j.tz} · stops after ${j.timeoutMin} min${j.enabled && j.nextRun ? ` · next ${whenText(j.nextRun)}` : ''}`;
+  $('#job-meta').textContent = `${shortPath(j.cwd)}/${j.script}${j.args?.length ? ' ' + j.args.join(' ') : ''} · ${j.tz} · ${j.model ? `${j.model}${j.effort ? ' ' + j.effort : ''} · ` : j.effort ? `effort ${j.effort} · ` : ''}stops after ${j.timeoutMin} min${j.enabled && j.nextRun ? ` · next ${whenText(j.nextRun)}` : ''}`;
   const runs = await (await fetch(`/api/jobs/${j.id}/runs`)).json().catch(() => []);
   if (state.jobView !== j.id) return;
   const box = $('#job-runs');
@@ -2188,6 +2223,7 @@ $('#job-runs').addEventListener('click', (e) => {
   const row = e.target.closest('[data-run]'); if (!row) return;
   state.openRun = state.openRun === row.dataset.run ? null : row.dataset.run;
   renderJobView();
+  syncUrl(true);
 });
 $('#job-run').addEventListener('click', async () => { await post(`/api/jobs/${state.jobView}/run`); toast('Starting…'); setTimeout(loadJobs, 1500); });
 $('#job-pause').addEventListener('click', async () => {
@@ -2236,12 +2272,26 @@ async function jdLoadScripts(selected = '') {
   sel.innerHTML = scripts.length ? scripts.map((x) => `<option ${x === selected ? 'selected' : ''}>${esc(x)}</option>`).join('') : '<option value="">No .py, .mjs, .js or .sh scripts here</option>';
   if (selected && !scripts.includes(selected)) sel.insertAdjacentHTML('afterbegin', `<option selected>${esc(selected)}</option>`);
 }
+// The models of fx's active provider: `fx ask` in a job uses that one (a Gateway id fails on a ChatGPT login), plus
+// whatever the job already has, so editing never drops it.
+async function jdModels(selected) {
+  const sel = $('#jd-model');
+  sel.innerHTML = `<option value="">script's choice</option>${selected ? `<option selected>${esc(selected)}</option>` : ''}`;
+  const cat = await loadModels().catch(() => null);
+  if (!cat) return;
+  const cmp = (x, y) => x.localeCompare(y, 'en', { numeric: true });
+  sel.innerHTML = '<option value="">script\'s choice</option>' + (cat.providers ?? []).filter((p) => !cat.default?.provider || p.id === cat.default.provider).map((p) =>
+    `<optgroup label="${esc(p.label)}">${[...p.models].sort(cmp).map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join('')}</optgroup>`).join('');
+  if (selected && ![...sel.options].some((o) => o.value === selected)) sel.insertAdjacentHTML('beforeend', `<option value="${esc(selected)}">${esc(selected)}</option>`);
+  sel.value = selected;
+}
 const jdCwd = () => $('#jd-folder').value === '__other' ? $('#jd-cwd').value.trim() : $('#jd-folder').value;
 $('#jd-folder').addEventListener('change', () => { $('#jd-cwd').classList.toggle('hidden', $('#jd-folder').value !== '__other'); jdLoadScripts(); });
 $('#jd-cwd').addEventListener('input', debounce(() => jdLoadScripts(), 300));
 async function openJobDialog(id = null) {
   const j = id ? state.jobs.find((x) => x.id === id) : null;
   jd.id = j?.id ?? null;
+  state.jobDialog = j?.id ?? 'new';
   $('#jd-title').textContent = j ? `Edit ${j.name}` : 'New job';
   $('#jd-submit').textContent = j ? 'Save' : 'Create';
   $('#jd-delete-open').classList.toggle('hidden', !j);
@@ -2264,19 +2314,28 @@ async function openJobDialog(id = null) {
   if (!$('#jd-date').value) $('#jd-date').value = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
   $('#jd-tz').value = j?.tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   $('#jd-timeout').value = j?.timeoutMin ?? 30;
+  $('#jd-effort').value = j?.effort ?? '';
+  jdModels(j?.model ?? '');
   $('#jobdialog').classList.remove('hidden');
   await jdLoadScripts(j?.script ?? '');
   jdRenderWhen();
   $('#jd-name').focus();
+  syncUrl(true);
 }
-const closeJobDialog = () => $('#jobdialog').classList.add('hidden');
+function closeJobDialog() {
+  if (!state.jobDialog) return;
+  state.jobDialog = null;
+  $('#jobdialog').classList.add('hidden');
+  syncUrl(true);
+}
 $('#jd-cancel').addEventListener('click', closeJobDialog);
 $('#jobdialog').addEventListener('click', (e) => { if (e.target.id === 'jobdialog') closeJobDialog(); });
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#jobdialog').classList.contains('hidden')) closeJobDialog(); });
 $('#jobform').addEventListener('submit', async (e) => {
   e.preventDefault();
   const body = { name: $('#jd-name').value.trim(), cwd: jdCwd(), script: $('#jd-script').value, args: $('#jd-args').value.trim() ? $('#jd-args').value.trim().split(/\s+/) : [],
-    schedule: jdSchedule(), tz: $('#jd-tz').value.trim(), timeoutMin: Number($('#jd-timeout').value) };
+    schedule: jdSchedule(), tz: $('#jd-tz').value.trim(), timeoutMin: Number($('#jd-timeout').value),
+    model: $('#jd-model').value, effort: $('#jd-effort').value };
   const r = await fetch(jd.id ? `/api/jobs/${jd.id}` : '/api/jobs', { method: jd.id ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { $('#jd-error').textContent = j.error || 'Could not save the job.'; return; }
@@ -2543,6 +2602,7 @@ $('#pair-stop').addEventListener('click', async () => {
   if (openId && sessionById(openId)) await openSession(openId);
   // Respect the saved column state on refresh; only an explicit ?session= that differs from the open tab opens it.
   if (selId && sessionById(selId)) { if (q.get('session') && selId !== openId) setTranscript(true); selectSession(selId); if (mobileLayout.matches && q.get('session') && !openId) showMobileView('read'); }
+  if (q.get('view') || q.get('job') || q.get('edit')) { await loadJobs(); history.replaceState(null, '', '?' + q); await applyUrl(); }
   state.pollTimer = setInterval(async () => {
     await refresh();
     if (state.selected) loadTranscript(state.selected, true);
