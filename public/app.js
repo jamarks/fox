@@ -578,6 +578,20 @@ function showVersion({ version: v, startedAt }) {
   if (v.repo) sv.href = el.href;
 }
 const LOCAL_URL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(?::(\d{2,5}))?(\/[^\s'"<>)\]]*)?/g;
+// Links to other sites. Opened from the iPhone Home Screen icon, a new tab would be iOS's in-app browser, which
+// keeps no login, so every site asks again; x-safari-https:// (iOS 17+) hands the address to Safari instead.
+const IOS_HOME_APP = navigator.standalone === true;
+function openExternal(url) {
+  if (IOS_HOME_APP) location.href = 'x-safari-' + url;
+  else window.open(url, '_blank', 'noopener');
+}
+document.addEventListener('click', (e) => {
+  if (!IOS_HOME_APP || e.defaultPrevented) return;
+  const a = e.target.closest?.('a[href]');
+  if (!a || !/^https?:/i.test(a.href) || new URL(a.href).origin === location.origin) return; // fox's own files stay in fox
+  e.preventDefault();
+  openExternal(a.href);
+}, true);
 const WEB_URL = /\bhttps?:\/\/[^\s'"<>)\]]+/g;
 function previewUrl(raw, port, path) {
   if (!foxConfig.remote) return raw.replace('0.0.0.0', 'localhost');
@@ -596,13 +610,13 @@ function localServerLinks(term) {
         if (LOCAL_URL.test(m[0])) { LOCAL_URL.lastIndex = 0; continue; }
         const url = m[0].replace(/[.,;:!?]+$/, '');
         links.push({ text: url, range: { start: { x: m.index + 1, y }, end: { x: m.index + url.length, y } },
-          decorations: { underline: true, pointerCursor: true }, activate: () => window.open(url, '_blank', 'noopener') });
+          decorations: { underline: true, pointerCursor: true }, activate: () => openExternal(url) });
       }
       for (const m of text.matchAll(LOCAL_URL)) {
         const url = previewUrl(m[0], m[1], m[2]);
         if (!url) continue;
         links.push({ text: m[0], range: { start: { x: m.index + 1, y }, end: { x: m.index + m[0].length, y } },
-          decorations: { underline: true, pointerCursor: true }, activate: () => window.open(url, '_blank', 'noopener') });
+          decorations: { underline: true, pointerCursor: true }, activate: () => openExternal(url) });
       }
       callback(links.length ? links : undefined);
     },
@@ -694,7 +708,7 @@ function attachTab(t, { user = false, activate = true } = {}) {
     cursorBlink: true, fontSize, fontFamily: terminalFontFamily(), scrollback: 5000, allowTransparency: true,
     macOptionClickForcesSelection: true, // Option-drag selects text for Cmd+C even while tmux owns the mouse
     // fx's hyperlinks (a word that carries an address): web addresses open in a new tab, nothing else opens.
-    linkHandler: { activate: (e, uri) => { if (/^https?:\/\//i.test(uri)) window.open(uri, '_blank', 'noopener'); } },
+    linkHandler: { activate: (e, uri) => { if (/^https?:\/\//i.test(uri)) openExternal(uri); } },
     theme: state.palette ? { background: state.palette.sky ? 'rgba(0,0,0,0)' : state.palette.bg, foreground: state.palette.text, cursor: state.palette.cursor, selectionBackground: state.palette.sel } : undefined,
   });
   const fit = new FitAddon.FitAddon();
