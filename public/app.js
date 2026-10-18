@@ -1594,6 +1594,7 @@ $('#theme').addEventListener('change', renderThemeDots);
 // Settings: a page in the center, like Jobs (the gear opens and closes it).
 function openSettings() {
   if (state.jobView) closeJob();
+  dictation.cancel();
   $('#settings-view').classList.remove('hidden');
   $('#settings').classList.add('active'); $('#settings').setAttribute('aria-expanded', 'true');
   if (mobileLayout.matches) showMobileView('terminal');
@@ -1601,7 +1602,9 @@ function openSettings() {
   loadTools();
 }
 function closeSettings() {
+  if (!settingsOpen()) return;
   $('#settings-view').classList.add('hidden');
+  requestAnimationFrame(fitActive); // the session's bar is back on a phone
   $('#settings').classList.remove('active'); $('#settings').setAttribute('aria-expanded', 'false');
 }
 const settingsOpen = () => !$('#settings-view').classList.contains('hidden');
@@ -1972,6 +1975,7 @@ $('#jobs-entry').addEventListener('click', () => (state.jobView ? closeJob() : o
 $('#job-list').addEventListener('click', (e) => { if (e.target.closest('[data-link]')) return; const row = e.target.closest('[data-job]'); if (row) openJob(row.dataset.job); });
 function showJobView(mode) {
   closeSettings();
+  dictation.cancel();
   $('#job-view').classList.remove('hidden');
   $('#job-view').dataset.mode = mode;
   if (mobileLayout.matches) showMobileView('terminal');
@@ -1985,7 +1989,7 @@ function openJob(id) {
   state.jobView = id; state.openRun = null;
   showJobView('detail'); renderJobsEntry(); renderJobView();
 }
-function closeJob() { state.jobView = null; $('#job-view').classList.add('hidden'); renderJobsEntry(); }
+function closeJob() { state.jobView = null; $('#job-view').classList.add('hidden'); renderJobsEntry(); requestAnimationFrame(fitActive); }
 $('#job-close').addEventListener('click', closeJob);
 $('#job-back').addEventListener('click', openJobs);
 $('#job-new').addEventListener('click', () => openJobDialog());
