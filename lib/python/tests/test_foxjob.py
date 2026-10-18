@@ -6,6 +6,14 @@ HERE = Path(__file__).resolve().parent
 FAKE_FX = """#!/usr/bin/env python3
 import json, os, sys
 mode = os.environ.get("FAKE_FX_MODE", "done")
+if mode == "flaky":
+    marker = os.environ["FAKE_FX_FLAKY"]
+    if not os.path.exists(marker):
+        open(marker, "w").write("1")
+        sys.stderr.write("[notice] provider_error: Provider response failed\\n")
+        print(json.dumps({"final_output": ""}))
+        sys.exit(1)
+    mode = "done"
 if os.environ.get("FAKE_FX_ARGS"):
     open(os.environ["FAKE_FX_ARGS"], "w").write(json.dumps(sys.argv[1:]))
 if mode == "big":
@@ -44,7 +52,7 @@ class FoxJobTest(unittest.TestCase):
         os.environ.update({
             "PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_GH_STATE": str(self.tmp / "gh.json"),
             "FOXJOB_WORK": str(self.tmp / "work"), "FOXJOB_GIT_BASE": f"file://{self.tmp}/remote/",
-            "FOX_JOB_OUTPUT": str(self.tmp / "out"), "FAKE_FX_MODE": "done",
+            "FOX_JOB_OUTPUT": str(self.tmp / "out"), "FAKE_FX_MODE": "done", "FOXJOB_RETRY_WAIT": "0",
             "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
         })
         self.origin = self.tmp / "remote" / "o" / "r.git"
@@ -82,6 +90,10 @@ class FoxJobTest(unittest.TestCase):
         self.assertEqual(json.loads(args.read_text())[:7], ["ask", "--auto", "--no-save", "--json", "--model", "gpt-x", "--effort"])
         self.fj.ask_fx("hi", cwd=self.tmp)
         self.assertNotIn("--model", json.loads(args.read_text()), "without a model fx uses its own settings")
+
+    def test_a_dropped_answer_from_the_provider_is_tried_once_more(self):
+        self.fj.CHILD_ENV.update({"FAKE_FX_MODE": "flaky", "FAKE_FX_FLAKY": str(self.tmp / "flaky")})
+        self.assertEqual(self.propose().status, "opened")
 
     def test_nothing_is_pushed_when_fx_skips_goes_too_big_or_tests_fail(self):
         for mode, test, reason in (("skip", "true", "fx did not do it"), ("big", "true", "too big"), ("done", "false", "failed")):
