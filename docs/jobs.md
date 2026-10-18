@@ -51,4 +51,6 @@ What it does, in order: refuses when the repo already has `max_open` PRs from jo
 
 Other helpers in `foxjob` (`lib/python/foxjob.py`): `summary`, `link`, `log`, `write_report`, `output_dir`, `run`/`git`/`sh` (commands without fox's environment), `checkout`, `ask_fx` (fx with the `RESULT` convention), `link_open_prs` (a button for each PR still waiting, every run), and `publish_merged`: after you merge, it moves a deploy branch (for example `release`) forward to the base branch, fast-forward only, and returns the merged PRs so the job can close whatever they came from.
 
+In fox's own repo, merging the pull request is what publishes it: a merge into `main` moves `release` forward (`.github/workflows/publish-merged.yml`). Other repos decide for themselves; `publish_merged` is there for the ones that publish from a branch.
+
 Branch names start with `agent/` by default; `publish_merged` and `link_open_prs` only look at those, so your own PRs are never touched.
