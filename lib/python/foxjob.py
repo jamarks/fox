@@ -112,10 +112,14 @@ def parse_result(final):
     return result
 
 
-def ask_fx(prompt, cwd, timeout_min=25):
-    """fx works on its own (fx ask --auto) and answers with a RESULT line; its log and answer go to the output."""
-    log(f"fx working (up to {timeout_min} min)…")
-    p = subprocess.run(["fx", "ask", "--auto", "--no-save", "--json", "--", prompt], cwd=cwd, env=CHILD_ENV,
+def ask_fx(prompt, cwd, timeout_min=25, model=None, effort=None):
+    """fx works on its own (fx ask --auto) and answers with a RESULT line; its log and answer go to the output.
+
+    model and effort pick them for this request (exact ids from `fx models --json`); without them fx uses its settings.
+    """
+    log(f"fx working (up to {timeout_min} min{', ' + model if model else ''})…")
+    pick = (["--model", model] if model else []) + (["--effort", effort] if effort else [])
+    p = subprocess.run(["fx", "ask", "--auto", "--no-save", "--json", *pick, "--", prompt], cwd=cwd, env=CHILD_ENV,
                        capture_output=True, text=True, timeout=timeout_min * 60)
     (output_dir() / "fx-progress.log").write_text(p.stderr[-200_000:])
     try:
@@ -159,7 +163,7 @@ class Proposal:
 
 
 def propose_change(repo, *, branch, title, task, test, base="main", setup=None, max_lines=400, max_open=3,
-                   prefix="agent/", timeout_min=25, body="", commit_message=None, dry=False):
+                   prefix="agent/", timeout_min=25, body="", commit_message=None, dry=False, model=None, effort=None):
     """fx does `task` in a clean copy of `repo`; the job checks size and tests itself and opens a PR to `base`.
 
     commit_message may use {title} and {summary} (fx's one-line summary of what it did).
@@ -180,7 +184,7 @@ def propose_change(repo, *, branch, title, task, test, base="main", setup=None, 
     git("clean", "-qfdx", cwd=path)
     if setup:
         sh(setup, path)
-    result = ask_fx(f"{task.strip()}\n\n{agent_rules(test)}", path, timeout_min)
+    result = ask_fx(f"{task.strip()}\n\n{agent_rules(test)}", path, timeout_min, model=model, effort=effort)
     log(f"fx says {result['status']}: {result['summary']}")
     if result["status"] == "skip":
         raise Failure("fx did not do it: " + result["summary"])
