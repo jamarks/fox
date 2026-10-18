@@ -27,15 +27,15 @@ export async function ensureFoxNotes(file, block) {
 }
 
 // The block itself. `preview` is fox's preview config (null on a laptop).
-export function foxNotes({ preview = null } = {}) {
+export function foxNotes({ preview = null, apps = null } = {}) {
   const ports = preview?.ports ?? [3000, 3001, 4321, 5173, 8000, 8080];
   const example = preview ? preview.url.replace('{port}', String(ports.includes(5173) ? 5173 : ports[0])) : 'http://localhost:5173';
   return `## fox (the panel this session runs in)
 
 ### Dev servers
-- Start dev servers in the background so the terminal stays yours, with their output in a log you can read (\`npm run dev > /tmp/dev-5173.log 2>&1 &\`), on one of these ports: ${ports.join(', ')}. Pass the port explicitly (\`--port 5173\`, and \`--strictPort\` for Vite). Stop them when done.
+- Start dev servers in the background so the terminal stays yours, with their output in a log you can read (\`npm run dev > /tmp/dev-5173.log 2>&1 &\`), on one of these ports: ${ports.join(', ')}. Pass the port explicitly (\`--port 5173\`, and \`--strictPort\` for Vite). Stop the ones you only started to check your work.
 - Check your own work with the browser tool at \`http://localhost:<port>\` (it runs on this machine): take a screenshot, read console errors, fix what you see before saying it works.
-${preview ? `- The user is not on this machine: give them ${preview.url.replace('{port}', '<port>')} (for example ${example}), never localhost. Those links are private to them.` : '- The user is on this machine: give them the `http://localhost:<port>` link.'}
+${preview ? `- The user is not on this machine: give them ${preview.url.replace('{port}', '<port>')} (for example ${example}), never localhost. Those links are private to them.` : '- The user is on this machine: give them the `http://localhost:<port>` link.'}${apps ? `\n- For something the user will keep using (a dashboard, an app), give it a name: \`fox-expose <name> <port>\` publishes it at ${apps.url.replace('{name}', '<name>')}, private to them like the previews; any port works, and \`fox-expose list\` shows what is published. Write the full address in your answer.` : ''}
 
 ### Scheduled jobs
 fox runs scripts on a schedule on this machine ("jobs"); the user sees them on fox's Jobs page. Manage them with the \`fox-job\` command:

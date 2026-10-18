@@ -21,6 +21,7 @@ import { readMetrics } from './metrics.mjs';
 import { TOOLS, isInstalled, isEnabled, withEnabled, addArgs } from './tools.mjs';
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
+import { createAppRegistry, createAppRouter } from './apps.mjs';
 import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
 import { createJobStore, createRunner } from './jobs.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
@@ -70,6 +71,13 @@ async function saveState(st) {
 const searchSessions = createSearchIndex(SESSIONS_DIR, loadState);
 // Dev-server previews on a server: FOX_PREVIEW_URL=https://fox-{port}.example.com and FOX_PREVIEW_PORTS=3000,5173.
 // Each hostname is routed to 127.0.0.1:<port> by the tunnel and protected by Access (see docs/plans).
+// Named apps (see apps.mjs): FOX_APPS_URL=https://{name}.example.com and FOX_APPS_PORT, the port the tunnel's
+// wildcard rule points at. Off unless both are set.
+const APPS = (() => {
+  const url = process.env.FOX_APPS_URL, port = Number(process.env.FOX_APPS_PORT);
+  const m = url && /^https:\/\/\{name\}\.([a-z0-9.-]+\.[a-z]+)$/i.exec(url);
+  return m && Number.isInteger(port) && port > 0 ? { url, port, domain: m[1].toLowerCase() } : null;
+})();
 const PREVIEW = (() => {
   const url = process.env.FOX_PREVIEW_URL, ports = String(process.env.FOX_PREVIEW_PORTS ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0 && n < 65536);
   return url && /^https:\/\/[^/]*\{port\}[^/]*$/.test(url) && ports.length ? { url, ports } : null;
@@ -86,10 +94,14 @@ const workspaces = createWorkspaces({ stateDir: STATE_DIR, rootDir: join(homedir
 // Jobs (see jobs.mjs). On a server the runner is its own service (FOX_JOBS_RUNNER=external), so deploying fox
 // never kills a job mid-run; on a laptop it runs inside fox.
 const jobStore = createJobStore({ stateDir: STATE_DIR });
+if (APPS) {
+  const registry = createAppRegistry({ stateDir: STATE_DIR, denyPorts: [PORT, APPS.port, 4849] });
+  createAppRouter({ registry, domain: APPS.domain }).listen(APPS.port, '127.0.0.1', () => console.log(`fox: named apps at ${APPS.url} (router on 127.0.0.1:${APPS.port})`));
+}
 // On a server, fx learns about previews and jobs (the fox-job command) from a block fox keeps in ~/.fx/AGENTS.md.
 // On a laptop fox leaves your fx instructions alone; FOX_FX_NOTES=1 or 0 overrides either way.
 if ((process.env.FOX_FX_NOTES ?? (process.env.FOX_PUBLIC_ORIGIN ? '1' : '0')) === '1') {
-  ensureFoxNotes(join(homedir(), '.fx', 'AGENTS.md'), foxNotes({ preview: PREVIEW })).catch((err) => console.error(`fox: could not update fx instructions: ${err.message}`));
+  ensureFoxNotes(join(homedir(), '.fx', 'AGENTS.md'), foxNotes({ preview: PREVIEW, apps: APPS })).catch((err) => console.error(`fox: could not update fx instructions: ${err.message}`));
 }
 const inlineRunner = process.env.FOX_JOBS_RUNNER === 'external' ? null : createRunner({ store: jobStore });
 inlineRunner?.start().catch((err) => console.error(`fox: jobs runner failed: ${err.message}`));
