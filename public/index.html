@@ -91,8 +91,9 @@
   </div>
   <div id="pastesheet" class="hidden">
     <form class="sheet" id="pasteform">
-      <div class="ns-head">Paste</div>
-      <textarea id="paste-text" rows="4" spellcheck="false" autocapitalize="none" autocorrect="off" placeholder="Hold here and choose Paste"></textarea>
+      <div class="ns-head" id="paste-title">Paste</div>
+      <div id="paste-hint" class="muted hidden" role="status"></div>
+      <textarea id="paste-text" aria-labelledby="paste-title" aria-describedby="paste-hint" rows="4" spellcheck="false" autocapitalize="none" autocorrect="off" placeholder="Hold here and choose Paste"></textarea>
       <div class="row ns-actions"><button type="button" id="paste-cancel">Cancel</button><button type="submit" class="primary">Insert</button></div>
     </form>
   </div>

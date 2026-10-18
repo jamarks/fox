@@ -31,6 +31,7 @@ fx can split a job across subagents, and each one can run on a different model, 
 
 - **Grouped by task.** Same task on several models sits under one header: a side-by-side comparison.
 - **The answer each returned to the parent.** Click a row; it opens in place, with a link to that subagent's own conversation.
+- **Follow up with named agents.** In an expanded row, select an answer excerpt and choose Follow up. Edit the draft, then insert it into the parent terminal (resume it first if asleep). A working parent labels it Steer; fx applies feedback after the current tool. fox never sends Enter or interrupts a child.
 - **Flags.** `didn't run tools` (printed a tool call as text), `couldn't`, `cancelled` (with what it had started to write), `failed`.
 - **Their files.** The files each subagent wrote show up at the top with its number, `#3`.
 

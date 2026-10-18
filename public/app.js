@@ -535,19 +535,92 @@ dictationButton.addEventListener('click', () => {
 });
 updateDictationAvailability();
 // Paste on a phone (see #pastesheet). The text goes in as a paste, like ⌘V: it waits in fx's input, nothing is sent.
-function pasteIntoTerminal(text) {
-  const tab = state.tabs.get(state.activeTab);
-  if (!text || !tab || tab.closed || tab.ws?.readyState !== WebSocket.OPEN) { toast('Open a terminal to paste into'); return false; }
+function pasteIntoTerminal(text, target = state.activeTab) {
+  const tab = state.tabs.get(target);
+  if (!text || state.activeTab !== target || !tab || tab.closed || tab.ws?.readyState !== WebSocket.OPEN) { toast('Open a terminal to paste into'); return false; }
   tab.term.paste(text);
   return true;
 }
-function closePasteSheet() { $('#pastesheet').classList.add('hidden'); $('#paste-text').value = ''; }
+let agentDraft = null;
+function closePasteSheet() {
+  $('#pastesheet').classList.add('hidden'); $('#paste-text').value = ''; agentDraft = null;
+  $('#paste-title').textContent = 'Paste'; $('#paste-hint').classList.add('hidden');
+  $('#pasteform button[type="submit"]').textContent = 'Insert';
+}
+// A named agent belongs to one parent, even when another session has the same name.
+function agentDraftParent(draft) {
+  if (!draft?.name) return null;
+  const parent = sessionById(draft.parentId);
+  return parent && !parent.parentId && !parent.archived && parent.state !== 'external'
+    && parent.children?.some((c) => c.id === draft.childId && c.name === draft.name) ? parent : null;
+}
+function agentParentTerminal(parent) {
+  return state.terminals.find((t) => t.resume === parent.id && (!parent.terminal || t.name === parent.terminal));
+}
+function describeAgentDraft(parent) {
+  const busy = parent.state === 'working';
+  $('#paste-title').textContent = busy ? 'Steer' : 'Follow up';
+  $('#paste-hint').classList.remove('hidden');
+  $('#paste-hint').textContent = `To ${displayTitle(parent)} · ${agentDraft.name}. ${busy ? 'fx applies feedback after the current tool. ' : ''}Insert a single-line draft, then press Enter in the parent terminal to send.`;
+  describeAgentDraftButton(parent);
+}
+function openAgentDraft(button) {
+  const draft = { parentId: button.dataset.agentParent, childId: button.dataset.agentFollowup, name: button.dataset.agentName };
+  const parent = agentDraftParent(draft);
+  if (!parent) { toast('The named agent’s parent is unavailable'); return; }
+  const row = button.closest('[data-agent]');
+  const selection = getSelection();
+  const anchor = selection.anchorNode;
+  const answer = (anchor?.nodeType === 1 ? anchor : anchor?.parentElement)?.closest('.agent-answer');
+  const excerpt = selection.rangeCount === 1 && row?.contains(answer) && answer?.contains(selection.focusNode) ? selection.toString().trim() : '';
+  agentDraft = draft;
+  const name = /^[\w-]+$/.test(draft.name) ? draft.name : JSON.stringify(draft.name);
+  $('#paste-text').value = `Tell ${name}: ${excerpt ? `Regarding “${excerpt}”, ` : ''}`;
+  describeAgentDraft(parent);
+  $('#pastesheet').classList.remove('hidden'); $('#paste-text').focus();
+  $('#paste-text').setSelectionRange($('#paste-text').value.length, $('#paste-text').value.length);
+}
+async function insertAgentDraft() {
+  const draft = agentDraft;
+  const submit = $('#pasteform button[type="submit"]');
+  const resume = submit.textContent === 'Resume parent';
+  submit.disabled = true;
+  try {
+    await refresh(); // Resolve again: polling, another tab, or sleep may have changed the target.
+    if (agentDraft !== draft) return;
+    const parent = agentDraftParent(draft);
+    if (!parent) { $('#paste-hint').textContent = 'The named agent’s parent is unavailable. Your draft is kept here.'; return; }
+    describeAgentDraft(parent);
+    const terminal = agentParentTerminal(parent);
+    if (!terminal && !resume) { $('#paste-hint').textContent = 'Parent is asleep. Resume it to insert your draft.'; return; }
+    await openSession(parent.id); // Only the parent may be focused or explicitly resumed.
+    if (agentDraft !== draft) return;
+    const current = agentDraftParent(draft);
+    if (!current || !terminal || agentParentTerminal(current)?.name !== terminal.name) {
+      $('#paste-hint').textContent = current ? 'Parent is resuming. Your draft is kept; insert when its terminal is ready.' : 'The parent disappeared. Your draft is kept here.';
+      if (current) describeAgentDraftButton(current);
+      return;
+    }
+    // Never send Enter, escape sequences, or other terminal control bytes from an excerpt or draft.
+    const text = $('#paste-text').value.replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
+    if (state.waking?.id === current.id || !pasteIntoTerminal(text, terminal.name)) {
+      $('#paste-hint').textContent = 'Parent terminal is not ready. Your draft is kept; try Insert again.'; return;
+    }
+    closePasteSheet(); state.tabs.get(terminal.name)?.term.focus();
+  } catch {
+    if (agentDraft === draft) $('#paste-hint').textContent = 'Could not open the parent terminal. Your draft is kept; try again.';
+  } finally { submit.disabled = false; }
+}
+function describeAgentDraftButton(parent) {
+  $('#pasteform button[type="submit"]').textContent = agentParentTerminal(parent) ? 'Insert into parent' : 'Resume parent';
+}
 $('#paste').addEventListener('click', async () => {
+  if (agentDraft) { $('#pastesheet').classList.remove('hidden'); $('#paste-text').focus(); return; }
   try { const text = await navigator.clipboard?.readText?.(); if (text) return pasteIntoTerminal(text); } catch {} // iOS asks with its own Paste bubble
   $('#pastesheet').classList.remove('hidden');
   $('#paste-text').focus();
 });
-$('#pasteform').addEventListener('submit', (e) => { e.preventDefault(); if (pasteIntoTerminal($('#paste-text').value)) closePasteSheet(); });
+$('#pasteform').addEventListener('submit', (e) => { e.preventDefault(); if (agentDraft) { if (!$('#pasteform button[type="submit"]').disabled) void insertAgentDraft(); } else if (pasteIntoTerminal($('#paste-text').value)) closePasteSheet(); });
 $('#paste-cancel').addEventListener('click', closePasteSheet);
 $('#pastesheet').addEventListener('click', (e) => { if (e.target.id === 'pastesheet') closePasteSheet(); });
 async function openTerminal({ cwd, resume, provider, model }) {
@@ -1029,7 +1102,7 @@ function agentsBoard(parent, { selectedId = null } = {}) {
           ? rounds.map((r, k) => `<div class="agent-note">round ${k + 1} · ${esc(r.message.slice(0, 160))}</div><div class="agent-answer">${esc(r.text)}</div>`).join('')
           : res ? `<div class="agent-answer">${esc(res)}</div>` : ''}`;
     const selected = c.id === selectedId;
-    return `<div class="agent ${open ? 'open' : ''} ${selected ? 'selected' : ''}" data-agent="${esc(c.id)}" title="${open ? '' : esc(task)}">${head}${body}${open && !selected ? `<a class="agent-open" href="#" data-child="${esc(c.id)}">its conversation →</a>` : ''}</div>`;
+    return `<div class="agent ${open ? 'open' : ''} ${selected ? 'selected' : ''}" data-agent="${esc(c.id)}" title="${open ? '' : esc(task)}">${head}${body}${open && c.name ? `<button type="button" class="agent-open linkish" data-agent-followup="${esc(c.id)}" data-agent-parent="${esc(parent.id)}" data-agent-name="${esc(c.name)}">Follow up</button>` : ''}${open && !selected ? `<a class="agent-open" href="#" data-child="${esc(c.id)}">its conversation →</a>` : ''}</div>`;
   };
   // A header only where it says something: the same task on several models, or a named agent.
   const html = [...groups.values()].map((g) => {
@@ -1270,6 +1343,8 @@ $('#transcript').addEventListener('click', (e) => {
     convoShown.delete(id);
     lastTranscriptKey = ''; return loadTranscript(id);
   }
+  const followup = e.target.closest('[data-agent-followup]');
+  if (followup) { e.preventDefault(); return openAgentDraft(followup); }
   const link = e.target.closest('a[data-child], a[data-goto]');
   if (link) { e.preventDefault(); return selectSession(link.dataset.child ?? link.dataset.goto); }
   const row = e.target.closest('[data-agent]');

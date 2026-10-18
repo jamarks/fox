@@ -300,6 +300,7 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 .board .agent.open .agent-answer { display: block; white-space: pre-wrap; color: var(--text); -webkit-line-clamp: unset; user-select: text; cursor: text; }
 .board .agent-answer.err { color: var(--err); }
 .agent-open { display: inline-block; margin: 6px 0 0 21px; font-size: 11px; color: var(--accent); text-decoration: none; }
+button.agent-open { padding: 0; line-height: 1.45; }
 /* files the session touched */
 .files { display: flex; flex-direction: column; gap: 2px; }
 .file { border-radius: 5px; }
