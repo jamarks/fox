@@ -13,7 +13,7 @@ A job is a script fox runs on a schedule. fox shows each run (status, a one-line
 - **Limits.** One job runs at a time, each with a time limit (30 minutes by default); past it fox stops the script and everything it started. The last 50 runs of each job are kept.
 - **Environment.** `FOX_JOB_ID`, `FOX_JOB_NAME`, `FOX_JOB_RUN_ID`, `FOX_JOB_OUTPUT`, and `PYTHONPATH` with fox's helpers (below). Nothing of fox's own settings is meant for the job.
 
-Create and manage jobs from the Jobs page or with `fox-job` (`fox-job --help`).
+Create and manage jobs from the Jobs page or with `fox-job` (`fox-job --help`). A job added with `fox-job` (that is how fx adds one) waits paused until you approve it on the Jobs page.
 
 ## Good jobs
 

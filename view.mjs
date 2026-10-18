@@ -29,6 +29,8 @@ export function createViewTokens({ ttlMs = 2 * 60 * 60 * 1000, max = 200, now = 
       } else live.expires = now() + ttlMs;
       return `/view/${token}/${encodeURIComponent(basename(file))}`;
     },
+    // The folder a live token is bound to (null when it expired).
+    root(token) { const e = tokens.get(token); return e && e.expires > now() ? e.root : null; },
     // The files a request may read: next to the page first, then from the project root (for "/x" links).
     // Never outside the project, never hidden files or folders, only types a page loads.
     candidates(token, rest) {

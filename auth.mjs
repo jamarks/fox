@@ -17,7 +17,9 @@ const local = (req) => {
     ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
 };
 const origin = (req) => `http://${req.headers.host}`;
-const cookieToken = (req) => (req.headers.cookie ?? '').split(';').map((s) => s.trim()).find((s) => s.startsWith('fox_session='))?.slice(12) ?? '';
+// Every fox_session the browser sends: another site on the same domain (an app, a preview) can add its own, and
+// one bad value must not hide the good one.
+const cookieTokens = (req) => (req.headers.cookie ?? '').split(';').map((s) => s.trim()).filter((s) => s.startsWith('fox_session=')).map((s) => s.slice(12));
 async function body(req) {
   let text = '';
   for await (const chunk of req) {
@@ -71,10 +73,12 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
     }).catch((error) => console.error(`Cannot save fox sessions: ${error.message}`));
     return persisting;
   };
+  // The signed-in session a request carries (its hash), or the first one it names.
+  const sessionKey = (req) => { const keys = cookieTokens(req).slice(0, 10).map(digest); return keys.find((k) => sessions.has(k)) ?? keys[0] ?? digest(''); };
   const active = (req) => {
     if (disabled) return true;
     if (!accepts(req)) return false;
-    const key = digest(cookieToken(req));
+    const key = sessionKey(req);
     const session = sessions.get(key);
     if (!session) return false;
     if (session < Date.now()) { sessions.delete(key); for (const ws of sockets.get(key) ?? []) ws.close(4001, 'session expired'); sockets.delete(key); persistSessions(); return false; }
@@ -82,7 +86,7 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
   };
   const track = (req, ws) => {
     if (disabled) return;
-    const key = digest(cookieToken(req));
+    const key = sessionKey(req);
     if (!sockets.has(key)) sockets.set(key, new Set());
     sockets.get(key).add(ws);
     ws.once('close', () => sockets.get(key)?.delete(ws));
@@ -117,7 +121,7 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
     if (req.method === 'GET' && path === '/api/auth/status') return json(res, 200, { registered: Boolean(credential), authenticated: active(req), enrollmentRequired: Boolean(remote && !credential) });
     if (req.method !== 'POST' || !validOrigin(req)) return json(res, 403, { error: 'same-origin POST required' });
     if (path === '/api/auth/logout') {
-      const key = digest(cookieToken(req));
+      const key = sessionKey(req);
       sessions.delete(key);
       await persistSessions();
       for (const ws of sockets.get(key) ?? []) ws.close(4001, 'signed out');
@@ -133,7 +137,8 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
         if (!await validEnrollment(stateDir, data.code, remote.origin)) return json(res, 403, { error: 'valid enrollment code required' });
       }
       for (const [key, item] of pending) if (item.expires < Date.now()) pending.delete(key);
-      if (pending.size >= 100) return json(res, 429, { error: 'try again later' });
+      // Full: the oldest challenge goes, so a flood of requests never keeps you from signing in.
+      while (pending.size >= 100) pending.delete(pending.keys().next().value);
       const rpID = remote?.hostname ?? 'localhost';
       const options = setup
         ? await generateRegistrationOptions({ rpName: 'fox', rpID, userName: 'owner', authenticatorSelection: { residentKey: 'required', userVerification: 'required' } })

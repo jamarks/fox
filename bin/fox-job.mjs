@@ -81,19 +81,18 @@ async function main(argv) {
   if (cmd === 'list') {
     const jobs = await store.overview();
     if (!jobs.length) return console.log('No jobs yet.');
-    for (const j of jobs) console.log(`${j.name}\t${j.enabled ? describeSchedule(j.schedule) : 'paused'}\tnext ${j.enabled ? when(j.nextRun, j.tz) : '-'}\tlast ${j.lastRun ? `${j.lastRun.status}${j.lastRun.summary ? ': ' + j.lastRun.summary : ''}` : 'never'}\t${j.cwd}/${j.script}`);
+    for (const j of jobs) console.log(`${j.name}\t${j.enabled ? describeSchedule(j.schedule) : j.pendingApproval ? 'waiting for approval' : 'paused'}\tnext ${j.enabled ? when(j.nextRun, j.tz) : '-'}\tlast ${j.lastRun ? `${j.lastRun.status}${j.lastRun.summary ? ': ' + j.lastRun.summary : ''}` : 'never'}\t${j.cwd}/${j.script}`);
     return;
   }
   if (cmd === 'add') {
     const def = parseAdd(rest);
     if (def.timeoutMin === undefined) delete def.timeoutMin;
-    const job = await store.create(def);
-    const [o] = (await store.overview()).filter((j) => j.id === job.id);
-    return console.log(`Created ${job.name}: ${describeSchedule(job.schedule)} (${job.tz})${job.enabled ? `, next ${when(o?.nextRun, job.tz)}` : ', paused'}.`);
+    const job = await store.create(def, { from: 'terminal' });
+    return console.log(`Created ${job.name}: ${describeSchedule(job.schedule)} (${job.tz}). It waits for the user to approve it on fox's Jobs page; until then it does not run.`);
   }
   const job = await byName(rest[0]);
-  if (cmd === 'run') { await store.trigger(job.id); return console.log(`${job.name} will start within a few seconds (after any job already running).`); }
-  if (cmd === 'pause' || cmd === 'resume') { await store.update(job.id, { enabled: cmd === 'resume' }); return console.log(`${job.name} ${cmd === 'pause' ? 'paused' : 'resumed'}.`); }
+  if (cmd === 'run') { await store.trigger(job.id, { from: 'terminal' }); return console.log(`${job.name} will start within a few seconds (after any job already running).`); }
+  if (cmd === 'pause' || cmd === 'resume') { await store.update(job.id, { enabled: cmd === 'resume' }, { from: 'terminal' }); return console.log(`${job.name} ${cmd === 'pause' ? 'paused' : 'resumed'}.`); }
   if (cmd === 'remove') { await store.remove(job.id); return console.log(`Removed ${job.name} and its run history; the script stays.`); }
   if (cmd === 'runs') {
     const runs = await store.runs(job.id, 20);

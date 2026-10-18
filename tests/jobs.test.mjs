@@ -125,3 +125,72 @@ test('scripts start by extension, never through a shell string', () => {
   assert.equal(commandFor('jobs/a.mjs')[1][0], 'jobs/a.mjs');
   assert.deepEqual(commandFor('jobs/run', ['a b; rm -rf /']), ['jobs/run', ['a b; rm -rf /']]);
 });
+
+test('output that only looks like a link never stops the runner; links and output files are what they say', async () => {
+  const { store, work } = await setup({ 'odd.mjs': `
+    import { writeFile, symlink } from 'node:fs/promises';
+    console.log('FOX_LINK: https://[oops');
+    console.log('FOX_LINK: ok https://example.com/x');
+    await writeFile(process.env.FOX_JOB_OUTPUT + '/real.txt', 'real');
+    await symlink('/etc/hosts', process.env.FOX_JOB_OUTPUT + '/hosts.txt');
+  ` });
+  const job = await store.create({ name: 'odd', cwd: work, script: 'jobs/odd.mjs', schedule: daily('03:00'), tz });
+  const runner = createRunner({ store, log: quiet });
+  await store.trigger(job.id);
+  await runner.tick(); await runner.idle();
+  const [run] = await store.runs(job.id);
+  assert.equal(run.status, 'ok');
+  assert.deepEqual(run.links, [{ label: 'ok', url: 'https://example.com/x' }]);
+  assert.deepEqual(run.outputs, [{ name: 'real.txt', size: 4 }], 'a symlink is not an output');
+  assert.equal(await store.outputPath(job.id, run.id, 'hosts.txt'), null);
+});
+
+test('a script without an extension is the file in the folder, not a command on PATH', async () => {
+  const { store, work } = await setup();
+  await writeFile(join(work, 'ls'), '#!/bin/sh\necho FOX_SUMMARY: the folder one\n', { mode: 0o755 });
+  const job = await store.create({ name: 'own', cwd: work, script: 'ls', schedule: daily('03:00'), tz });
+  const runner = createRunner({ store, log: quiet });
+  await store.trigger(job.id);
+  await runner.tick(); await runner.idle();
+  const [run] = await store.runs(job.id);
+  assert.equal(run.summary, 'the folder one');
+});
+
+test('what a script leaves running in the background ends with its run', async () => {
+  const { store, work } = await setup({ 'bg.sh': 'sleep 30 > /dev/null 2>&1 &\necho $! > "$FOX_JOB_OUTPUT/pid"\n' });
+  const job = await store.create({ name: 'bg', cwd: work, script: 'jobs/bg.sh', schedule: daily('03:00'), tz });
+  const runner = createRunner({ store, log: quiet });
+  await store.trigger(job.id);
+  await runner.tick(); await runner.idle();
+  const [run] = await store.runs(job.id);
+  const pid = Number(await readFile(await store.outputPath(job.id, run.id, 'pid'), 'utf8'));
+  await new Promise((r) => setTimeout(r, 200));
+  assert.throws(() => process.kill(pid, 0), 'the background sleep was stopped');
+});
+
+test('two writers at once both land in jobs.json', async () => {
+  const { store, work } = await setup({ 'a.sh': '' });
+  const def = (name) => ({ name, cwd: work, script: 'jobs/a.sh', schedule: daily('03:00'), tz });
+  await Promise.all(['one', 'two', 'three', 'four'].map((n) => store.create(def(n))));
+  assert.deepEqual((await store.list()).map((j) => j.name).sort(), ['four', 'one', 'three', 'two']);
+});
+
+test('a job added from a terminal waits for the OK on fox\'s page before it ever runs', async () => {
+  const { store, work } = await setup({ 'a.sh': 'echo FOX_SUMMARY: ran\n' });
+  const job = await store.create({ name: 'from-fx', cwd: work, script: 'jobs/a.sh', schedule: { kind: 'hours', every: 1, from: '00:00', to: '23:00', days: [1, 2, 3, 4, 5, 6, 7] }, tz }, { from: 'terminal' });
+  assert.equal(job.enabled, false);
+  assert.equal(job.pendingApproval, true);
+  await assert.rejects(store.update(job.id, { enabled: true }, { from: 'terminal' }), /approve/);
+  await assert.rejects(store.trigger(job.id, { from: 'terminal' }), /approve/);
+  // Even a trigger file written by hand does not run it.
+  await mkdir(store.triggers, { recursive: true });
+  await writeFile(join(store.triggers, job.id), '1');
+  const runner = createRunner({ store, log: quiet });
+  await runner.tick(); await runner.idle();
+  assert.equal((await store.runs(job.id)).length, 0);
+  // Turning it on in fox is the OK; from then on the terminal manages it like any other.
+  const approved = await store.update(job.id, { enabled: true });
+  assert.equal(approved.pendingApproval, undefined);
+  await store.update(job.id, { enabled: false }, { from: 'terminal' });
+  await store.update(job.id, { enabled: true }, { from: 'terminal' });
+});

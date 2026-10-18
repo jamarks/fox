@@ -21,7 +21,7 @@ export function createSearchIndex(sessionsDir, loadState) {
       const parentId = owner?.parent_id;
       const childrenPath = /^[A-Za-z0-9_-]{4,64}$/.test(parentId ?? '') ? join(sessionsDir, parentId, 'subagent', 'children.json') : null;
       const childrenStamp = childrenPath ? await fileStamp(childrenPath) : '';
-      const name = state.names[id] ?? '';
+      const name = Object.hasOwn(state.names, id) ? String(state.names[id]) : '';
       const previous = cache.get(id);
       if (previous && previous.metaStamp === metaStamp && previous.eventsStamp === eventsStamp && previous.ownerStamp === ownerStamp && previous.childrenStamp === childrenStamp && previous.name === name) return;
       const meta = await readJson(metaPath);

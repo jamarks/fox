@@ -5,7 +5,7 @@ import http from 'node:http';
 import { readFile, readdir, stat, mkdir, writeFile, rename } from 'node:fs/promises';
 import { existsSync, realpathSync } from 'node:fs';
 import { createReadStream } from 'node:fs';
-import { join, resolve, extname, basename } from 'node:path';
+import { join, resolve, extname, basename, dirname, sep, relative } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { createShareBridge } from './share.mjs';
@@ -23,7 +23,7 @@ import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
 import { createAppRegistry, createAppRouter } from './apps.mjs';
 import { createFxSettings } from './fxsettings.mjs';
-import { fastForward } from './gitsync.mjs';
+import { fastForward, SAFE_GIT } from './gitsync.mjs';
 import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
 import { createJobStore, createRunner, updateJobRepo } from './jobs.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
@@ -54,6 +54,9 @@ const STATE_DIR = process.env.FOX_STATE_DIR || join(homedir(), '.config', 'fox')
 const DROP_DIR = join(STATE_DIR, 'drops');
 const DROP_LIMIT = 25 * 1024 * 1024;
 const STATE_FILE = join(STATE_DIR, 'state.json');
+const DEPLOY_FILE = join(STATE_DIR, 'deploy-branch');
+const DEPLOY_BRANCHES = ['release', 'main'];
+const deployBranch = async () => (await readFile(DEPLOY_FILE, 'utf8').catch(() => '')).trim() === 'main' ? 'main' : 'release';
 if (process.env.FOX_PUBLIC_ORIGIN && (process.env.FOX_SHARE_PORT || process.env.FOX_MOBILE_PORT)) {
   throw new Error('FOX_PUBLIC_ORIGIN cannot be combined with the legacy share or mobile listener');
 }
@@ -67,8 +70,8 @@ async function loadState() {
   return { archived: Array.isArray(st.archived) ? st.archived : [], names: obj(st.names), toolsSignedIn: obj(st.toolsSignedIn) };
 }
 async function saveState(st) {
-  await mkdir(STATE_DIR, { recursive: true });
-  await writeFile(STATE_FILE, JSON.stringify(st, null, 2));
+  await mkdir(STATE_DIR, { recursive: true, mode: 0o700 });
+  await writeFile(STATE_FILE, JSON.stringify(st, null, 2), { mode: 0o600 });
 }
 const searchSessions = createSearchIndex(SESSIONS_DIR, loadState);
 // Dev-server previews on a server: FOX_PREVIEW_URL=https://fox-{port}.example.com and FOX_PREVIEW_PORTS=3000,5173.
@@ -99,7 +102,7 @@ const jobStore = createJobStore({ stateDir: STATE_DIR });
 const fxSettings = createFxSettings(join(homedir(), '.fx', 'settings.json'));
 if (APPS) {
   const registry = createAppRegistry({ stateDir: STATE_DIR, denyPorts: [PORT, APPS.port, 4849] });
-  createAppRouter({ registry, domain: APPS.domain }).listen(APPS.port, '127.0.0.1', () => console.log(`fox: named apps at ${APPS.url} (router on 127.0.0.1:${APPS.port})`));
+  createAppRouter({ registry, domain: APPS.domain, denyPorts: [PORT, APPS.port, 4849] }).listen(APPS.port, '127.0.0.1', () => console.log(`fox: named apps at ${APPS.url} (router on 127.0.0.1:${APPS.port})`));
 }
 // On a server, fx learns about previews and jobs (the fox-job command) from a block fox keeps in ~/.fx/AGENTS.md.
 // On a laptop fox leaves your fx instructions alone; FOX_FX_NOTES=1 or 0 overrides either way.
@@ -144,6 +147,7 @@ async function listSessions() {
   const ids = await readdir(SESSIONS_DIR);
   const sessions = [];
   for (const id of ids) {
+    if (!safeSessionId(id)) continue; // a folder named like markup is not a session (ids end up in the page)
     const dir = join(SESSIONS_DIR, id);
     const meta = await readJson(join(dir, 'session.json'));
     if (!meta) continue;
@@ -164,7 +168,7 @@ async function listSessions() {
     // Subagentes: el padre lista hijos en subagent/children.json; el hijo apunta al padre en subagent/owner.json.
     const owner = await readJson(join(dir, 'subagent', 'owner.json'));
     const childrenFile = await readJson(join(dir, 'subagent', 'children.json'));
-    const children = (childrenFile?.children ?? []).map((c) => ({
+    const children = (childrenFile?.children ?? []).filter((c) => safeSessionId(c?.id)).map((c) => ({
       id: c.id,
       kind: c.kind,
       name: c.persistent?.agent ?? null,
@@ -194,7 +198,7 @@ async function listSessions() {
       parentId: owner?.parent_id ?? null,
       children,
       title: meta.title ?? '(untitled)',
-      customName: st.names[id] ?? null,
+      customName: Object.hasOwn(st.names, id) ? st.names[id] : null,
       archived: st.archived.includes(id),
       firstPrompt: firstPrompt.replace(/\s+/g, ' ').slice(0, 160),
       latestReply,
@@ -234,6 +238,10 @@ function safeSessionId(id) {
 // paths it names in its answers that exist on disk (a file made by a shell command shows up that way).
 const FILE_RANK = { write: 3, edit: 2, mention: 1, read: 0 };
 const PREVIEW_TYPES = { '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
+// Files macOS runs instead of showing when opened. Scripts and link files open as text in your editor; apps,
+// installers and other bundles are shown in Finder.
+const OPEN_AS_TEXT = new Set(['.command', '.tool', '.terminal', '.sh', '.zsh', '.bash', '.csh', '.py', '.rb', '.pl', '.js', '.mjs', '.cjs', '.applescript', '.webloc', '.inetloc', '.fileloc', '.url', '.desktop', '.mobileconfig', '.itermcolors']);
+const OPEN_IN_FINDER = new Set(['.app', '.pkg', '.mpkg', '.dmg', '.jar', '.scpt', '.scptd', '.workflow', '.action', '.prefpane', '.saver', '.osax', '.kext', '.plugin', '.bundle', '.dylib']);
 const realPath = (p) => { try { return realpathSync(p); } catch { return p; } };
 async function sessionFiles(id) {
   const meta = await readJson(join(SESSIONS_DIR, id, 'session.json'));
@@ -253,7 +261,7 @@ async function sessionFiles(id) {
     const ws = (await readJson(join(SESSIONS_DIR, sid, 'session.json')))?.workspace_root ?? root;
     for (const ev of await readEvents(sid)) {
       if (ev.kind === 'tool_call' && /^(write|edit|read)_file$/.test(ev.name) && !/error|fail/i.test(ev.result?.status ?? '')) add(ws, ev.args?.path, ev.name.split('_')[0], by);
-      if (ev.kind === 'assistant' && ev.text) for (const m of ev.text.matchAll(/`([^`\s]+\.[A-Za-z0-9]{1,10})`|\]\(([^)\s]+\.[A-Za-z0-9]{1,10})\)/g)) add(ws, m[1] ?? m[2], 'mention', by);
+      if (ev.kind === 'assistant' && ev.text) for (const m of ev.text.matchAll(/`([^`\s]{1,400}\.[A-Za-z0-9]{1,10})`|\]\(([^)\s]{1,400}\.[A-Za-z0-9]{1,10})\)/g)) add(ws, m[1] ?? m[2], 'mention', by);
     }
   };
   await scan(id, 0);
@@ -323,12 +331,13 @@ async function readArtifact(id, name) {
 
 // ---------- git info por workspace (cacheado) ----------
 const gitCache = new Map(); // ws -> { at, info }
+// fox runs git on its own in folders it did not make: never run a program the repo's config names.
 async function gitInfo(ws) {
   const hit = gitCache.get(ws);
   if (hit && Date.now() - hit.at < 20000) return hit.info;
   let info = null;
   try {
-    const run = (args) => execFileP('git', ['-C', ws, ...args], { timeout: 4000 }).then((r) => r.stdout.trim());
+    const run = (args) => execFileP('git', ['-C', ws, ...SAFE_GIT, ...args], { timeout: 4000 }).then((r) => r.stdout.trim());
     const top = await run(['rev-parse', '--show-toplevel']).catch(() => null);
     if (top) {
       const [branch, remote, status] = await Promise.all([
@@ -376,8 +385,8 @@ async function fetchModels() {
     await fxJson(['provider', original]).catch(() => {});
   }
   modelsCache = out;
-  await mkdir(STATE_DIR, { recursive: true });
-  await writeFile(MODELS_FILE, JSON.stringify(out, null, 2));
+  await mkdir(STATE_DIR, { recursive: true, mode: 0o700 });
+  await writeFile(MODELS_FILE, JSON.stringify(out, null, 2), { mode: 0o600 });
   return out;
 }
 async function getModels() {
@@ -445,24 +454,41 @@ async function listTools() {
 // ---------- HTTP ----------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.map': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2' };
 
-function readBody(req) {
-  return new Promise((resolve) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => resolve(b)); });
+const BODY_LIMIT = 1024 * 1024;
+async function readBody(req) {
+  let b = '';
+  for await (const c of req) {
+    b += c;
+    if (b.length > BODY_LIMIT) throw Object.assign(new Error('request too large'), { status: 413 });
+  }
+  return b;
 }
 
+// Every answer of fox's own: no type sniffing, no framing by other sites, no address sent along with links.
+const BASE_HEADERS = { 'x-content-type-options': 'nosniff', 'x-frame-options': 'SAMEORIGIN', 'referrer-policy': 'no-referrer' };
+// fox's own pages run only fox's own scripts. Inline styles stay (the page sets style= attributes); images may be
+// remote (a README's badges, shown in the Markdown frame). The terminal's WebSocket is named: Safari does not
+// count ws:// as 'self'.
+const pageCsp = (host) => {
+  const ws = /^[A-Za-z0-9.:[\]-]+$/.test(host ?? '') ? ` ws://${host} wss://${host}` : '';
+  return `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'${ws}; frame-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'self'`;
+};
 function send(res, status, body, type = 'application/json') {
-  res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
+  res.writeHead(status, { ...BASE_HEADERS, 'content-type': type, 'cache-control': 'no-store' });
   res.end(typeof body === 'string' ? body : JSON.stringify(body));
 }
 
 async function serveStatic(res, root, rel) {
   const path = resolve(root, '.' + rel);
-  if (!path.startsWith(root)) return send(res, 403, 'forbidden', 'text/plain');
+  if (!path.startsWith(root + sep)) return send(res, 403, 'forbidden', 'text/plain');
   try {
     const s = await stat(path);
     if (!s.isFile()) throw new Error('not file');
   } catch { return send(res, 404, 'not found', 'text/plain'); }
   // No browser caching: the panel changes often and a stale app.js is confusing.
-  res.writeHead(200, { 'content-type': MIME[extname(path)] ?? 'application/octet-stream', 'cache-control': 'no-store' });
+  const type = MIME[extname(path)] ?? 'application/octet-stream';
+  const csp = type.startsWith('text/html') && !res.hasHeader('content-security-policy') ? { 'content-security-policy': pageCsp(res.req?.headers.host) } : {};
+  res.writeHead(200, { ...BASE_HEADERS, ...csp, 'content-type': type, 'cache-control': 'no-store' });
   createReadStream(path).pipe(res);
 }
 
@@ -529,7 +555,10 @@ async function handlePanelRequest(req, res) {
       if (m[2] === 'open-file') {
         if (req.method !== 'POST') return send(res, 405, { error: 'POST' });
         if (process.platform !== 'darwin') return send(res, 501, { error: 'only on macOS' });
-        await execFileP('open', [f.path]);
+        // Opening a script or an app would run it (a repo can ship one for fx to mention): never that.
+        const ext = extname(f.path).toLowerCase();
+        const how = OPEN_AS_TEXT.has(ext) ? '-t' : OPEN_IN_FINDER.has(ext) || ((await stat(f.path)).mode & 0o111) ? '-R' : null;
+        await execFileP('open', how ? [how, f.path] : [f.path]);
         return send(res, 200, { ok: true });
       }
       // The file itself, to render in a preview tab. An agent wrote it, so it runs sandboxed (CSP sandbox
@@ -540,7 +569,9 @@ async function handlePanelRequest(req, res) {
         const meta = await readJson(join(SESSIONS_DIR, id, 'session.json'));
         const root = realPath(meta?.workspace_root ?? meta?.origin_workspace_root ?? '');
         if (!root || !(f.path === root || f.path.startsWith(root + '/'))) return send(res, 400, { error: 'page is outside the project' });
-        return send(res, 200, { url: viewTokens.issue(root, f.path) });
+        // A session that runs in your home folder (or /) is not a project: the link then covers the page's folder only.
+        const scope = root === realPath(homedir()) || root === '/' ? dirname(f.path) : root;
+        return send(res, 200, { url: viewTokens.issue(scope, f.path) });
       }
       if (m[2] === 'preview') {
         const etag = `"${Math.round(f.mtime)}-${f.size}"`;
@@ -586,10 +617,10 @@ async function handlePanelRequest(req, res) {
       const safe = raw.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[-.]+/, '').slice(-80) || 'file';
       const chunks = []; let size = 0;
       for await (const c of req) { size += c.length; if (size > DROP_LIMIT) return send(res, 413, { error: 'file too large (max 25 MB)' }); chunks.push(c); }
-      await mkdir(DROP_DIR, { recursive: true });
+      await mkdir(DROP_DIR, { recursive: true, mode: 0o700 });
       const stamp = new Date().toISOString().replace(/[-:.]/g, '').replace('T', '-').slice(0, 18);
       const path = join(DROP_DIR, `${stamp}-${safe}`);
-      await writeFile(path, Buffer.concat(chunks));
+      await writeFile(path, Buffer.concat(chunks), { mode: 0o600 });
       return send(res, 200, { path });
     }
     // A few of fx's own settings (see fxsettings.mjs). New and resumed sessions pick them up.
@@ -666,6 +697,17 @@ async function handlePanelRequest(req, res) {
         return send(res, 405, { error: 'method not allowed' });
       } catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
     }
+    // On a server, which branch fox-update deploys (/usr/local/sbin/fox-update reads this file every minute):
+    // release (merged pull requests) or main (every push).
+    if (p === '/api/deploy' && req.method === 'GET') return send(res, 200, { available: Boolean(process.env.FOX_PUBLIC_ORIGIN), branch: await deployBranch() });
+    if (p === '/api/deploy' && req.method === 'POST') {
+      if (!process.env.FOX_PUBLIC_ORIGIN) return send(res, 404, { error: 'only on a server' });
+      const { branch } = JSON.parse(await readBody(req) || '{}');
+      if (!DEPLOY_BRANCHES.includes(branch)) return send(res, 400, { error: 'release or main' });
+      await mkdir(STATE_DIR, { recursive: true, mode: 0o700 });
+      await writeFile(DEPLOY_FILE, branch + '\n', { mode: 0o644 });
+      return send(res, 200, { available: true, branch });
+    }
     // What the page needs to know about where fox runs: remote or local, and the dev-server preview hostnames.
     if (p === '/api/config' && req.method === 'GET') return send(res, 200, { remote: Boolean(process.env.FOX_PUBLIC_ORIGIN), preview: PREVIEW, version: await VERSION, startedAt: STARTED_AT });
     // Workspaces: folders made of GitHub repos (see workspaces.mjs).
@@ -728,11 +770,14 @@ async function handlePanelRequest(req, res) {
     if (p.startsWith('/vendor/font/')) return serveStatic(res, join(__dirname, 'node_modules/@fontsource/source-code-pro'), p.slice('/vendor/font'.length));
     return serveStatic(res, PUBLIC, p === '/' ? '/index.html' : p);
   } catch (err) {
-    send(res, 500, { error: String(err) });
+    send(res, err.status ?? 500, { error: err.status ? err.message : String(err) });
   }
 }
 
-const localHost = (host) => host === `127.0.0.1:${PORT}` || host === `localhost:${PORT}`;
+const localHost = (host) => host === `127.0.0.1:${PORT}` || host === `localhost:${PORT}` || host === `[::1]:${PORT}`;
+// With FOX_AUTH_DISABLED (the older Tailscale Serve setup): loopback, or a tailnet name, which no other site can
+// point at this machine.
+const unlockedHost = (host) => localHost(host) || /^[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net$/i.test(host ?? '');
 // /view/<token>/...: a page fx made, with the files it loads. The token is the key (see view.mjs).
 const viewTokens = createViewTokens();
 async function handleView(req, res, path) {
@@ -740,12 +785,17 @@ async function handleView(req, res, path) {
   const [, , token = '', ...rest] = path.split('/');
   const candidates = viewTokens.candidates(token, rest.join('/'));
   if (candidates === null) return send(res, 410, 'This preview link expired. Open the file again from fox.', 'text/plain; charset=utf-8');
+  const root = viewTokens.root(token);
   for (const file of candidates) {
+    // A symlink must not lead out of the project or onto a hidden file (a repo can ship one to ~/.ssh).
+    const real = realPath(file);
+    const rel = relative(root, real);
+    if (real !== file && (!rel || rel.startsWith('..') || resolve(root, rel) !== real || rel.split(sep).some((s) => s.startsWith('.')))) continue;
     let st = null;
-    try { st = await stat(file); } catch {}
+    try { st = await stat(real); } catch {}
     if (!st?.isFile() || st.size > 20 * 1024 * 1024) continue;
     const type = VIEW_TYPES[extname(file).toLowerCase()];
-    let body = await readFile(file);
+    let body = await readFile(real);
     if (/^text\/(html|css)/.test(type)) body = rewriteRootLinks(body.toString('utf8'), token, type);
     res.writeHead(200, {
       'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer',
@@ -761,6 +811,8 @@ const OPEN_ASSETS = new Set(['/fox.svg', '/icon-180.png', '/icon-512.png', '/man
 const server = http.createServer(async (req, res) => {
   if (process.env.FOX_SHARE_PORT !== undefined && !localHost(req.headers.host)) return send(res, 403, { error: 'use the paired gateway for remote access' });
   const path = new URL(req.url, 'http://localhost').pathname;
+  // Without a passkey only fox's own names reach it: another name pointing here (DNS rebinding) is a foreign site.
+  if (process.env.FOX_AUTH_DISABLED === '1' && !unlockedHost(req.headers.host)) return send(res, 403, { error: 'host not allowed' });
   if (!auth.accepts(req) && process.env.FOX_AUTH_DISABLED !== '1') {
     if (!process.env.FOX_PUBLIC_ORIGIN && localHost(req.headers.host) && req.method === 'GET' &&
         (path === '/' || path === '/login.html' || path === '/login.css' || path === '/login.js' || OPEN_ASSETS.has(path))) {
@@ -914,7 +966,8 @@ async function createTerminal({ cwd, resume, provider = null, model = null }) {
   await updateWorkspaceRepos(cwd);
   // New sessions can start on a chosen provider/model; resumed ones keep what the session already has.
   const flags = resume ? '' : `${provider ? ` --provider ${provider}` : ''}${model ? ` --model ${model}` : ''}`;
-  const cmd = resume ? `${FX_BIN} session resume ${resume}` : `${FX_BIN}${flags}`;
+  const fx = `'${FX_BIN.replaceAll("'", "'\\''")}'`; // tmux runs this through a shell: a path with spaces stays one word
+  const cmd = resume ? `${fx} session resume ${resume}` : `${fx}${flags}`;
   await tmux('new-session', '-d', '-s', name, '-x', '140', '-y', '40', '-c', cwd, cmd);
   await passHyperlinks();
   await tmux('set-option', '-t', name, 'status', 'off');
@@ -930,7 +983,7 @@ async function createTerminal({ cwd, resume, provider = null, model = null }) {
 
 async function killTerminal(name) {
   if (!name.startsWith(TMUX_PREFIX)) return false;
-  await tmux('kill-session', '-t', name);
+  await tmux('kill-session', '-t', `=${name}`); // "=": exactly this session, never one whose name starts the same
   return true;
 }
 
@@ -950,7 +1003,7 @@ function upgrade(req, socket, head, deviceId = null, remoteSockets = null) {
   });
 }
 server.on('upgrade', (req, socket, head) => {
-  if (process.env.FOX_SHARE_PORT !== undefined && !localHost(req.headers.host)) {
+  if ((process.env.FOX_SHARE_PORT !== undefined && !localHost(req.headers.host)) || (process.env.FOX_AUTH_DISABLED === '1' && !unlockedHost(req.headers.host))) {
     socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return;
   }
   upgrade(req, socket, head);
@@ -966,7 +1019,7 @@ wss.on('connection', (ws, req) => {
 
   let proc;
   try {
-    proc = pty.spawn(TMUX, ['attach-session', '-t', name], {
+    proc = pty.spawn(TMUX, ['attach-session', '-t', `=${name}`], {
       name: 'xterm-256color', cols, rows, cwd: homedir(),
       env: { ...process.env, PATH: `/opt/homebrew/bin:${process.env.PATH}`, TERM: 'xterm-256color', COLORTERM: 'truecolor', LANG: process.env.LANG ?? 'en_US.UTF-8' },
     });
@@ -986,8 +1039,11 @@ wss.on('connection', (ws, req) => {
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
-    if (msg.type === 'input') proc.write(msg.data);
-    else if (msg.type === 'resize' && msg.cols > 0 && msg.rows > 0) proc.resize(msg.cols, msg.rows);
+    // A throw here would stop fox: only text is typed, and sizes are whole numbers in range.
+    try {
+      if (msg?.type === 'input' && typeof msg.data === 'string') proc.write(msg.data);
+      else if (msg?.type === 'resize' && Number.isInteger(msg.cols) && Number.isInteger(msg.rows)) proc.resize(Math.min(1000, Math.max(2, msg.cols)), Math.min(500, Math.max(2, msg.rows)));
+    } catch {}
   });
   // Cerrar la pestaña solo desconecta al cliente; la sesión de tmux y fx siguen vivos.
   ws.on('close', () => { try { proc.kill(); } catch {} });

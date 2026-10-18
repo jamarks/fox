@@ -52,6 +52,7 @@ fox runs scripts on a schedule on this machine ("jobs"); the user sees them on f
 
 Rules:
 - Create, change or remove a job only when the user asks, and confirm the name, script and schedule with them before running \`fox-job add\`.
+- A job you add waits for the user to approve it on fox's Jobs page; until then it does not run, and \`fox-job run\` or \`resume\` cannot start it. Tell the user to approve it there.
 - A job is a script: keep it in the workspace (for example \`jobs/<name>.py\`) and commit it. Do as much as possible in plain code; when there is nothing to do, exit early without calling a model.
 - Print \`FOX_SUMMARY: <one line>\` with what the run did; write reports or files for the user to \`$FOX_JOB_OUTPUT\`.
 - To use a model inside a job, call \`fx ask --no-save --json "<prompt>"\` and read \`final_output\`. Validate what comes back; never run a model's output as shell commands.

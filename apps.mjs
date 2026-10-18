@@ -52,7 +52,7 @@ export const appUrl = (template, name) => template.replace('{name}', name);
 
 // Forwards each request (and WebSocket, for dev-server reload) to its app's port, as `localhost` the way the
 // per-port previews do, so dev servers that only accept localhost (Vite) answer. Unknown names get a short page.
-export function createAppRouter({ registry, domain, log = console }) {
+export function createAppRouter({ registry, domain, denyPorts = [], log = console }) {
   const suffix = `.${domain}`;
   const nameOf = (host) => {
     const h = String(host ?? '').toLowerCase().replace(/:\d+$/, '');
@@ -61,9 +61,15 @@ export function createAppRouter({ registry, domain, log = console }) {
   async function target(req) {
     const name = nameOf(req.headers.host);
     const app = name && APP_NAME.test(name) ? await registry.get(name) : null;
-    return app ? { name, port: app.port } : { name };
+    return app && !denyPorts.includes(app.port) ? { name, port: app.port } : { name }; // apps.json edited by hand
   }
-  const headersFor = (req) => ({ ...req.headers, host: 'localhost', 'x-forwarded-host': req.headers.host, 'x-forwarded-proto': 'https' });
+  // Cloudflare Access proves who you are to the tunnel; the dev server gets no copy of that proof.
+  const headersFor = (req) => {
+    const h = { ...req.headers, host: 'localhost', 'x-forwarded-host': req.headers.host, 'x-forwarded-proto': 'https' };
+    for (const k of Object.keys(h)) if (k.startsWith('cf-access-')) delete h[k];
+    if (h.cookie) { h.cookie = h.cookie.split(';').map((c) => c.trim()).filter((c) => c && !/^CF_Authorization=/i.test(c)).join('; '); if (!h.cookie) delete h.cookie; }
+    return h;
+  };
   const server = http.createServer(async (req, res) => {
     const t = await target(req);
     if (!t.port) {
