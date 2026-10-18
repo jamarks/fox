@@ -6,6 +6,8 @@ HERE = Path(__file__).resolve().parent
 FAKE_FX = """#!/usr/bin/env python3
 import json, os, sys
 mode = os.environ.get("FAKE_FX_MODE", "done")
+if os.environ.get("FAKE_FX_ARGS"):
+    open(os.environ["FAKE_FX_ARGS"], "w").write(json.dumps(sys.argv[1:]))
 if mode == "big":
     open("big.txt", "w").write("x\\n" * 500)
 elif mode == "done":
@@ -72,6 +74,14 @@ class FoxJobTest(unittest.TestCase):
         self.assertEqual(sh("git", "rev-parse", "main", cwd=self.origin), sh("git", "rev-parse", "release", cwd=self.origin),
                          "main and release untouched")
         self.assertEqual(self.propose().status, "exists")
+
+    def test_a_job_can_pick_the_model_and_effort(self):
+        args = self.tmp / "fx-args.json"
+        self.fj.CHILD_ENV["FAKE_FX_ARGS"] = str(args)
+        self.propose(model="gpt-x", effort="high")
+        self.assertEqual(json.loads(args.read_text())[:7], ["ask", "--auto", "--no-save", "--json", "--model", "gpt-x", "--effort"])
+        self.fj.ask_fx("hi", cwd=self.tmp)
+        self.assertNotIn("--model", json.loads(args.read_text()), "without a model fx uses its own settings")
 
     def test_nothing_is_pushed_when_fx_skips_goes_too_big_or_tests_fail(self):
         for mode, test, reason in (("skip", "true", "fx did not do it"), ("big", "true", "too big"), ("done", "false", "failed")):
