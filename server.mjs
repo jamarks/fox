@@ -22,6 +22,7 @@ import { TOOLS, isInstalled, isEnabled, withEnabled, addArgs } from './tools.mjs
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
 import { createAppRegistry, createAppRouter } from './apps.mjs';
+import { createFxSettings } from './fxsettings.mjs';
 import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
 import { createJobStore, createRunner } from './jobs.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
@@ -94,6 +95,7 @@ const workspaces = createWorkspaces({ stateDir: STATE_DIR, rootDir: join(homedir
 // Jobs (see jobs.mjs). On a server the runner is its own service (FOX_JOBS_RUNNER=external), so deploying fox
 // never kills a job mid-run; on a laptop it runs inside fox.
 const jobStore = createJobStore({ stateDir: STATE_DIR });
+const fxSettings = createFxSettings(join(homedir(), '.fx', 'settings.json'));
 if (APPS) {
   const registry = createAppRegistry({ stateDir: STATE_DIR, denyPorts: [PORT, APPS.port, 4849] });
   createAppRouter({ registry, domain: APPS.domain }).listen(APPS.port, '127.0.0.1', () => console.log(`fox: named apps at ${APPS.url} (router on 127.0.0.1:${APPS.port})`));
@@ -588,6 +590,12 @@ async function handlePanelRequest(req, res) {
       const path = join(DROP_DIR, `${stamp}-${safe}`);
       await writeFile(path, Buffer.concat(chunks));
       return send(res, 200, { path });
+    }
+    // A few of fx's own settings (see fxsettings.mjs). New and resumed sessions pick them up.
+    if (p === '/api/fx-settings' && req.method === 'GET') return send(res, 200, await fxSettings.list());
+    if (p === '/api/fx-settings' && req.method === 'POST') {
+      try { const { key, value } = JSON.parse(await readBody(req) || '{}'); return send(res, 200, await fxSettings.set(key, value)); }
+      catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
     }
     if (p === '/api/tools' && req.method === 'GET') return send(res, 200, await listTools());
     // Sign-in progress for a remote tool (see startSignIn).

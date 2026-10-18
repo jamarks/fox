@@ -1628,6 +1628,7 @@ function openSettings() {
   if (mobileLayout.matches) showMobileView('terminal');
   renderThemeDots();
   loadTools();
+  loadFxSettings();
 }
 function closeSettings() {
   if (!settingsOpen()) return;
@@ -1639,6 +1640,26 @@ const settingsOpen = () => !$('#settings-view').classList.contains('hidden');
 $('#settings').addEventListener('click', () => (settingsOpen() ? closeSettings() : openSettings()));
 $('#settings-close').addEventListener('click', closeSettings);
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && settingsOpen() && !e.defaultPrevented) closeSettings(); });
+// fx's own settings (see fxsettings.mjs): a switch each, effort as a row of choices.
+function fxSettingRow(o) {
+  const main = `<span class="set-main">${esc(o.label)}<span class="set-sub">${esc(o.description)}</span></span>`;
+  if (o.type === 'bool') return `<div class="set-row">${main}<button type="button" class="switch-btn ${o.value ? 'on' : ''}" data-fx-key="${o.key}" role="switch" aria-checked="${o.value}" aria-label="${esc(o.label)}"><span class="switch"></span></button></div>`;
+  return `<div class="set-row">${main}<div class="seg">${o.choices.map((c) => `<button type="button" class="${c === o.value ? 'on' : ''}" data-fx-key="${o.key}" data-fx-value="${c}">${c}</button>`).join('')}</div></div>`;
+}
+async function loadFxSettings() {
+  try { $('#settings-fx').innerHTML = (await (await fetch('/api/fx-settings')).json()).map(fxSettingRow).join(''); } catch {}
+}
+$('#settings-fx').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-fx-key]');
+  if (!btn || btn.disabled) return;
+  const value = 'fxValue' in btn.dataset ? btn.dataset.fxValue : !btn.classList.contains('on');
+  btn.disabled = true;
+  const r = await fetch('/api/fx-settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: btn.dataset.fxKey, value }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { btn.disabled = false; $('#settings-fx-note').textContent = j.error || 'That did not work.'; return; }
+  $('#settings-fx').innerHTML = j.map(fxSettingRow).join('');
+  $('#settings-fx-note').textContent = 'New sessions use it; an open one picks it up when it is resumed.';
+});
 // Tools for fx (MCP servers from fox's catalog), for every session: a switch for the ones fx has (off keeps the
 // setup, fx skips it), Add for the rest, Sign in when one needs it. Nothing changes without a tap.
 function toolRow(t) {
