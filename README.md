@@ -40,7 +40,7 @@ All of it: [CHANGELOG.md](CHANGELOG.md).
 - **One terminal** per session in tmux; pin the ones you keep. Drop files on it, dictate into it (the text lands in fx's input; you send it).
 - **Workspaces**: a folder of GitHub repos, cloned once, with each repo's branch and changes at a glance.
 - **Jobs**: scripts on a schedule, each with its model, log, summary and links. A job can have fx make a change and open a pull request it checked itself. [docs/jobs.md](docs/jobs.md)
-- **Tools for fx** from Settings: a browser, Chrome DevTools, library docs, Vercel.
+- **Tools for fx** from Settings: a browser, Chrome DevTools, library docs, Vercel, Linear.
 - **Search** across every session (⌥Space), **metrics** for the last 7 and 30 days, seven **themes** (one is a real star map).
 - **On a server**: open it from any device, publish dev servers as named apps, and merging a pull request deploys it. [docs/remote-access.md](docs/remote-access.md)
 
