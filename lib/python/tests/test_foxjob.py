@@ -68,6 +68,7 @@ class FoxJobTest(unittest.TestCase):
         p = self.propose()
         self.assertEqual((p.status, p.url, p.files, p.summary), ("opened", "https://github.com/o/r/pull/1", 1, "said hello"))
         self.assertEqual(sh("git", "show", "agent/hello:hello.txt", cwd=self.origin), "hello")
+        self.assertEqual(sh("git", "log", "-1", "--format=%B", "agent/hello", cwd=self.origin), "Say hello\n\nsaid hello")
         self.assertEqual(sh("git", "rev-parse", "main", cwd=self.origin), sh("git", "rev-parse", "release", cwd=self.origin),
                          "main and release untouched")
         self.assertEqual(self.propose().status, "exists")

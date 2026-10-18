@@ -162,6 +162,8 @@ def propose_change(repo, *, branch, title, task, test, base="main", setup=None, 
                    prefix="agent/", timeout_min=25, body="", commit_message=None, dry=False):
     """fx does `task` in a clean copy of `repo`; the job checks size and tests itself and opens a PR to `base`.
 
+    commit_message may use {title} and {summary} (fx's one-line summary of what it did).
+
     Raises Failure when fx skips, changes nothing, goes over max_lines or the tests fail: nothing is pushed then.
     """
     path = checkout(repo)
@@ -195,7 +197,8 @@ def propose_change(repo, *, branch, title, task, test, base="main", setup=None, 
     (output_dir() / "change.diff").write_text(git("diff", "--cached", start, cwd=path))
     log(f"running the tests myself: {test}")
     sh(test, path)
-    git("commit", "--quiet", "-m", commit_message or f"{title}\n\n{result['summary']}", cwd=path)
+    message = (commit_message or "{title}\n\n{summary}").replace("{title}", title).replace("{summary}", result["summary"])
+    git("commit", "--quiet", "-m", message, cwd=path)
     pr_body = (f"{result['summary']}\n\n**Verified:** {result.get('verified', '')}\n\n"
                f"**Change:** {files} files, {lines} lines. Tests pass (`{test}`), run by the job.\n\n"
                + (body.strip() + "\n\n" if body.strip() else "") + f"Made by a fox job ({RUN_ID}).")
