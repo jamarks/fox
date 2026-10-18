@@ -1640,9 +1640,14 @@ const settingsOpen = () => !$('#settings-view').classList.contains('hidden');
 $('#settings').addEventListener('click', () => (settingsOpen() ? closeSettings() : openSettings()));
 $('#settings-close').addEventListener('click', closeSettings);
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && settingsOpen() && !e.defaultPrevented) closeSettings(); });
-// fx's own settings (see fxsettings.mjs): a switch each, effort as a row of choices.
+// fx's own settings (see fxsettings.mjs). Seen state is browser-only, never activation.
+const fxSettingsSeen = new Set();
+try { for (const id of JSON.parse(localStorage.getItem('fox.fxSettingsSeen') ?? '[]')) fxSettingsSeen.add(id); } catch {}
 function fxSettingRow(o) {
-  const main = `<span class="set-main">${esc(o.label)}<span class="set-sub">${esc(o.description)}</span></span>`;
+  const id = `${o.key}:${o.introduced}`;
+  const badge = o.introduced && !fxSettingsSeen.has(id) ? ` <span class="set-note" data-fx-badge>New · <button type="button" class="set-act" data-fx-seen="${esc(id)}">Mark as seen</button></span>` : '';
+  const main = `<span class="set-main">${esc(o.label)}${badge}<span class="set-sub">${esc(o.description)}</span></span>`;
+  if (o.type === 'integer') return `<div class="set-row set-optional">${main}<div class="set-override"><input type="number" min="${o.min}" max="${o.max}" step="1" value="${esc(o.value)}" aria-label="${esc(o.label)}" data-fx-input="${o.key}" style="width:8em"><button type="button" class="set-act" data-fx-key="${o.key}" data-fx-save>Save</button><button type="button" class="switch-btn ${o.applied ? 'on' : ''}" data-fx-key="${o.key}" data-fx-apply role="switch" aria-checked="${o.applied}" aria-label="Apply setting: ${esc(o.label)}"><span class="switch"></span></button><span>Apply setting</span><span class="set-sub">${o.applied ? 'Saved override' : 'No fox override; fx uses its own defaults or other configuration'}. Upstream default: ${esc(o.upstreamDefault)}. <a href="${esc(o.documentation)}" target="_blank" rel="noopener noreferrer">Documentation</a></span></div></div>`;
   if (o.type === 'bool') return `<div class="set-row">${main}<button type="button" class="switch-btn ${o.value ? 'on' : ''}" data-fx-key="${o.key}" role="switch" aria-checked="${o.value}" aria-label="${esc(o.label)}"><span class="switch"></span></button></div>`;
   return `<div class="set-row">${main}<div class="seg">${o.choices.map((c) => `<button type="button" class="${c === o.value ? 'on' : ''}" data-fx-key="${o.key}" data-fx-value="${c}">${c}</button>`).join('')}</div></div>`;
 }
@@ -1650,15 +1655,36 @@ async function loadFxSettings() {
   try { $('#settings-fx').innerHTML = (await (await fetch('/api/fx-settings')).json()).map(fxSettingRow).join(''); } catch {}
 }
 $('#settings-fx').addEventListener('click', async (e) => {
+  const seen = e.target.closest('[data-fx-seen]');
+  if (seen) {
+    fxSettingsSeen.add(seen.dataset.fxSeen);
+    try { localStorage.setItem('fox.fxSettingsSeen', JSON.stringify([...fxSettingsSeen])); } catch {}
+    seen.closest('[data-fx-badge]').remove();
+    return;
+  }
   const btn = e.target.closest('[data-fx-key]');
   if (!btn || btn.disabled) return;
-  const value = 'fxValue' in btn.dataset ? btn.dataset.fxValue : !btn.classList.contains('on');
+  let value = 'fxValue' in btn.dataset ? btn.dataset.fxValue : !btn.classList.contains('on');
+  const input = btn.closest('.set-row').querySelector('[data-fx-input]');
+  if (input) {
+    if ('fxApply' in btn.dataset && btn.classList.contains('on')) value = null;
+    else {
+      if (!input.value.trim() || !input.reportValidity()) { $('#settings-fx-note').textContent = 'Enter a valid whole number.'; return; }
+      value = Number(input.value);
+      // Editing a draft does not opt in. The switch is the explicit application action.
+      if ('fxSave' in btn.dataset && !btn.closest('.set-row').querySelector('[data-fx-apply]').classList.contains('on')) {
+        $('#settings-fx-note').textContent = 'Turn on Apply setting to save this override.'; return;
+      }
+    }
+  }
   btn.disabled = true;
-  const r = await fetch('/api/fx-settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: btn.dataset.fxKey, value }) });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) { btn.disabled = false; $('#settings-fx-note').textContent = j.error || 'That did not work.'; return; }
-  $('#settings-fx').innerHTML = j.map(fxSettingRow).join('');
-  $('#settings-fx-note').textContent = 'New sessions use it; an open one picks it up when it is resumed.';
+  try {
+    const r = await fetch('/api/fx-settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: btn.dataset.fxKey, value }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || 'That did not work.');
+    $('#settings-fx').innerHTML = j.map(fxSettingRow).join('');
+    $('#settings-fx-note').textContent = 'New sessions use it; an open one picks it up when it is resumed.';
+  } catch (err) { btn.disabled = false; $('#settings-fx-note').textContent = err.message; }
 });
 // Tools for fx (MCP servers from fox's catalog), for every session: a switch for the ones fx has (off keeps the
 // setup, fx skips it), Add for the rest, Sign in when one needs it. Nothing changes without a tap.
