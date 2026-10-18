@@ -9,13 +9,14 @@ pushes to the base branch; publish_merged() then moves a deploy branch forward o
 
 Stdlib only, plus git, gh and fx on PATH.
 """
-import json, os, re, subprocess
+import json, os, re, subprocess, time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 RUN_ID = os.environ.get("FOX_JOB_RUN_ID", "manual")
 WORK = Path(os.environ.get("FOXJOB_WORK", "~/.cache/fox-jobs")).expanduser()
 GIT_BASE = os.environ.get("FOXJOB_GIT_BASE", "https://github.com/")  # tests point this at local repos
+RETRY_WAIT = int(os.environ.get("FOXJOB_RETRY_WAIT", "60"))
 _report, _linked = [], set()
 
 # What the job starts (tests, fx) must not inherit fox's own settings (its port, its state, its auth).
@@ -119,8 +120,14 @@ def ask_fx(prompt, cwd, timeout_min=25, model=None, effort=None):
     """
     log(f"fx working (up to {timeout_min} min{', ' + model if model else ''})…")
     pick = (["--model", model] if model else []) + (["--effort", effort] if effort else [])
-    p = subprocess.run(["fx", "ask", "--auto", "--no-save", "--json", *pick, "--", prompt], cwd=cwd, env=CHILD_ENV,
-                       capture_output=True, text=True, timeout=timeout_min * 60)
+    for attempt in (1, 2):
+        p = subprocess.run(["fx", "ask", "--auto", "--no-save", "--json", *pick, "--", prompt], cwd=cwd, env=CHILD_ENV,
+                           capture_output=True, text=True, timeout=timeout_min * 60)
+        # A provider that drops the answer (fx prints provider_error and returns nothing) usually works a minute later.
+        if attempt == 2 or "provider_error" not in p.stderr or _final(p.stdout):
+            break
+        log("the provider failed the answer; trying once more in a minute")
+        time.sleep(RETRY_WAIT)
     (output_dir() / "fx-progress.log").write_text(p.stderr[-200_000:])
     try:
         final = json.loads(p.stdout).get("final_output") or ""
@@ -128,6 +135,13 @@ def ask_fx(prompt, cwd, timeout_min=25, model=None, effort=None):
         raise Failure(f"fx did not answer in JSON (exit {p.returncode})", (p.stdout + p.stderr)[-2000:])
     (output_dir() / "fx-answer.md").write_text(final)
     return parse_result(final)
+
+
+def _final(stdout):
+    try:
+        return json.loads(stdout).get("final_output") or ""
+    except (json.JSONDecodeError, AttributeError):
+        return ""
 
 
 def count_lines(numstat):
