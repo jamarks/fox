@@ -203,10 +203,11 @@ test('a job can pick fx\'s model and effort; its script sees them as FOX_JOB_MOD
   const job = await store.create({ ...base, name: 'm', model: 'gpt-6.1-sol', effort: 'medium' });
   const runner = createRunner({ store, log: quiet });
   await store.trigger(job.id); await runner.tick(); await runner.idle();
-  assert.equal((await store.runs(job.id))[0].summary, 'gpt-6.1-sol medium');
+  const [first] = await store.runs(job.id);
+  assert.equal(first.summary, 'gpt-6.1-sol medium');
   await store.update(job.id, { model: '', effort: '' });
   const plain = await store.get(job.id);
   assert.equal('model' in plain || 'effort' in plain, false, 'empty leaves it to the script again');
   await store.trigger(job.id); await runner.tick(); await runner.idle();
-  assert.equal((await store.runs(job.id))[0].summary, 'none none');
+  assert.equal((await store.runs(job.id)).find((r) => r.id !== first.id).summary, 'none none', 'runs in the same second can list in either order');
 });
