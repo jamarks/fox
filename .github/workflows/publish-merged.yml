@@ -1,0 +1,31 @@
+# A pull request merged into main goes out: release moves to main (fast-forward only) and a server running fox from
+# release deploys it within a minute (it runs the tests first and rolls back if fox does not answer). Merging, from
+# anywhere (the GitHub app on a phone too), is the only step.
+name: Publish merged pull requests
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+permissions:
+  contents: write
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Fast-forward release to main
+        run: |
+          git fetch --quiet origin release main
+          if ! git merge-base --is-ancestor origin/release origin/main; then
+            echo "::error::release has commits that main does not; publish by hand"
+            exit 1
+          fi
+          git push origin origin/main:refs/heads/release
+          echo "Published $(git rev-parse --short origin/main) to release (#${{ github.event.pull_request.number }})" >> "$GITHUB_STEP_SUMMARY"
