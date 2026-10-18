@@ -2,7 +2,7 @@
 // Lee ~/.fx/sessions (solo lectura) y abre `fx` en pseudo-terminales vía WebSocket.
 
 import http from 'node:http';
-import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, stat, mkdir, writeFile, rename } from 'node:fs/promises';
 import { existsSync, realpathSync } from 'node:fs';
 import { createReadStream } from 'node:fs';
 import { join, resolve, extname, basename } from 'node:path';
@@ -18,7 +18,7 @@ import { promisify } from 'node:util';
 import { createSearchIndex } from './search.mjs';
 import { latestCompletedReply } from './inbox.mjs';
 import { readMetrics } from './metrics.mjs';
-import { TOOLS, isInstalled, addArgs } from './tools.mjs';
+import { TOOLS, isInstalled, isEnabled, withEnabled, addArgs } from './tools.mjs';
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
 import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
@@ -378,6 +378,16 @@ async function fxMcpConfig() {
   mcpPath ??= (await execFileP(FX_BIN, ['mcp', 'path'], { timeout: 10000 })).stdout.trim();
   return readJson(mcpPath, {});
 }
+// Turns a tool on or off in fx's MCP config, changing only its `enabled` flag. Written whole and renamed into
+// place, with the file's own permissions, so fx never reads half a file. Sessions already running keep theirs.
+async function setToolEnabled(tool, enabled) {
+  const config = await fxMcpConfig();
+  const next = withEnabled(config, tool, enabled);
+  const mode = (await stat(mcpPath)).mode & 0o777;
+  const tmp = `${mcpPath}.${randomUUID()}.tmp`;
+  await writeFile(tmp, JSON.stringify(next, null, 2) + '\n', { mode });
+  await rename(tmp, mcpPath);
+}
 // Sign-in for a remote tool: `fx mcp auth NAME` prints the provider's authorize URL and waits for the
 // browser callback. fox hands the URL to the page, which opens it, and polls until fx exits.
 const signins = new Map(); // tool id -> { status: 'waiting' | 'done' | 'failed', url, error, proc }
@@ -412,7 +422,8 @@ async function listTools() {
   return TOOLS.map((t) => {
     const installed = isInstalled(t, config);
     // fx keeps OAuth tokens to itself; fox only remembers that a sign-in it started went through.
-    return { id: t.id, label: t.label, description: t.description, installed, needsSignIn: installed && t.auth === 'oauth' && !st.toolsSignedIn[t.id] };
+    return { id: t.id, label: t.label, description: t.description, cost: t.cost ?? null, installed, enabled: installed && isEnabled(t, config),
+      needsSignIn: installed && t.auth === 'oauth' && !st.toolsSignedIn[t.id] };
   });
 }
 
@@ -574,9 +585,14 @@ async function handlePanelRequest(req, res) {
     }
     // Adds one catalog tool to fx's MCP config, the same as running `fx mcp add` by hand; 'signin' starts
     // `fx mcp auth NAME` and answers with the authorize URL to open.
-    if (req.method === 'POST' && (m = p.match(/^\/api\/tools\/([a-z0-9-]+)\/(add|signin)$/))) {
+    if (req.method === 'POST' && (m = p.match(/^\/api\/tools\/([a-z0-9-]+)\/(add|signin|on|off)$/))) {
       const tool = TOOLS.find((t) => t.id === m[1]);
       if (!tool) return send(res, 404, { error: 'unknown tool' });
+      if (m[2] === 'on' || m[2] === 'off') {
+        try { await setToolEnabled(tool, m[2] === 'on'); }
+        catch (err) { return send(res, 500, { error: err.message }); }
+        return send(res, 200, await listTools());
+      }
       if (m[2] === 'signin') {
         const e = await startSignIn(tool);
         return e.url ? send(res, 200, { url: e.url }) : send(res, 500, { error: e.error || 'fx did not give a sign-in URL' });

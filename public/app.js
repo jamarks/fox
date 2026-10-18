@@ -343,6 +343,7 @@ $('#session-groups').addEventListener('click', async (e) => {
 // Click on a session: focus its tab if open, attach to its tmux terminal if running, otherwise start one.
 async function openSession(id) {
   if (state.jobView) closeJob();
+  closeSettings();
   const s = sessionById(id);
   if (!s) return;
   if (s.terminal && state.tabs.has(s.terminal) && !state.tabs.get(s.terminal).closed) { activateTab(s.terminal); return selectSession(id); }
@@ -572,6 +573,9 @@ function showVersion({ version: v, startedAt }) {
   el.title = `${v.subject ?? ''}\ncommitted ${fmt(Date.parse(v.date))}${v.deployedAt ? `\ndeployed ${fmt(Date.parse(v.deployedAt))}` : ''}\nrunning since ${fmt(startedAt)}`;
   if (v.repo) el.href = `https://github.com/${v.repo}/commit/${v.commit}`; else el.removeAttribute('href');
   el.classList.remove('hidden');
+  const sv = $('#settings-version');
+  sv.textContent = el.textContent; sv.title = el.title;
+  if (v.repo) sv.href = el.href;
 }
 const LOCAL_URL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(?::(\d{2,5}))?(\/[^\s'"<>)\]]*)?/g;
 function previewUrl(raw, port, path) {
@@ -1587,14 +1591,63 @@ $('#theme-dots').addEventListener('click', (e) => {
   $('#theme').dispatchEvent(new Event('change'));
 });
 $('#theme').addEventListener('change', renderThemeDots);
-// Settings menu: theme, notifications, phone pairing, shortcuts. Closes on outside click or Esc.
-const settingsMenu = $('#settings-menu');
-function setSettingsMenu(open) { settingsMenu.classList.toggle('hidden', !open); $('#settings').setAttribute('aria-expanded', String(open)); if (open) renderThemeDots(); }
-$('#settings').addEventListener('click', (e) => { e.stopPropagation(); setSettingsMenu(settingsMenu.classList.contains('hidden')); });
-document.addEventListener('click', (e) => { if (!e.target.closest('.menu-wrap')) setSettingsMenu(false); });
-window.addEventListener('keydown', (e) => { if (e.key === 'Escape') setSettingsMenu(false); });
-$('#keys').addEventListener('click', () => setSettingsMenu(false));
-$('#pair-phone').addEventListener('click', () => setSettingsMenu(false));
+// Settings: a page in the center, like Jobs (the gear opens and closes it).
+function openSettings() {
+  if (state.jobView) closeJob();
+  $('#settings-view').classList.remove('hidden');
+  $('#settings').classList.add('active'); $('#settings').setAttribute('aria-expanded', 'true');
+  if (mobileLayout.matches) showMobileView('terminal');
+  renderThemeDots();
+  loadTools();
+}
+function closeSettings() {
+  $('#settings-view').classList.add('hidden');
+  $('#settings').classList.remove('active'); $('#settings').setAttribute('aria-expanded', 'false');
+}
+const settingsOpen = () => !$('#settings-view').classList.contains('hidden');
+$('#settings').addEventListener('click', () => (settingsOpen() ? closeSettings() : openSettings()));
+$('#settings-close').addEventListener('click', closeSettings);
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && settingsOpen() && !e.defaultPrevented) closeSettings(); });
+// Tools for fx (MCP servers from fox's catalog), for every session: a switch for the ones fx has (off keeps the
+// setup, fx skips it), Add for the rest, Sign in when one needs it. Nothing changes without a tap.
+function toolRow(t) {
+  const sub = [esc(t.description), t.cost && t.enabled ? esc(t.cost) : ''].filter(Boolean).join(' · ');
+  const main = `<span class="set-main">${esc(t.label)}<span class="set-sub">${sub}</span></span>`;
+  if (!t.installed) return `<div class="set-row">${main}<button type="button" class="set-act" data-add-tool="${t.id}">Add</button></div>`;
+  const signin = t.enabled && t.needsSignIn ? `<button type="button" class="set-act warn" data-signin-tool="${t.id}">Sign in</button>` : '';
+  return `<div class="set-row">${main}${signin}<button type="button" class="switch-btn ${t.enabled ? 'on' : ''}" data-toggle-tool="${t.id}" role="switch" aria-checked="${t.enabled}" aria-label="${esc(t.label)}"><span class="switch"></span></button></div>`;
+}
+async function loadTools() {
+  let tools = [];
+  try { tools = await (await fetch('/api/tools')).json(); } catch {}
+  $('#settings-tools').innerHTML = tools.map(toolRow).join('');
+}
+$('#settings-tools').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-add-tool], [data-signin-tool], [data-toggle-tool]');
+  if (!btn || btn.disabled) return;
+  const note = $('#settings-tools-note');
+  const id = btn.dataset.addTool ?? btn.dataset.signinTool ?? btn.dataset.toggleTool;
+  const action = btn.dataset.addTool ? 'add' : btn.dataset.signinTool ? 'signin' : btn.classList.contains('on') ? 'off' : 'on';
+  btn.disabled = true; note.textContent = '';
+  const r = await fetch(`/api/tools/${id}/${action}`, { method: 'POST' });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { btn.disabled = false; note.textContent = j.error || 'That did not work.'; return; }
+  if (action !== 'signin') {
+    $('#settings-tools').innerHTML = j.map(toolRow).join('');
+    note.textContent = action === 'off' ? 'New sessions start without it; open ones keep it until they close.' : 'New sessions have it.';
+    return;
+  }
+  // fx waits for the provider's page to call back: open it in a tab, or offer a link if popups are blocked.
+  const tab = window.open(j.url, '_blank');
+  btn.textContent = 'Waiting…';
+  note.innerHTML = tab ? 'Finish the sign-in in the new tab.' : `Pop-up blocked: <a href="${esc(j.url)}" target="_blank" rel="noopener">open the sign-in page</a>.`;
+  for (let i = 0; i < 150; i++) {
+    await new Promise((res) => setTimeout(res, 2000));
+    const st = await (await fetch(`/api/tools/${id}/signin`)).json().catch(() => ({}));
+    if (st.status === 'done') { note.textContent = 'Signed in. New sessions have it.'; return loadTools(); }
+    if (st.status === 'failed') { btn.disabled = false; btn.textContent = 'Sign in'; note.textContent = st.error || 'The sign-in did not finish.'; return; }
+  }
+});
 $('#sign-out').addEventListener('click', async () => {
   const response = await fetch('/api/auth/logout', { method: 'POST' });
   if (response.ok) location.replace('/');
@@ -1657,7 +1710,6 @@ function newSessionSheet(cwd) {
   $('#newsheet').dataset.cwd = cwd;
   $('#newsheet').classList.remove('hidden');
   loadModels().then(() => $('#ns-model').focus());
-  loadTools();
 }
 // Workspace repos in the new-session sheet, and a warning when another session is working there.
 function renderNsWorkspace(wsp) {
@@ -1667,43 +1719,6 @@ function renderNsWorkspace(wsp) {
   const busy = state.sessions.filter((s) => !s.archived && s.terminal && (s.state === 'working' || s.state === 'needs_input') && workspaceFor(s.workspace)?.id === wsp.id);
   box.innerHTML = `${wsp.repos.length ? `<label class="ns-label">Repos · shared by every session in this workspace</label>${wsp.repos.map(wsRepoLine).join('')}` : ''}${busy.length ? `<div class="ws-busy">${busy.length === 1 ? 'Another session is working here' : `${busy.length} sessions are working here`}: they edit the same files.</div>` : ''}`;
 }
-// Tools for fx (MCP servers from fox's catalog): one chip each, ✓ when fx has it. Nothing is added without a click.
-const toolChip = (t) => !t.installed ? `<button type="button" class="ns-chip" data-add-tool="${t.id}" title="${esc(t.description)}">+ ${esc(t.label)}</button>`
-  : t.needsSignIn ? `<button type="button" class="ns-chip warn" data-signin-tool="${t.id}" title="${esc(t.description)} Opens the sign-in page in a new tab.">${esc(t.label)} · sign in</button>`
-  : `<span class="ns-chip on" title="${esc(t.description)}">✓ ${esc(t.label)}</span>`;
-async function loadTools() {
-  const box = $('#ns-tools');
-  let tools = [];
-  try { tools = await (await fetch('/api/tools')).json(); } catch {}
-  box.classList.toggle('hidden', !tools.length);
-  box.innerHTML = `<label class="ns-label" title="Added to fx's own MCP config, so every fx session has them">Tools for fx</label><div class="ns-chips">${tools.map(toolChip).join('')}</div><div class="ns-tools-note muted"></div>`;
-}
-$('#ns-tools').addEventListener('click', async (e) => {
-  const btn = e.target.closest('[data-add-tool], [data-signin-tool]');
-  if (!btn || btn.disabled) return;
-  const id = btn.dataset.addTool ?? btn.dataset.signinTool, adding = Boolean(btn.dataset.addTool);
-  const label = btn.textContent, note = $('#ns-tools .ns-tools-note');
-  btn.disabled = true; btn.textContent = adding ? 'Adding…' : 'Opening…';
-  const r = await fetch(`/api/tools/${id}/${adding ? 'add' : 'signin'}`, { method: 'POST' });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) { btn.disabled = false; btn.textContent = label; note.textContent = j.error || (adding ? 'Could not add it.' : 'Could not start the sign-in.'); return; }
-  if (adding) {
-    const tool = Array.isArray(j) ? j.find((t) => t.id === id) : null;
-    btn.outerHTML = toolChip(tool ?? { id, label: label.replace(/^\+ /, ''), description: btn.title, installed: true });
-    if (!tool?.needsSignIn) note.textContent = 'New sessions have it.';
-    return;
-  }
-  // fx waits for the provider's page to call back: open it in a tab, or offer a link if popups are blocked.
-  const tab = window.open(j.url, '_blank');
-  btn.textContent = 'Waiting for sign-in…';
-  note.innerHTML = tab ? 'Finish the sign-in in the new tab.' : `Pop-up blocked: <a href="${esc(j.url)}" target="_blank" rel="noopener">open the sign-in page</a>.`;
-  for (let i = 0; i < 150; i++) {
-    await new Promise((res) => setTimeout(res, 2000));
-    const st = await (await fetch(`/api/tools/${id}/signin`)).json().catch(() => ({}));
-    if (st.status === 'done') { btn.outerHTML = `<span class="ns-chip on" title="${esc(btn.title)}">✓ ${esc(label.replace(/ · sign in$/, ''))}</span>`; note.textContent = 'Signed in. New sessions have it.'; return; }
-    if (st.status === 'failed') { btn.disabled = false; btn.textContent = label; note.textContent = st.error || 'The sign-in did not finish.'; return; }
-  }
-});
 function updateNsBadge() {
   const v = $('#ns-model').value;
   const [provider, model] = v ? v.split('|') : [modelsCatalog?.default?.provider, modelsCatalog?.default?.model];
@@ -1956,6 +1971,7 @@ function renderJobList() {
 $('#jobs-entry').addEventListener('click', () => (state.jobView ? closeJob() : openJobs()));
 $('#job-list').addEventListener('click', (e) => { if (e.target.closest('[data-link]')) return; const row = e.target.closest('[data-job]'); if (row) openJob(row.dataset.job); });
 function showJobView(mode) {
+  closeSettings();
   $('#job-view').classList.remove('hidden');
   $('#job-view').dataset.mode = mode;
   if (mobileLayout.matches) showMobileView('terminal');

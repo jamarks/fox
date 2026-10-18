@@ -13,7 +13,7 @@ curl -fsSL https://raw.githubusercontent.com/jamarks/fox/main/setup.sh | bash
 
 <p align="center"><sub>Checks Node 20+, tmux and <a href="https://fx.sh">fx</a> (offers to install the last two), installs fox and opens http://127.0.0.1:4848. Details in <a href="#install-and-run">Install and run</a>.</sub></p>
 
-<p align="center"><sub>Optional: give fx more tools (a browser, Chrome DevTools, library docs, Vercel) with one click from the new-session panel. See <a href="#tools-for-fx">Tools for fx</a>.</sub></p>
+<p align="center"><sub>Optional: give fx more tools (a browser, Chrome DevTools, library docs, Vercel) from Settings. See <a href="#tools-for-fx">Tools for fx</a>.</sub></p>
 
 <p align="center"><img src="docs/screenshot.png" alt="fox: three subagents on three models answering the same task, grouped for comparison in the right column, next to the real fx terminal" /></p>
 
@@ -48,7 +48,7 @@ Do this in stages, without asking me anything. Stage 1: launch three one-off sub
 
 ## Tools for fx
 
-fx can use MCP servers. The new-session panel shows fox's catalog as chips: `✓` when fx already has one, `+` to add it, `sign in` when it needs an account. Adding one runs `fx mcp add`, so it lands in fx's own config and every fx session gets it, inside fox or not. Sessions that were already open pick it up on their next start.
+fx can use MCP servers. Settings (the gear) lists fox's catalog: Add for the ones fx does not have, a switch for the ones it has, Sign in when one needs an account. Adding runs `fx mcp add`, so it lands in fx's own config and every fx session gets it, inside fox or not. The switch only flips the server's `enabled` flag, so turning one off keeps its setup and frees its memory in new sessions. Sessions already open keep what they started with.
 
 | Tool | What fx can do with it | Account |
 |---|---|---|
@@ -75,7 +75,7 @@ To offer another one, add an entry to `tools.mjs`.
 - **Drop files**: drag images or files onto the terminal to attach them to your next message.
 - **Search everything**: ⌥Space searches names and messages across all sessions.
 - **Metrics**: the tiny bar-chart icon in the sidebar footer opens rolling 7- and 30-day comparisons with the preceding equal-length period: sessions created, user messages and completed turns. Includes archived sessions and subagents in locally retained history; no lifetime cost or token totals are assigned to a period.
-- **Tools for fx**: chips in the new-session panel add MCP servers to fx in one click.
+- **Settings**: a page behind the gear with the theme, notifications, tools for fx (add, switch on and off, sign in), phone pairing and the running version.
 - **Archive and rename** without touching fx's files.
 - **Git at a glance**: repo, branch and uncommitted files per project.
 - **Keyboard first**: ⌥ shortcuts for sessions, tabs, search, themes and font size; ⌥? lists them.
