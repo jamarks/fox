@@ -37,6 +37,7 @@
     </div>
     <div id="session-groups"></div>
     <button type="button" id="jobs-entry" title="Jobs: scripts on a schedule"></button>
+    <button type="button" id="prs-entry" title="Open pull requests of your workspaces"></button>
     <footer class="sidebar-footer">
       <div id="mem" class="hidden"><span id="mem-text"></span><span class="mem-bar"><i id="mem-fill"></i></span></div>
       <button type="button" id="mem-free" class="icon hidden" title="Free memory: put to sleep the sessions that wait for you, nobody has open and were idle for 3 minutes or more. Opening one wakes it up." aria-label="Free memory"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
@@ -165,6 +166,13 @@
         <div id="job-meta" class="muted"></div>
         <div id="job-list" role="list"></div>
         <div id="job-runs" role="list"></div>
+      </section>
+      <section id="pr-view" class="hidden" aria-label="Pull requests">
+        <header class="job-head">
+          <div class="job-title"><span id="pr-title">Pull requests</span><span id="pr-repos" class="job-chip"></span></div>
+          <div class="job-actions"><button type="button" id="pr-refresh">Refresh</button><button type="button" id="pr-close" class="icon" aria-label="Close">×</button></div>
+        </header>
+        <div id="pr-list" role="list"></div>
       </section>
       <div id="term-loading" class="hidden" role="status" aria-live="polite"><span class="term-spinner" aria-hidden="true"></span><div><div id="term-loading-title"></div><div id="term-loading-hint"></div></div></div>
       <div id="empty-state">

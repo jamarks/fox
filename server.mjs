@@ -27,6 +27,7 @@ import { fastForward, SAFE_GIT } from './gitsync.mjs';
 import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
 import { createJobStore, createRunner, updateJobRepo } from './jobs.mjs';
 import { createPrStates } from './prstate.mjs';
+import { createPrs } from './prs.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 import { ensureFoxNotes, foxNotes } from './notes.mjs';
 const execFileP = promisify(execFile);
@@ -129,6 +130,11 @@ async function jobScripts(cwd) {
 }
 const repoCatalog = createRepoCatalog({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
 const prStates = createPrStates({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
+// Open pull requests of the workspaces' repos (prs.mjs): the Pull requests page, merged or closed from fox.
+const prs = createPrs({
+  tokensDir: join(homedir(), '.config', 'fox-git', 'tokens'),
+  repos: async () => [...new Set((await listWorkspaces()).flatMap((w) => (w.repos ?? []).map((r) => `${r.owner}/${r.name}`)))],
+});
 // The sidebar polls the overview every few seconds; workspace git state is cheap but not free.
 let workspacesCache = { at: 0, list: [] };
 async function listWorkspaces(force = false) {
@@ -663,6 +669,20 @@ async function handlePanelRequest(req, res) {
       if (slept.length) await new Promise((r) => setTimeout(r, 1500)); // let the processes exit
       const after = await memory();
       return send(res, 200, { slept: slept.length, freedMb: before && after ? Math.max(0, before.usedMb - after.usedMb) : null, memory: after });
+    }
+    // ---------- pull requests ----------
+    if (p === '/api/prs' && req.method === 'GET') {
+      try { return send(res, 200, await prs.list({ force: url.searchParams.has('fresh') })); }
+      catch (err) { return send(res, 500, { error: err.message }); }
+    }
+    if ((m = p.match(/^\/api\/prs\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)\/(\d+)(?:\/(files|merge|close))$/))) {
+      const [, owner, name, num, action] = m;
+      try {
+        if (action === 'files' && req.method === 'GET') return send(res, 200, await prs.files(`${owner}/${name}`, num));
+        if (action === 'merge' && req.method === 'POST') return send(res, 200, await prs.merge(`${owner}/${name}`, num));
+        if (action === 'close' && req.method === 'POST') return send(res, 200, await prs.close(`${owner}/${name}`, num, JSON.parse(await readBody(req) || '{}').reason));
+        return send(res, 405, { error: 'method not allowed' });
+      } catch (err) { return send(res, err.status ?? 500, { error: String(err.stderr || err.message).trim().split('\n')[0] }); }
     }
     // ---------- jobs ----------
     if (p === '/api/jobs' && req.method === 'GET') return send(res, 200, await jobStore.overview());

@@ -345,6 +345,7 @@ $('#session-groups').addEventListener('click', async (e) => {
 // Click on a session: focus its tab if open, attach to its tmux terminal if running, otherwise start one.
 async function openSession(id) {
   if (state.jobView) closeJob();
+  if (state.prView) closePrs();
   closeSettings();
   if (state.waking?.id !== id) state.waking = null; // the person moved on: the other session keeps waking, unseen
   const s = sessionById(id);
@@ -887,6 +888,7 @@ function syncUrl(push = false) {
   const sel = state.selected;
   const q = new URLSearchParams();
   if (settingsOpen()) q.set('view', 'settings');
+  else if (state.prView) { q.set('view', 'prs'); if (state.prOpen) q.set('pr', state.prOpen); }
   else if (state.jobView === 'list') q.set('view', 'jobs');
   else if (state.jobView) { q.set('job', state.jobView); if (state.openRun) q.set('run', state.openRun); }
   if (state.jobDialog) q.set('edit', state.jobDialog);
@@ -903,6 +905,7 @@ async function applyUrl() {
     const q = new URLSearchParams(location.search);
     const view = q.get('view'), job = q.get('job'), edit = q.get('edit');
     if (view === 'settings') openSettings(); else closeSettings();
+    if (view === 'prs') { state.prOpen = q.get('pr'); openPrs(); } else if (state.prView) closePrs();
     if (job) { openJob(job); state.openRun = q.get('run'); renderJobView(); }
     else if (view === 'jobs') openJobs();
     else if (state.jobView) closeJob();
@@ -1725,6 +1728,7 @@ $('#theme').addEventListener('change', renderThemeDots);
 // Settings: a page in the center, like Jobs (the gear opens and closes it).
 function openSettings() {
   if (state.jobView) closeJob({ sync: false });
+  if (state.prView) closePrs({ sync: false });
   dictation.cancel();
   $('#settings-view').classList.remove('hidden');
   $('#settings').classList.add('active'); $('#settings').setAttribute('aria-expanded', 'true');
@@ -2178,6 +2182,7 @@ $('#jobs-entry').addEventListener('click', () => (state.jobView ? closeJob() : o
 $('#job-list').addEventListener('click', (e) => { if (e.target.closest('[data-link]')) return; const row = e.target.closest('[data-job]'); if (row) openJob(row.dataset.job); });
 function showJobView(mode) {
   closeSettings({ sync: false });
+  if (state.prView) closePrs({ sync: false });
   dictation.cancel();
   $('#job-view').classList.remove('hidden');
   $('#job-view').dataset.mode = mode;
@@ -2235,6 +2240,111 @@ $('#job-pause').addEventListener('click', async () => {
 $('#job-edit').addEventListener('click', () => openJobDialog(state.jobView));
 loadJobs();
 setInterval(loadJobs, 5000);
+
+// ---------- pull requests: every open PR of the workspaces' repos, merged or closed from here ----------
+// A row opens in place (the PR's text, its files, the review job's verdict). Merge and Close take two clicks: the
+// first arms the button for a few seconds, so nothing that deploys or throws work away happens on a stray click.
+const prKey = (p) => `${p.repo}#${p.number}`;
+const prFiles = new Map();
+async function loadPrs(force = false) {
+  try { state.prs = await (await fetch('/api/prs' + (force ? '?fresh' : ''))).json(); } catch { return; }
+  renderPrsEntry();
+  if (state.prView) renderPrList();
+}
+function renderPrsEntry() {
+  const list = state.prs?.prs ?? [], ready = list.filter((p) => p.ready).length, btn = $('#prs-entry');
+  btn.classList.toggle('hidden', !list.length && !state.prView && !(state.prs?.errors ?? []).length);
+  btn.classList.toggle('active', Boolean(state.prView));
+  btn.innerHTML = `<span class="jdot ${ready ? 'ok' : list.length ? 'paused' : 'none'}"></span><span class="jtitle">Pull requests</span><span>${list.length || ''}</span><span class="jnext${ready ? ' ready' : ''}">${ready ? `${ready} ready` : list.length ? '' : 'none open'}</span>`;
+}
+const PR_REVIEW = { good: ['✓ reviewed', 'good'], fixed: ['✓ fixed by review', 'good'], 'needs-you': ['needs you', 'wait'], reviewed: ['reviewed', ''] };
+function prChip(p) {
+  if (p.checks === 'failing') return '<span class="pr-chip bad">checks fail</span>';
+  if (p.draft) return '<span class="pr-chip">draft</span>';
+  if (!p.job) return '<span class="pr-chip">yours</span>';
+  const [text, cls] = p.review ? PR_REVIEW[p.review.verdict] ?? PR_REVIEW.reviewed : ['not reviewed yet', 'wait'];
+  return `<span class="pr-chip ${cls}">${text}</span>`;
+}
+// The PR's own text without the job's footer lines (verified, change size, made by): the summary is what reads.
+const prText = (body) => esc(String(body ?? '').split(/\n\s*\n/).filter((para) => !/^(\*\*Verified|\*\*Change|Made by a fox job|Linear: |Merging publishes)/.test(para.trim())).join('\n\n').trim());
+function renderPrList() {
+  const data = state.prs ?? { prs: [], errors: [] }, box = $('#pr-list');
+  const repos = [...new Set(data.prs.map((p) => p.repo))];
+  $('#pr-repos').textContent = repos.length ? repos.join(' · ') : '';
+  $('#pr-repos').classList.toggle('hidden', !repos.length);
+  const rows = data.prs.map((p) => {
+    const key = prKey(p), open = state.prOpen === key;
+    const meta = [p.issue, p.repo.split('/')[1]].filter(Boolean).map(esc).join(' · ');
+    const row = `<div class="pr-row${open ? ' open' : ''}" data-pr="${esc(key)}" role="listitem"><span class="jdot ${p.ready ? 'ok' : p.checks === 'failing' ? 'failed' : 'paused'}"></span>`
+      + `<span class="pt"><b>#${p.number}</b> ${esc(p.title.replace(/^[A-Z]+-\d+:\s*/, ''))} <span class="pm">· ${meta}</span></span>${prChip(p)}`
+      + `<span class="plines"><span class="pr-add">+${p.additions}</span> <span class="pr-del">−${p.deletions}</span></span>`
+      + `<span class="pr-acts"><button type="button" class="merge" data-act="merge">Merge</button><button type="button" class="shut" data-act="close">Close</button></span></div>`;
+    if (!open) return row;
+    const files = prFiles.get(key);
+    const filesHtml = files ? `<div class="pr-files">${files.map((x) => `<span class="pf" title="${esc(x.path)}">${esc(x.path)}</span><span class="pr-add">+${x.additions}</span><span class="pr-del">−${x.deletions}</span>`).join('')}</div>` : '<div class="muted">Loading files…</div>';
+    const review = p.review ? `<div class="pr-review ${esc(p.review.verdict)}"><b>fox review</b> ${esc(p.review.text)}</div>` : '';
+    const text = prText(p.body);
+    return row + `<div class="pr-open">${text ? `<div class="pbody">${text}</div>` : ''}${filesHtml}${review}`
+      + `<div class="pr-links">${p.linear ? `<a class="pr-chip" href="${esc(p.linear)}" target="_blank" rel="noopener">${esc(p.issue ?? 'Linear')} ↗</a>` : ''}<a class="pr-chip" href="${esc(p.url)}" target="_blank" rel="noopener">GitHub ↗</a><a class="pr-chip" href="${esc(p.url)}/files" target="_blank" rel="noopener">diff ↗</a>`
+      + `<input class="pr-reason" placeholder="Why close it? Optional, it goes on the PR" maxlength="1000" /></div></div>`;
+  });
+  const errors = (data.errors ?? []).map((e) => `<div>${esc(e.repo)}: ${esc(e.error)}</div>`).join('');
+  box.innerHTML = (rows.join('') || '<div class="jobs-none">No open pull requests in your workspaces\' repos.</div>') + (errors ? `<div class="pr-errors">${errors}</div>` : '');
+  if (state.prOpen && !prFiles.has(state.prOpen)) loadPrFiles(state.prOpen);
+}
+async function loadPrFiles(key) {
+  const [repo, n] = key.split('#');
+  try { prFiles.set(key, await (await fetch(`/api/prs/${repo}/${n}/files`)).json()); } catch { prFiles.set(key, []); }
+  if (state.prView && state.prOpen === key) renderPrList();
+}
+function openPrs() {
+  closeSettings({ sync: false });
+  if (state.jobView) closeJob({ sync: false });
+  dictation.cancel();
+  state.prView = true;
+  $('#pr-view').classList.remove('hidden');
+  if (mobileLayout.matches) showMobileView('terminal');
+  renderPrsEntry(); renderPrList(); loadPrs(true);
+  syncUrl(true);
+}
+function closePrs({ sync = true } = {}) {
+  if (!state.prView) return;
+  state.prView = false; state.prOpen = null;
+  $('#pr-view').classList.add('hidden');
+  renderPrsEntry(); requestAnimationFrame(fitActive);
+  if (sync) syncUrl(true);
+}
+$('#prs-entry').addEventListener('click', () => (state.prView ? closePrs() : openPrs()));
+$('#pr-close').addEventListener('click', () => closePrs());
+$('#pr-refresh').addEventListener('click', () => { prFiles.clear(); loadPrs(true); });
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.prView && !e.defaultPrevented && !e.target.closest?.('input')) closePrs(); });
+$('#pr-list').addEventListener('click', async (e) => {
+  if (e.target.closest('a, input')) return;
+  const rowEl = e.target.closest('[data-pr]'); if (!rowEl) return;
+  const key = rowEl.dataset.pr, btn = e.target.closest('[data-act]');
+  if (!btn) { state.prOpen = state.prOpen === key ? null : key; renderPrList(); syncUrl(true); return; }
+  const p = (state.prs?.prs ?? []).find((x) => prKey(x) === key); if (!p) return;
+  const act = btn.dataset.act;
+  if (!btn.classList.contains('armed')) {
+    btn.classList.add('armed'); btn.textContent = act === 'merge' ? 'Merge?' : 'Close?';
+    btn.title = act === 'merge' ? `Click again to merge #${p.number} into its base. It deploys if that branch is deployed.` : `Click again to close #${p.number} without merging.`;
+    setTimeout(() => { if (btn.isConnected) { btn.classList.remove('armed'); btn.textContent = act === 'merge' ? 'Merge' : 'Close'; } }, 4000);
+    return;
+  }
+  btn.disabled = true; btn.textContent = act === 'merge' ? 'Merging…' : 'Closing…';
+  const reason = act === 'close' ? ($('#pr-list .pr-open .pr-reason')?.value ?? '') : '';
+  const [repo, n] = key.split('#');
+  const r = await fetch(`/api/prs/${repo}/${n}/${act}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason }) });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) { toast(out.error || `Could not ${act} #${p.number}`); btn.disabled = false; btn.classList.remove('armed'); btn.textContent = act === 'merge' ? 'Merge' : 'Close'; return; }
+  toast(act === 'merge' ? `Merged #${p.number}` : `Closed #${p.number}`);
+  if (state.prOpen === key) state.prOpen = null;
+  prFiles.delete(key);
+  await loadPrs(true);
+  syncUrl();
+});
+loadPrs();
+setInterval(() => loadPrs(), 60_000);
 
 // The editor: the schedule is built with buttons and drawn on a 24-hour line, with the next runs written out.
 const jd = { id: null, kind: 'hours', days: new Set([1, 2, 3, 4, 5]) };

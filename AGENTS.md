@@ -21,6 +21,7 @@ Server (`server.mjs` is the HTTP/WebSocket entry point; the rest are its parts, 
 - `notes.mjs`: the block fox keeps in fx's personal instructions (`~/.fx/AGENTS.md`) on a server: dev servers, previews, named apps, jobs.
 - `fxsettings.mjs`: the fx settings shown in Settings → fx (the `FX_SETTINGS` list). Adding one = an entry there plus its test.
 - `tools.mjs`: the MCP tools offered in Settings → Tools for fx (add, switch on and off, sign in).
+- `prs.mjs`: the Pull requests page: open PRs of the workspaces' repos through gh (token per owner), the review job's verdict from its comment, merge and close. `prstate.mjs`: merged or open marks on PR links in job runs.
 - `apps.mjs`: named apps (`bin/fox-expose.mjs`): `https://<name>.<domain>` routed to a local port.
 - `view.mjs`: preview links for pages fx wrote. `idle.mjs`: putting idle sessions to sleep to save memory. `search.mjs`, `inbox.mjs`: search and the "new replies" list. `metrics.mjs`: the metrics page. `share.mjs`, `tunnel.mjs`: the older laptop sharing modes.
 
