@@ -209,6 +209,8 @@ function renderSessions() {
   // so nothing jumps around when you pick a session; the state dots say what is busy.
   const rank = (ws) => { const i = groupOrder.indexOf(ws); return i < 0 ? Infinity : i; };
   const ordered = [...groups.entries()].sort((a, b) => (rank(a[0]) - rank(b[0])) || a[0].localeCompare(b[0]));
+  // Every group reads the same: its folder's name with a capital letter (the folder itself keeps its own).
+  const groupName = (n) => n ? n[0].toLocaleUpperCase() + n.slice(1) : n;
   for (const [ws, list] of ordered) {
     list.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)); // newest first, and it stays put
     const g = document.createElement('div');
@@ -218,15 +220,16 @@ function renderSessions() {
     const wsp = (state.workspaces ?? []).find((w) => w.dir === ws);
     if (wsp) {
       g.classList.add('workspace');
-      g.innerHTML = `<h3 draggable="true" title="Drag to reorder"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(wsp.name)}</span><span class="gcount" title="${wsp.repos.length} repo${wsp.repos.length === 1 ? '' : 's'}">${list.length}</span><button class="icon" data-edit-ws="${esc(wsp.id)}" title="Edit workspace">${ICON.rename}</button><button class="icon" data-new="${esc(ws)}" title="New session in this workspace">+</button></h3>${isCollapsed ? '' : wsRepoSummary(wsp)}`;
+      g.innerHTML = `<h3 draggable="true" title="Drag to reorder"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(groupName(wsp.name))}</span><span class="gcount" title="${wsp.repos.length} repo${wsp.repos.length === 1 ? '' : 's'}">${list.length}</span><button class="icon" data-edit-ws="${esc(wsp.id)}" title="Edit workspace">${ICON.rename}</button><button class="icon" data-new="${esc(ws)}" title="New session in this workspace">+</button></h3>${isCollapsed ? '' : wsRepoSummary(wsp)}`;
       if (!isCollapsed) list.forEach((s, i) => g.appendChild(sessionCard(s, i + 1)));
       root.appendChild(g);
       continue;
     }
+    g.classList.add('folder'); // a folder that is not a workspace: same look, named by its folder (full path on hover)
     const repo = state.repos?.[ws];
     // GitHub remote: owner/repo as a link. Plain git: just the branch (and the repo root if the workspace is a subfolder).
     const gitLine = repo ? `<div class="git" title="${esc(repo.remote || 'git repo without a remote: add one (git remote add origin …) and this becomes a link')}">${repo.url ? `<a href="${esc(repo.url)}" target="_blank" rel="noopener" title="Open ${esc(repo.repo)} on GitHub">${ICON.github}${esc(repo.repo)}</a>` : `<span>${ICON.git}${repo.root !== ws ? esc(shortPath(repo.root)) : 'no remote'}</span>`}${repo.branch ? `<span class="branch">${esc(repo.branch)}</span>` : ''}${repo.changed ? `<span class="changed" title="${repo.changed} changed file${repo.changed === 1 ? '' : 's'}">±${repo.changed}</span>` : ''}</div>` : '';
-    g.innerHTML = `<h3 draggable="true" title="Drag to reorder projects"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(ws)}">${esc(shortPath(ws))}</span><span class="gcount">${list.length}</span><button class="icon" data-new="${esc(ws)}" title="New session in this folder">+</button></h3>${isCollapsed ? '' : gitLine}`;
+    g.innerHTML = `<h3 draggable="true" title="Drag to reorder projects"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(groupName(ws.split('/').filter(Boolean).pop() ?? ws))}</span><span class="gcount">${list.length}</span><button class="icon" data-new="${esc(ws)}" title="New session in this folder">+</button></h3>${isCollapsed ? '' : gitLine}`;
     if (!isCollapsed) list.forEach((s, i) => g.appendChild(sessionCard(s, i + 1)));
     root.appendChild(g);
   }
