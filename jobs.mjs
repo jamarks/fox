@@ -11,6 +11,9 @@
 import { readFile, writeFile, mkdir, rename, readdir, rm, stat, open } from 'node:fs/promises';
 import { existsSync, createWriteStream } from 'node:fs';
 import { fastForward } from './gitsync.mjs';
+import { fileURLToPath } from 'node:url';
+// Helpers jobs share (lib/python/foxjob.py): on every job's PYTHONPATH, so a script only needs `import foxjob`.
+export const FOXJOB_LIB = fileURLToPath(new URL('./lib/python', import.meta.url));
 import { join, resolve, sep, extname, isAbsolute, basename } from 'node:path';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID, randomBytes } from 'node:crypto';
@@ -246,7 +249,8 @@ export function createRunner({ store, now = () => Date.now(), spawn = nodeSpawn,
       let child;
       try {
         child = spawn(cmd, args, { cwd: job.cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env, FOX_JOB_ID: job.id, FOX_JOB_NAME: job.name, FOX_JOB_RUN_ID: id, FOX_JOB_OUTPUT: outDir, PYTHONUNBUFFERED: '1' } });
+          env: { ...process.env, FOX_JOB_ID: job.id, FOX_JOB_NAME: job.name, FOX_JOB_RUN_ID: id, FOX_JOB_OUTPUT: outDir, PYTHONUNBUFFERED: '1',
+            PYTHONPATH: [FOXJOB_LIB, process.env.PYTHONPATH].filter(Boolean).join(':') } });
       } catch (err) { return done({ status: 'failed', error: err.message }); }
       run.pid = child.pid; write();
       child.stdout.on('data', take); child.stderr.on('data', take);

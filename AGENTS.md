@@ -17,6 +17,7 @@ Server (`server.mjs` is the HTTP/WebSocket entry point; the rest are its parts, 
 - `auth.mjs`, `enrollment.mjs`, `pairing.mjs`: passkey sign-in, first enrollment (`bin/fox-enroll.mjs`), phone pairing.
 - `workspaces.mjs`: named folders under `~/workspaces` made of GitHub repos; `gitsync.mjs` fast-forwards their clean checkouts when a session starts, and a job's repo before each run.
 - `jobs.mjs`, `schedule.mjs`: scheduled scripts (store, runner, schedules). `bin/fox-job.mjs` is the CLI, `bin/fox-jobs.mjs` the runner service on a server. A run's script prints `FOX_SUMMARY:` and `FOX_LINK: <label> <url>` lines.
+- `lib/python/foxjob.py`: helpers every Python job can import (summary, links, `propose_change` for a pull request, `publish_merged`); `docs/jobs.md` is the guide to writing jobs.
 - `notes.mjs`: the block fox keeps in fx's personal instructions (`~/.fx/AGENTS.md`) on a server: dev servers, previews, named apps, jobs.
 - `fxsettings.mjs`: the fx settings shown in Settings → fx (the `FX_SETTINGS` list). Adding one = an entry there plus its test.
 - `tools.mjs`: the MCP tools offered in Settings → Tools for fx (add, switch on and off, sign in).

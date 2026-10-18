@@ -4,6 +4,9 @@
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+
+const JOBS_GUIDE = fileURLToPath(new URL('./docs/jobs.md', import.meta.url));
 
 const START = '<!-- fox:start · written by fox; edits inside this block are replaced -->';
 const END = '<!-- fox:end -->';
@@ -53,5 +56,6 @@ Rules:
 - Print \`FOX_SUMMARY: <one line>\` with what the run did; write reports or files for the user to \`$FOX_JOB_OUTPUT\`.
 - To use a model inside a job, call \`fx ask --no-save --json "<prompt>"\` and read \`final_output\`. Validate what comes back; never run a model's output as shell commands.
 - One job runs at a time, each with a time limit (\`--timeout\`, 30 minutes by default). Before each run fox fast-forwards the job's folder if it is a clean checkout, so a script pushed from another copy is what runs.
-- A job that changes code works in its own checkout and opens a pull request; it never pushes to main or to a deploy branch.`;
+- How to write a job, and the Python helpers every job can import (\`import foxjob\`; \`foxjob.propose_change()\` for a job that changes code through a pull request): ${JOBS_GUIDE}. Read it before writing one.
+- A job that changes code proposes a pull request (\`foxjob.propose_change\`); it never pushes to main or to a deploy branch.`;
 }
