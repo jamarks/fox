@@ -1376,7 +1376,7 @@ async function loadTranscript(id, quiet = false) {
     const match = globalMessage?.id === id && globalMessage.index === messageIndex;
     if (ev.kind === 'user') html.push(`<div class="msg user${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? 'task from parent' : 'you'}</div><div class="text">${esc(ev.text)}</div></div>`);
     else if (ev.kind === 'assistant' && !ev.text?.trim()) continue; // a turn step with only tool calls
-    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? (s.subagent?.name ? ICON.threads + ' ' + esc(s.subagent.name) : 'subagent') : 'fx'}</div><div class="text">${esc(ev.text)}</div></div>`);
+    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? (s.subagent?.name ? ICON.threads + ' ' + esc(s.subagent.name) : 'subagent') : 'fx'}</div><div class="text md">${renderMarkdown(ev.text)}</div></div>`);
     else if (ev.kind === 'tool_call') {
       const st = ev.result?.status ?? 'pending';
       const isSub = ev.name === 'subagent';
