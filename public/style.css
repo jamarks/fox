@@ -742,4 +742,5 @@ body.night .global-search-box { background: #0d101c; }
 .run-link.merged { border-color: #8957e5; color: #c3a6ff; }
 .run-link.merged::before { content: '✓ '; }
 .run-link.closed { opacity: .55; text-decoration: line-through; }
+.run-link.open::before { content: '○ '; } /* waiting for a merge */
 .ws-line .gh-mark { margin-right: 4px; vertical-align: -2px; opacity: .8; }

@@ -2144,7 +2144,9 @@ const jobState = (j) => j.lastRun?.status === 'running' ? 'running' : !j.enabled
 // Added from a terminal (fx, with fox-job): it waits for your OK before it ever runs.
 const pausedText = (j) => j.pendingApproval ? 'needs your OK' : 'paused';
 const BAD = ['failed', 'timeout', 'interrupted'];
-const linkChips = (links = []) => links.filter((l) => /^https?:\/\//.test(l.url)).map((l) => `<a class="run-link${l.pr ? ' ' + l.pr : ''}" href="${esc(l.url)}" target="_blank" rel="noopener" data-link title="${l.pr ? esc(l.pr) : ''}">${esc(l.label)}</a>`).join('');
+// A pull request link says where it stands: ○ waiting for a merge, ✓ merged, struck through when closed unmerged.
+const PR_TITLE = { open: 'Open: waiting for a merge', merged: 'Merged', closed: 'Closed without merging' };
+const linkChips = (links = []) => links.filter((l) => /^https?:\/\//.test(l.url)).map((l) => `<a class="run-link${l.pr ? ' ' + l.pr : ''}" href="${esc(l.url)}" target="_blank" rel="noopener" data-link title="${esc(PR_TITLE[l.pr] ?? '')}">${esc(l.label)}</a>`).join('');
 async function loadJobs() {
   try { state.jobs = await (await fetch('/api/jobs')).json(); } catch { return; }
   renderJobsEntry();
