@@ -380,3 +380,12 @@ Para el MVP, proponer horarios simples (diario/semanal y ejecución única), con
 - Endpoints sin autenticación o con origen incorrecto son rechazados. Entradas maliciosas no inyectan argumentos en unidades ni comandos de shell. Credenciales no aparecen en definiciones exportadas, API ni logs de prueba.
 - Una integración aislada comprueba systemd user y el resultado tras restart/reboot acordado; los tests deterministas por sí solos no prueban esa infraestructura.
 - Antes de cerrar, registrar comandos exactos, resultados y lo que quedó sin verificar. No marcar como resueltos aquí backups, notificaciones o callbacks de login: conservan la prioridad decidida anteriormente.
+
+## Named apps and one Access app for every name (2026-10-18)
+
+- Access: one self-hosted app for `*.jwass.xyz` with the reusable "solo yo" policy (created before the DNS record). The older per-host apps (fox, fox-dev, fox-<port>) stay; Cloudflare picks the most specific.
+- DNS: wildcard CNAME `*.jwass.xyz` → the tunnel (`cloudflared tunnel route dns <tunnel> "*.jwass.xyz"`, as root with `/root/.cloudflared/cert.pem`).
+- Tunnel: after the specific hosts, `"*.jwass.xyz"` → `http://127.0.0.1:4850`, fox's router (`apps.mjs`), which forwards by Host to the port in `~/.config/fox/apps.json`, as `localhost`. fox's own ports cannot be published.
+- `/etc/fox/fox.env`: `FOX_APPS_URL=https://{name}.jwass.xyz`, `FOX_APPS_PORT=4850`. `fox-expose <name> <port>` (symlink in `~/.local/bin`) adds a name; fx learns it from the block in `~/.fx/AGENTS.md`.
+- Found while doing this: the `fox-dev.jwass.xyz` rule was never in the live tunnel config (it sat after the 404 catch-all in an unapplied `config.yml.new`). Added before the wildcard; fox-dev now answers with its enrollment page.
+- Next: GitHub as an Access login method, so one passkey (GitHub's) opens every `*.jwass.xyz` for the 30-day session.
