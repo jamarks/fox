@@ -188,7 +188,7 @@ function wsRepoSummary(wsp) {
   const n = wsp.repos.length;
   if (!n) return '';
   const clean = n - attention.length;
-  return `<div class="ws-repos-line">${attention.map(wsRepoLine).join('')}${clean ? `<div class="ws-line" title="${esc(wsp.repos.filter((r) => !attention.includes(r)).map((r) => r.dir).join(', '))}"><span>${attention.length ? `${clean} more` : `${n} repo${n === 1 ? '' : 's'}`}</span></div>` : ''}</div>`;
+  return `<div class="ws-repos-line">${attention.map(wsRepoLine).join('')}${clean ? `<div class="ws-line" title="${esc(wsp.repos.filter((r) => !attention.includes(r)).map((r) => r.dir).join(', '))}"><span>${attention.length ? `${clean} more` : `${GITHUB_MARK}${n}`}</span></div>` : ''}</div>`;
 }
 
 function renderSessions() {
@@ -257,14 +257,13 @@ function sessionCard(s, index = null) {
   el.innerHTML = `
     ${index ? `<span class="idx">${index}</span>` : ''}
     <div class="row">
-      <div class="title" title="${esc(s.title)}">${esc(displayTitle(s))}</div>
+      <div class="title" title="${esc(s.title)}${s.firstPrompt ? '\n' + esc(s.firstPrompt) : ''}">${esc(displayTitle(s))}</div>
       <div class="actions">
         ${s.terminal ? `<button class="icon ${state.pinned.has(s.terminal) ? 'on' : ''}" data-pin="${esc(s.terminal)}" title="${state.pinned.has(s.terminal) ? 'Unpin tab' : 'Pin as tab'}">${ICON.pin}</button>` : ''}
         <button class="icon" data-rename="${esc(s.id)}" title="Rename">${ICON.rename}</button>
         <button class="icon" data-${s.archived ? 'unarchive' : 'archive'}="${esc(s.id)}" title="${s.archived ? 'Restore' : (s.terminal ? 'Archive (stops the fx process)' : 'Archive')}">${s.archived ? ICON.restore : ICON.archive}</button>
       </div>
     </div>
-    ${s.firstPrompt ? `<div class="prompt">${esc(s.firstPrompt)}</div>` : ''}
     <div class="sub">
       ${stateHtml}
       <span class="model mono" title="${esc(s.model ?? '')} via ${esc(providerLabel(s.provider))}">${esc(modelShort(s.model))}${providerTag(s.provider)}</span>
@@ -642,16 +641,12 @@ let foxConfig = { preview: null, remote: false };
 fetch('/api/config').then((r) => r.ok ? r.json() : null).then((c) => { if (c) { foxConfig = c; showVersion(c); } }).catch(() => {});
 // "release 29772b0 · 17 Oct 14:02": the commit running now and when it was made; the full story on hover.
 function showVersion({ version: v, startedAt }) {
-  const el = $('#version');
   if (!v?.commit) return;
   const fmt = (ms) => new Date(ms).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-  el.textContent = `${v.branch ?? 'fox'} ${v.commit.slice(0, 7)} · ${fmt(Date.parse(v.date))}`;
-  el.title = `${v.subject ?? ''}\ncommitted ${fmt(Date.parse(v.date))}${v.deployedAt ? `\ndeployed ${fmt(Date.parse(v.deployedAt))}` : ''}\nrunning since ${fmt(startedAt)}`;
-  if (v.repo) el.href = `https://github.com/${v.repo}/commit/${v.commit}`; else el.removeAttribute('href');
-  el.classList.remove('hidden');
-  const sv = $('#settings-version');
-  sv.textContent = el.textContent; sv.title = el.title;
-  if (v.repo) sv.href = el.href;
+  const sv = $('#settings-version'); // the only place it shows: Settings → Running
+  sv.textContent = `${v.branch ?? 'fox'} ${v.commit.slice(0, 7)} · ${fmt(Date.parse(v.date))}`;
+  sv.title = `${v.subject ?? ''}\ncommitted ${fmt(Date.parse(v.date))}${v.deployedAt ? `\ndeployed ${fmt(Date.parse(v.deployedAt))}` : ''}\nrunning since ${fmt(startedAt)}`;
+  if (v.repo) sv.href = `https://github.com/${v.repo}/commit/${v.commit}`; else sv.removeAttribute('href');
 }
 const LOCAL_URL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(?::(\d{2,5}))?(\/[^\s'"<>)\]]*)?/g;
 // Links to other sites. Opened from the iPhone Home Screen icon, a new tab would be iOS's in-app browser, which
@@ -2116,7 +2111,7 @@ const jobState = (j) => j.lastRun?.status === 'running' ? 'running' : !j.enabled
 // Added from a terminal (fx, with fox-job): it waits for your OK before it ever runs.
 const pausedText = (j) => j.pendingApproval ? 'needs your OK' : 'paused';
 const BAD = ['failed', 'timeout', 'interrupted'];
-const linkChips = (links = []) => links.filter((l) => /^https?:\/\//.test(l.url)).map((l) => `<a class="run-link" href="${esc(l.url)}" target="_blank" rel="noopener" data-link>${esc(l.label)}</a>`).join('');
+const linkChips = (links = []) => links.filter((l) => /^https?:\/\//.test(l.url)).map((l) => `<a class="run-link${l.pr ? ' ' + l.pr : ''}" href="${esc(l.url)}" target="_blank" rel="noopener" data-link title="${l.pr ? esc(l.pr) : ''}">${esc(l.label)}</a>`).join('');
 async function loadJobs() {
   try { state.jobs = await (await fetch('/api/jobs')).json(); } catch { return; }
   renderJobsEntry();
@@ -2139,7 +2134,8 @@ function renderJobList() {
   box.innerHTML = state.jobs.map((j) => {
     const st = jobState(j), r = j.lastRun;
     const right = st === 'running' ? `<span class="jnext running">running ${runDur(r)}</span>` : !j.enabled ? `<span class="jnext${j.pendingApproval ? ' approve' : ''}">${pausedText(j)}</span>` : `<span class="jnext">${esc(whenText(j.nextRun))}</span>`;
-    const last = r ? `<div class="jlast ${BAD.includes(r.status) ? 'bad' : ''}"><span>${esc(whenText(r.startedAt))} · ${esc(r.summary ?? r.status)}</span>${linkChips(r.links)}</div>` : '<div class="jlast"><span>never ran</span></div>';
+    // Last run: when, and whether it went well. The summary and its links live in the job's page.
+    const last = r ? `<div class="jlast" title="${esc(r.summary ?? '')}"><span>last ${esc(whenText(r.startedAt))} · <b class="${r.status === 'running' ? '' : BAD.includes(r.status) ? 'bad' : 'ok'}">${r.status === 'running' ? 'running' : BAD.includes(r.status) ? 'failed' : 'ok'}</b></span></div>` : '<div class="jlast"><span>never ran</span></div>';
     return `<div class="jl-row" data-job="${j.id}" role="listitem"><span class="jdot ${st}"></span><span class="jname">${esc(j.name)}</span><span class="jwhen">${esc(j.scheduleText)}</span>${right}${last}</div>`;
   }).join('');
 }
@@ -2303,7 +2299,7 @@ function showMemory(m) {
   $('#mem').classList.toggle('hidden', !m);
   $('#mem-free').classList.toggle('hidden', !m);
   if (!m) return;
-  $('#mem-text').textContent = `RAM ${fmtGb(m.usedMb)} / ${fmtGb(m.totalMb)} GB · ${m.pct}%`;
+  $('#mem-text').textContent = `${m.pct}% · ${fmtGb(m.usedMb)}/${fmtGb(m.totalMb)} GB`;
   $('#mem-fill').style.width = `${Math.min(100, m.pct)}%`;
   // Green while there is room, orange approaching the limit, red where fox starts freeing memory on its own.
   const high = memHighPct || 85;
@@ -2319,14 +2315,14 @@ setInterval(pollMemory, 10_000);
 $('#mem-free').addEventListener('click', async () => {
   const btn = $('#mem-free');
   if (btn.disabled) return;
-  btn.disabled = true; btn.textContent = 'Freeing…';
+  btn.disabled = true; // an icon now: what happened shows as a toast
   try {
     const r = await post('/api/memory/free');
     if (r.memory) showMemory(r.memory);
-    btn.textContent = r.slept ? `Slept ${r.slept} · ${r.freedMb ? `${fmtGb(r.freedMb)} GB freed` : 'done'}` : 'Nothing idle to sleep';
+    toast(r.slept ? `Slept ${r.slept} · ${r.freedMb ? `${fmtGb(r.freedMb)} GB freed` : 'done'}` : 'Nothing idle to sleep');
     refresh();
-  } catch { btn.textContent = 'Could not free memory'; }
-  setTimeout(() => { btn.disabled = false; btn.textContent = 'Free memory'; }, 4000);
+  } catch { toast('Could not free memory'); }
+  setTimeout(() => { btn.disabled = false; }, 4000);
 });
 
 // ---------- keyboard ----------

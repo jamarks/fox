@@ -26,6 +26,7 @@ import { createFxSettings } from './fxsettings.mjs';
 import { fastForward, SAFE_GIT } from './gitsync.mjs';
 import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
 import { createJobStore, createRunner, updateJobRepo } from './jobs.mjs';
+import { createPrStates } from './prstate.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 import { ensureFoxNotes, foxNotes } from './notes.mjs';
 const execFileP = promisify(execFile);
@@ -127,6 +128,7 @@ async function jobScripts(cwd) {
   return out.sort();
 }
 const repoCatalog = createRepoCatalog({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
+const prStates = createPrStates({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
 // The sidebar polls the overview every few seconds; workspace git state is cheap but not free.
 let workspacesCache = { at: 0, list: [] };
 async function listWorkspaces(force = false) {
@@ -683,7 +685,7 @@ async function handlePanelRequest(req, res) {
         if (!sub && req.method === 'PATCH') return send(res, 200, await jobStore.update(id, JSON.parse(await readBody(req) || '{}')));
         if (!sub && req.method === 'DELETE') { await jobStore.remove(id); return send(res, 200, { ok: true }); }
         if (sub === 'run' && !runId && req.method === 'POST') { await jobStore.trigger(id); inlineRunner?.tick().catch(() => {}); return send(res, 200, { ok: true }); }
-        if (sub === 'runs' && !runId && req.method === 'GET') return send(res, 200, await jobStore.runs(id));
+        if (sub === 'runs' && !runId && req.method === 'GET') return send(res, 200, prStates.decorate(await jobStore.runs(id)));
         if (sub === 'runs' && part === 'log' && req.method === 'GET') return send(res, 200, await jobStore.readLog(id, runId), 'text/plain; charset=utf-8');
         if (sub === 'runs' && part === 'files' && file && req.method === 'GET') {
           const path = await jobStore.outputPath(id, runId, decodeURIComponent(file));
