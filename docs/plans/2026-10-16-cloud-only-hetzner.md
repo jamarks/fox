@@ -18,7 +18,7 @@ Handoff para el agente que lo implemente. Primero las decisiones tomadas y por q
    - **Aceptado:** el TLS termina en Cloudflare, así que Cloudflare puede ver en texto plano la terminal, el código y lo que se escriba. Está bien para uso personal. Si algún día hay requisitos de compliance, hay que revisarlo.
 6. **Dos usuarios Linux:** `admin`, con sudo, para administrar; y `fox`, **sin sudo**, donde corren fox, tmux, fx, los repos y las sesiones. fx ejecuta comandos que escribe un modelo: si `fox` tuviera sudo, un prompt injection sería root.
 7. **Login de fx:** API key del Vercel AI Gateway (`fx setup`) **con límite de gasto**. **Verificado:** el login con suscripción de ChatGPT también funciona. `fx login codex` espera la respuesta en `localhost:1455` del servidor, así que se corre con un túnel SSH desde la Mac: `ssh -t -L 1455:localhost:1455 fox@<ip> 'bash -lc "fx login codex"'`, y se abre el link en el browser de la Mac. Sin `-L`, el browser redirige al localhost de la Mac y el login no termina. Nunca copiar la URL de callback a mano: lleva un código de autorización.
-8. **Actualizaciones automáticas desde la rama `release`, con rollback.** fox está en desarrollo y cambia seguido, y en modo solo nube es la única puerta de entrada: si una actualización lo rompe, solo queda SSH. Por eso el servidor **no sigue `main`**: se desarrolla en `main` y, cuando algo está probado, se avanza `release`. El VPS busca los cambios con un timer (pull); GitHub nunca entra al servidor, así que no hay claves del VPS en GitHub. Si la versión nueva no pasa los tests o el chequeo de salud, vuelve sola a la anterior. Detalle en el paso 10.
+8. **Actualizaciones automáticas desde la rama `release`, con rollback.** fox está en desarrollo y cambia seguido, y en modo solo nube es la única puerta de entrada: si una actualización lo rompe, solo queda SSH. Por eso el servidor sigue `release` por defecto: se desarrolla en `main` y un pull request mergeado avanza `release` (GitHub Action `publish-merged.yml`). Desde Settings > Deploy el dueño puede elegir que siga `main` (cada push sale solo); ver el paso 10. El VPS busca los cambios con un timer (pull); GitHub nunca entra al servidor, así que no hay claves del VPS en GitHub. Si la versión nueva no pasa los tests o el chequeo de salud, vuelve sola a la anterior. Detalle en el paso 10.
 9. **El modo local sigue existiendo y no se toca.** `FOX_PUBLIC_ORIGIN` ya se niega a combinarse con `FOX_SHARE_PORT`, `FOX_MOBILE_PORT` y `FOX_AUTH_DISABLED`; el pairing y Tailscale quedan para el modo local.
 
 ## Lo que ya existe en el código
@@ -143,8 +143,10 @@ Detectar el modo con `FOX_PUBLIC_ORIGIN`, o con `process.platform !== 'darwin'` 
 - **Monitoreo mínimo:** una alerta si el disco pasa el 80% y si fox, tmux o cloudflared se caen. Por ejemplo, un healthcheck externo (Healthchecks.io, gratis) alimentado por un timer de systemd.
 - **Actualizar fox:** automático desde `release` (paso 10). Para forzar una actualización o un rollback a mano: `sudo /usr/local/sbin/fox-update` o `sudo /usr/local/sbin/fox-update --rollback`.
 
-### 10. Actualizaciones automáticas desde `release`
-**Flujo de desarrollo:** se trabaja en `main`. Cuando una versión está probada, se avanza `release` con fast-forward (`git push origin main:release`, o un commit concreto: `git push origin <commit>:release`). Nunca se reescribe `release` con force push.
+### 10. Actualizaciones automáticas desde `release` (o `main`)
+**Flujo de desarrollo:** se trabaja en `main`. Mergear un pull request en `main` avanza `release` con fast-forward (GitHub Action `.github/workflows/publish-merged.yml`); a mano también sirve `git push origin main:release` o `git push origin <commit>:release`. Nunca se reescribe `release` con force push.
+
+**Qué rama se despliega (desde 2026-10-18):** la elige el dueño en Settings > Deploy (`release | main`, solo en el servidor). fox escribe la palabra en `/home/fox/.config/fox/deploy-branch`; `fox-update` lo lee en cada pasada y acepta solo `main` exacto (cualquier otra cosa, o sin archivo, es `release`). Con `main`, todo push a `main`, el de fx también, sale en un minuto, con los mismos tests y rollback. Al volver a `release`, el servidor se queda en la versión activa sin alertar hasta que `release` la alcance.
 
 **Lo que hace la persona:** crear la rama `release` en GitHub desde el último commit sano de `main`. Opcional: protegerla para que solo acepte fast-forward.
 
@@ -152,12 +154,12 @@ Detectar el modo con `FOX_PUBLIC_ORIGIN`, o con `process.platform !== 'darwin'` 
 - `foxbuild`: usuario de sistema sin login y sin sudo. Es el único que corre `npm ci` y `npm test`, porque los scripts de instalación de npm (node-pty) ejecutan código del repo. Nunca correrlos como root.
 - `/opt/fox/releases/<commit>/`: una carpeta por versión. La arma `foxbuild` en un directorio temporal; cuando pasa los tests, root la mueve acá y la deja `root:root` y de solo lectura para `fox`.
 - `/opt/fox/current`: symlink a la versión activa. `/opt/fox/previous`: symlink a la anterior.
-- `/usr/local/sbin/fox-update`: el script, `root:root`, `0755`. Lo corre `fox-update.timer` cada 10 minutos.
+- `/usr/local/sbin/fox-update`: el script, `root:root`, `0755`. Lo corre `fox-update.timer` cada minuto. No está en el repo a propósito: si se desplegara solo, el agente podría cambiar un script que corre como root. Copia de la versión anterior a la elección de rama: `/var/lib/fox-update/fox-update.bak-20261018`.
 
 **Qué hace `fox-update`:**
 1. Toma un lock (`flock`) para no correr dos veces a la vez.
-2. `git fetch` de `release` en un clon espejo propio del script. Si el commit es el mismo que `current`, termina.
-3. **Solo avanza si es fast-forward** respecto de la versión activa (`git merge-base --is-ancestor`). Si alguien reescribió `release`, no despliega y alerta.
+2. `git fetch` de la rama elegida (`release` o `main`, ver arriba) en un clon espejo propio del script. Si el commit es el mismo que `current`, o la versión activa ya lo incluye (se volvió de `main` a `release`), termina.
+3. **Solo avanza si es fast-forward** respecto de la versión activa (`git merge-base --is-ancestor`). Si alguien reescribió la rama, no despliega y alerta.
 4. Opcional, recomendado: `git verify-commit` contra la clave del dueño. Sin firma válida, no despliega.
 5. Como `foxbuild`, en un directorio temporal: export del commit, `npm ci`, `npm test`. Si falla, borra el temporal, alerta y termina: no se tocó nada.
 6. Root mueve la versión a `releases/<commit>/`, apunta `previous` a la versión actual y cambia `current` a la nueva **de forma atómica** (`ln -sfn` a un symlink temporal y `mv -T`).
@@ -168,7 +170,7 @@ Detectar el modo con `FOX_PUBLIC_ORIGIN`, o con `process.platform !== 'darwin'` 
 
 **Límites, a dejar claros:** el rollback automático detecta lo que miden los tests y el chequeo de salud (que fox arranque y sirva la página). Un bug de la UI con fox arrancando bien no lo detecta: para eso está `sudo fox-update --rollback`, que vuelve a `previous` a mano.
 
-**Ciclo con fx:** si fox se desarrolla con fx desde este mismo servidor, fx trabaja sobre un clon en el HOME de `fox` (`~/workspaces/fox/fox`), hace push a `main`, y `release` se avanza solo cuando el dueño lo pide. El agente nunca toca `/opt/fox`. **Decisión vigente (paso 11):** el token de `fox` tiene escritura en `jamarks/fox`, así que técnicamente puede avanzar `release`; GitHub no distingue al dueño de su token. Lo que protege es la regla de no promover sin pedido del dueño, más el ruleset (sin force push ni borrado), los tests y el rollback, que no detectan todos los bugs funcionales.
+**Ciclo con fx:** si fox se desarrolla con fx desde este mismo servidor, fx trabaja sobre un clon en el HOME de `fox` (`~/workspaces/fox/fox`), hace push a `main`, y `release` avanza cuando el dueño mergea un pull request (o, con Deploy en `main`, cada push sale solo). El agente nunca toca `/opt/fox`. **Decisión vigente (paso 11):** el token de `fox` tiene escritura en `jamarks/fox`, así que técnicamente puede avanzar `release`; GitHub no distingue al dueño de su token. Lo que protege es la regla de no promover sin pedido del dueño, más el ruleset (sin force push ni borrado), los tests y el rollback, que no detectan todos los bugs funcionales.
 
 ### 11. GitHub: un token por dueño
 **Decidido y hecho en el VPS.** Un token fine-grained por dueño (usuario u org), cada uno con solo los repos elegidos y **Contents** + **Pull requests** en Read and write. Un token fine-grained no puede tener dos dueños.
@@ -177,7 +179,7 @@ Detectar el modo con `FOX_PUBLIC_ORIGIN`, o con `process.platform !== 'darwin'` 
 - `~/.local/bin/fox-git-credential` es el credential helper de git (`credential.https://github.com.useHttpPath=true`): elige el token según el dueño que viene en la ruta del repo, sin importar mayúsculas, y si no hay token para ese dueño usa `gh auth git-credential`.
 - `~/.local/bin/gh` envuelve a `/usr/bin/gh`: toma el dueño de `-R`/`--repo` o del remote `origin` y exporta `GH_TOKEN` con el token que corresponde.
 - Identidad de los commits: `Javier Wasserman <45493+jamarks@users.noreply.github.com>`.
-- **Decidido por el dueño:** fox se desarrolla desde fox, así que el token incluye `jamarks/fox` con escritura, y lo que llegue a `release` se despliega solo. GitHub no distingue al dueño de su token, así que no hay regla que deje avanzar `release` al dueño y no al agente. Lo que sí hay: un ruleset que bloquea force push y borrado de `main` y `release`, más los tests y el rollback automático del paso 10. Si en algún momento hay más colaboradores, revisar con commits firmados verificados por `fox-update`.
+- **Decidido por el dueño:** fox se desarrolla desde fox, así que el token incluye `jamarks/fox` con escritura, y lo que llegue a la rama elegida en Deploy se despliega solo; el dueño quiere que fox pueda publicar sin pasos de revisión (2026-10-18). GitHub no distingue al dueño de su token, así que no hay regla que deje avanzar `release` al dueño y no al agente. Lo que sí hay: un ruleset que bloquea force push y borrado de `main` y `release`, más los tests y el rollback automático del paso 10. Si en algún momento hay más colaboradores, revisar con commits firmados verificados por `fox-update`.
 - Los tokens vencen (30 a 90 días). Se renuevan editando o regenerando el token en GitHub y volviendo a cargarlo con el mismo comando.
 
 ### 12. Memoria: sesiones que duermen y herramientas sin npx
