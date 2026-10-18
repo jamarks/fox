@@ -194,3 +194,19 @@ test('a job added from a terminal waits for the OK on fox\'s page before it ever
   await store.update(job.id, { enabled: false }, { from: 'terminal' });
   await store.update(job.id, { enabled: true }, { from: 'terminal' });
 });
+
+test('a job can pick fx\'s model and effort; its script sees them as FOX_JOB_MODEL and FOX_JOB_EFFORT', async () => {
+  const { store, work } = await setup({ 'm.sh': 'echo "FOX_SUMMARY: ${FOX_JOB_MODEL:-none} ${FOX_JOB_EFFORT:-none}"\n' });
+  const base = { cwd: work, script: 'jobs/m.sh', schedule: daily('08:00'), tz };
+  await assert.rejects(store.create({ ...base, name: 'x', model: 'gpt; rm -rf /' }), /model id/);
+  await assert.rejects(store.create({ ...base, name: 'x', effort: 'max' }), /Effort is one of/);
+  const job = await store.create({ ...base, name: 'm', model: 'gpt-6.1-sol', effort: 'medium' });
+  const runner = createRunner({ store, log: quiet });
+  await store.trigger(job.id); await runner.tick(); await runner.idle();
+  assert.equal((await store.runs(job.id))[0].summary, 'gpt-6.1-sol medium');
+  await store.update(job.id, { model: '', effort: '' });
+  const plain = await store.get(job.id);
+  assert.equal('model' in plain || 'effort' in plain, false, 'empty leaves it to the script again');
+  await store.trigger(job.id); await runner.tick(); await runner.idle();
+  assert.equal((await store.runs(job.id))[0].summary, 'none none');
+});

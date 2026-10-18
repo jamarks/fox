@@ -79,6 +79,17 @@ export function createJobStore({ stateDir }) {
     if (def.schedule !== undefined) job.schedule = def.schedule;
     if (def.tz !== undefined) job.tz = String(def.tz);
     if (def.enabled !== undefined) job.enabled = Boolean(def.enabled);
+    // fx's model and effort for this job's fx calls (FOX_JOB_MODEL, FOX_JOB_EFFORT); empty leaves it to the script.
+    if (def.model !== undefined) {
+      const m = String(def.model ?? '').trim();
+      if (m && !/^[\w.:/-]{1,100}$/.test(m)) throw fail('That is not a model id.');
+      if (m) job.model = m; else delete job.model;
+    }
+    if (def.effort !== undefined) {
+      const e = String(def.effort ?? '').trim();
+      if (e && !EFFORTS.includes(e)) throw fail(`Effort is one of ${EFFORTS.join(', ')}.`);
+      if (e) job.effort = e; else delete job.effort;
+    }
     if (def.timeoutMin !== undefined) {
       const t = Number(def.timeoutMin);
       if (!Number.isInteger(t) || t < 1 || t > 240) throw fail('Time limit between 1 and 240 minutes.');
@@ -184,6 +195,8 @@ export function createJobStore({ stateDir }) {
 }
 
 // How a script is started: by its extension, or directly if it is executable.
+const EFFORTS = ['low', 'medium', 'high'];
+
 export function commandFor(script, args = []) {
   const ext = extname(script).toLowerCase();
   if (ext === '.py') return ['python3', ['-u', script, ...args]];
@@ -280,6 +293,7 @@ export function createRunner({ store, now = () => Date.now(), spawn = nodeSpawn,
       try {
         child = spawn(cmd, args, { cwd: job.cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
           env: { ...process.env, FOX_JOB_ID: job.id, FOX_JOB_NAME: job.name, FOX_JOB_RUN_ID: id, FOX_JOB_OUTPUT: outDir, PYTHONUNBUFFERED: '1',
+            ...(job.model ? { FOX_JOB_MODEL: job.model } : {}), ...(job.effort ? { FOX_JOB_EFFORT: job.effort } : {}),
             PYTHONPATH: [FOXJOB_LIB, process.env.PYTHONPATH].filter(Boolean).join(':') } });
       } catch (err) { return done({ status: 'failed', error: err.message }); }
       run.pid = child.pid; write();

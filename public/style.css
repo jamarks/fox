@@ -581,6 +581,7 @@ html, body { overscroll-behavior-y: none; }
 #jobdialog { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; }
 #jobdialog .sheet { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px 16px; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
 .jd-row { gap: 8px; flex-wrap: wrap; align-items: center; } .jd-row select, .jd-row > input { flex: 1; min-width: 160px; }
+#jd-effort { flex: 0 1 200px; }
 select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; }
 .jd-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .jd-chips button { border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; color: var(--muted); }

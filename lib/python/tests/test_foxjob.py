@@ -90,6 +90,12 @@ class FoxJobTest(unittest.TestCase):
         self.assertEqual(json.loads(args.read_text())[:7], ["ask", "--auto", "--no-save", "--json", "--model", "gpt-x", "--effort"])
         self.fj.ask_fx("hi", cwd=self.tmp)
         self.assertNotIn("--model", json.loads(args.read_text()), "without a model fx uses its own settings")
+        os.environ.update({"FOX_JOB_MODEL": "gpt-picked", "FOX_JOB_EFFORT": "low"})
+        try:
+            self.fj.ask_fx("hi", cwd=self.tmp, model="gpt-x", effort="high")
+        finally:
+            del os.environ["FOX_JOB_MODEL"], os.environ["FOX_JOB_EFFORT"]
+        self.assertEqual(json.loads(args.read_text())[4:8], ["--model", "gpt-picked", "--effort", "low"], "fox's choice for the job wins")
 
     def test_a_dropped_answer_from_the_provider_is_tried_once_more(self):
         self.fj.CHILD_ENV.update({"FAKE_FX_MODE": "flaky", "FAKE_FX_FLAKY": str(self.tmp / "flaky")})

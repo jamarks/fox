@@ -117,7 +117,10 @@ def ask_fx(prompt, cwd, timeout_min=25, model=None, effort=None):
     """fx works on its own (fx ask --auto) and answers with a RESULT line; its log and answer go to the output.
 
     model and effort pick them for this request (exact ids from `fx models --json`); without them fx uses its settings.
+    A model or effort chosen for the job in fox (FOX_JOB_MODEL, FOX_JOB_EFFORT) wins over the script's own choice.
     """
+    model = os.environ.get("FOX_JOB_MODEL") or model
+    effort = os.environ.get("FOX_JOB_EFFORT") or effort
     log(f"fx working (up to {timeout_min} min{', ' + model if model else ''})…")
     pick = (["--model", model] if model else []) + (["--effort", effort] if effort else [])
     for attempt in (1, 2):
