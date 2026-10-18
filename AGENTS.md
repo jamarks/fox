@@ -26,7 +26,7 @@ Server (`server.mjs` is the HTTP/WebSocket entry point; the rest are its parts, 
 
 Browser (`public/`): `index.html`, `app.js`, `style.css` are the panel; `markdown.js` formats fx's answers in Read; `dictation.js` the mic; `login.*`, `enroll.*`, `pair.*`, `mobile.*`, `metrics.*` are their own pages.
 
-Docs: `README.md` for users; `docs/plans/` for designs and the server setup (`2026-10-16-cloud-only-hetzner.md`).
+Docs: `README.md` for users, short (detail in `docs/install.md`, `docs/remote-access.md`, `docs/how-it-works.md`, `docs/jobs.md`); its "What's new" block and `CHANGELOG.md` are written by a changelog job from merged PR titles, so a good PR title is the changelog line; `docs/plans/` for designs and the server setup (`2026-10-16-cloud-only-hetzner.md`).
 
 ## Tests and shipping
 
