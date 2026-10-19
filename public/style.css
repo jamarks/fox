@@ -300,6 +300,14 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 .board .agent-answer.err { color: var(--err); }
 .agent-open { display: inline-block; margin: 6px 0 0 21px; font-size: 11px; color: var(--accent); text-decoration: none; }
 button.agent-open { padding: 0; line-height: 1.45; }
+/* Execution evidence is quiet in the row and readable beside the answer when expanded. */
+.agent-evidence-count { padding-left: 21px; color: var(--muted); font: 10px var(--mono); margin-top: 2px; }
+.evidence { border-top: 1px solid var(--border); margin: 9px 0 0 21px; padding-top: 6px; font-size: 11px; }
+.evidence-title { color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-size: 10px; margin-bottom: 4px; }
+.evidence-line { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; overflow-wrap: anywhere; }
+.evidence-line > a { min-width: 0; flex: 1; color: var(--accent); font-family: var(--mono); text-decoration: none; white-space: pre-wrap; }
+.evidence-line > span { flex: none; color: var(--muted); font-family: var(--mono); }
+.evidence-hint { color: var(--muted); margin-top: 6px; font-size: 10px; }
 /* files the session touched */
 .files { display: flex; flex-direction: column; gap: 2px; }
 .file { border-radius: 5px; }
