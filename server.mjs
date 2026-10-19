@@ -325,7 +325,7 @@ async function readEvents(id) {
         out.push({ kind, ts, text: body.text ?? '' });
         break;
       case 'assistant':
-        out.push({ kind, ts, text: body.text ?? '' });
+        out.push({ kind, ts, text: body.text ?? '', model: body.provider_replay?.source?.model ?? null });
         break;
       case 'tool_call': {
         let args = body.arguments_json;

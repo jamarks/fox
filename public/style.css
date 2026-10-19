@@ -727,6 +727,20 @@ body.night #wsdialog .sheet, body.night #jobdialog .sheet, body.night #newsheet 
 #paste-text { width: 100%; box-sizing: border-box; resize: vertical; font: 16px/1.4 var(--mono); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
 body.night #pastesheet { background: rgba(3, 5, 12, .7); }
 body.night #pastesheet .sheet { background: #0d101c; }
+/* The handoff is a paste-style sheet: evidence stays local until an explicit insert. */
+#handoffsheet { position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; }
+#handoffsheet.hidden { display: none; }
+#handoffsheet .sheet { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px 16px; width: min(680px, calc(100vw - 24px)); max-height: 90dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
+body.night #handoffsheet { background: rgba(3, 5, 12, .7); }
+body.night #handoffsheet .sheet { background: #0d101c; }
+#handoff-text { width: 100%; min-height: 180px; height: 30dvh; resize: vertical; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 10px; font: 12px/1.5 var(--mono); }
+#handoff-choices { display: flex; flex-wrap: wrap; gap: 4px 14px; max-height: 110px; overflow-y: auto; }
+#handoff-choices label { font-size: 11px; color: var(--muted); cursor: pointer; overflow-wrap: anywhere; }
+#handoff-choices input { width: auto; margin: 0 4px 0 0; }
+#handoff-boundary:not(:empty) { color: var(--warn); }
+#handoff-status:not(:empty) { color: var(--muted); }
+.handoff-action { display: none; }
+.msg.assistant:hover .handoff-action, .msg.assistant:focus-within .handoff-action, .agent.open:hover .handoff-action, .agent.open:focus-within .handoff-action { display: inline-block; }
 /* Settings: a page in the center, like Jobs */
 #settings-view { position: absolute; inset: 0; z-index: 7; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
 #settings-view.hidden { display: none; }

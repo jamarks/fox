@@ -1,0 +1,14 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Hand off · side-panel alternative</title><style>
+:root{--bg:#0f1115;--panel:#161920;--border:#262b36;--text:#e6e8ee;--muted:#8b93a7;--accent:#7aa2f7}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 system-ui;display:grid;grid-template-columns:300px 1fr 410px;min-height:100vh}.side,.read,.packet{border-right:1px solid var(--border);padding:22px}.side,.packet{background:var(--panel)}.side h2{font-size:14px;margin:0 0 32px}.side p{padding:10px;border-radius:5px;color:var(--muted)}.side .active{background:#202a3e;color:var(--text)}.read{max-width:740px}.read h2,.packet h2{font-size:16px;margin:0 0 10px}.muted{color:var(--muted)}.agent{border-left:2px solid var(--accent);padding:12px;background:var(--panel);margin-top:28px}.agent p{line-height:1.65}button,select,textarea{font:inherit;background:#101217;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px}.packet label{display:block;color:var(--muted);font-size:11px;margin:16px 0 6px}.packet select,.packet textarea{width:100%}.packet textarea{height:280px;font:12px/1.6 ui-monospace,monospace;resize:none}.packet button{margin-top:14px;color:var(--accent)}.note{color:#e0af68;font-size:11px}input{accent-color:var(--accent)}.choices{color:var(--muted);font-size:11px}.choices label{margin:7px 0}small{color:var(--muted)}
+</style><div class="side"><h2>fox</h2><p>Finance</p><p class="active">Revisión del repositorio</p><p>Fox</p><p>Jobs</p></div><section class="read"><h2>Revisión del repositorio</h2><div class="muted">files 6 · 2 subagents</div><div class="agent"><small>1 · gpt-6.1-sol · completed</small><h3>Backend review</h3><p>Implemented the HTTP service and focused tests. Verification: unittest passed; no live upstream request tested.</p><button>Hand off</button></div></section><aside class="packet"><h2>Hand off <small>· side panel</small></h2><div class="muted">Compare the packet and answer side by side.</div><label>Existing root session</label><select><option>Review Progress Against Plan · ~/workspaces/fox</option></select><p class="note">Selected file is outside the recipient root. Access is not granted.</p><div class="choices"><label><input type="checkbox" checked> task</label><label><input type="checkbox" checked> answer</label><label><input type="checkbox" checked> server.py</label></div><label>Packet · edit before inserting</label><textarea>Hand off · recorded evidence (not a current snapshot)
+Source session: abc123 · model: gpt-6.1-sol
+Turn marker: 14:1792317370814
+Repo: example/backend · branch: feature/service
+
+Task excerpt (verbatim):
+Implement backend with focused tests.
+
+Answer excerpt (verbatim):
+Implemented HTTP service and tests.
+
+Selected file path: server.py · sha256:…</textarea><div><button>Cancel</button><button>Insert, don't send</button></div></aside></html>

@@ -99,6 +99,19 @@
       <div class="row ns-actions"><button type="button" id="paste-cancel">Cancel</button><button type="submit" class="primary">Insert</button></div>
     </form>
   </div>
+  <div id="handoffsheet" class="hidden" role="dialog" aria-modal="true" aria-labelledby="handoff-title">
+    <form class="sheet" id="handoffform">
+      <div class="ns-head" id="handoff-title">Hand off</div>
+      <label class="ns-label" for="handoff-target">Existing root session</label>
+      <select id="handoff-target" required></select>
+      <div id="handoff-boundary" class="hint" role="status"></div>
+      <div id="handoff-choices" aria-label="Packet contents"></div>
+      <label class="ns-label" for="handoff-text">Packet · edit before inserting</label>
+      <textarea id="handoff-text" spellcheck="false" autocapitalize="none" autocorrect="off" aria-describedby="handoff-status"></textarea>
+      <div id="handoff-status" class="hint" role="status"></div>
+      <div class="row ns-actions"><button type="button" id="handoff-refresh">Refresh evidence</button><button type="button" id="handoff-cancel">Cancel</button><button type="submit" class="primary">Insert, don't send</button></div>
+    </form>
+  </div>
   <div id="jobdialog" class="hidden">
     <form class="sheet" id="jobform" autocomplete="off">
       <div class="ns-head" id="jd-title">New job</div>
