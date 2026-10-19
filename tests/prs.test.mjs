@@ -16,6 +16,9 @@ test('a row says what the review job and the checks said', () => {
   assert.equal(reviewOf([]), null);
   assert.deepEqual(reviewOf([{ body: '✅ **fox review** (gpt-6-luna): Good.\n\n- ok\n\n<sub>fox-review: abc123</sub>' }]), { verdict: 'good', text: '(gpt-6-luna): Good.\n\n- ok' });
   assert.equal(reviewOf([{ body: '✅ **fox review** (m): first' }, { body: '👀 **fox review** (m): later' }]).verdict, 'needs-you', 'the newest review counts');
+  const marked = [{ body: '✅ **fox review** (m): good\n\n<sub>fox-review: abc1234</sub>' }];
+  assert.equal(reviewOf(marked, 'abc1234def').verdict, 'good', 'reviewed the newest commit');
+  assert.equal(reviewOf(marked, '9999999fff').verdict, 'outdated', 'the PR moved on after the review');
   assert.equal(checksOf([]), 'none');
   assert.equal(checksOf([{ conclusion: 'SUCCESS' }, { conclusion: 'FAILURE' }]), 'failing');
   assert.equal(checksOf([{ status: 'IN_PROGRESS' }]), 'pending');
@@ -50,7 +53,7 @@ test('merged history is sorted by merge time, loads progressively, and has separ
   assert.deepEqual(history.prs.map((p) => p.number), [2, 1]);
   assert.equal(history.hasMore, true);
   assert.equal(history.prs[0].state, 'MERGED');
-  assert.deepEqual(calls.at(-1).args.slice(0, 8), ['pr', 'list', '--state', 'merged', '--limit', '2', '--json', 'number,title,url,headRefName,additions,deletions,changedFiles,createdAt,mergedAt,state,isDraft,body,comments,statusCheckRollup']);
+  assert.deepEqual(calls.at(-1).args.slice(0, 8), ['pr', 'list', '--state', 'merged', '--limit', '2', '--json', 'number,title,url,headRefName,headRefOid,additions,deletions,changedFiles,createdAt,mergedAt,state,isDraft,body,comments,statusCheckRollup']);
   await prs.list({ state: 'merged', limit: 2 });
   assert.equal(calls.length, 2, 'same page is cached');
   await prs.list({ state: 'merged', limit: 3 });

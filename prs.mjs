@@ -11,14 +11,17 @@ import { join } from 'node:path';
 import { REPO_PART } from './workspaces.mjs';
 const execFileP = promisify(execFile);
 
-const LIST_FIELDS = 'number,title,url,headRefName,additions,deletions,changedFiles,createdAt,mergedAt,state,isDraft,body,comments,statusCheckRollup';
+const LIST_FIELDS = 'number,title,url,headRefName,headRefOid,additions,deletions,changedFiles,createdAt,mergedAt,state,isDraft,body,comments,statusCheckRollup';
 const VERDICTS = [['✅', 'good'], ['🔧', 'fixed'], ['👀', 'needs-you']];
 
-// The review job's verdict, from its newest comment: good, fixed, needs-you, or null when not reviewed yet.
-export function reviewOf(comments = []) {
+// The review job's verdict, from its newest comment: good, fixed, needs-you, or null when not reviewed yet. The comment
+// names the commit it reviewed (`fox-review: <sha>`); when the PR has moved past it, the verdict is `outdated`.
+export function reviewOf(comments = [], head = null) {
   const last = [...comments].reverse().find((c) => /\*\*fox review\*\*/.test(c?.body ?? ''));
   if (!last) return null;
-  const verdict = VERDICTS.find(([mark]) => last.body.startsWith(mark))?.[1] ?? 'reviewed';
+  const reviewed = last.body.match(/fox-review: ([0-9a-f]{7,40})/)?.[1];
+  const verdict = reviewed && head && !head.startsWith(reviewed) ? 'outdated'
+    : VERDICTS.find(([mark]) => last.body.startsWith(mark))?.[1] ?? 'reviewed';
   const text = last.body.replace(/^\S+\s+\*\*fox review\*\*\s*/, '').replace(/<sub>[\s\S]*?<\/sub>/g, '').trim();
   return { verdict, text: text.slice(0, 1200) };
 }
@@ -33,7 +36,7 @@ export function checksOf(rollup = []) {
 }
 
 export function summarize(repo, pr) {
-  const review = reviewOf(pr.comments);
+  const review = reviewOf(pr.comments, pr.headRefOid);
   const checks = checksOf(pr.statusCheckRollup);
   const job = String(pr.headRefName).startsWith('agent/');
   const issue = (String(pr.headRefName).match(/^agent\/([a-z]+-\d+)/)?.[1] ?? '').toUpperCase() || null;

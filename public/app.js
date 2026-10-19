@@ -2339,7 +2339,7 @@ function renderPrsEntry() {
   btn.classList.toggle('active', Boolean(state.prView));
   btn.innerHTML = `<span class="jdot ${ready ? 'ok' : list.length ? 'paused' : 'none'}"></span><span class="jtitle">Pull requests</span><span>${list.length || ''}</span><span class="jnext${ready ? ' ready' : ''}">${ready ? `${ready} ready` : list.length ? '' : 'none open'}</span>`;
 }
-const PR_REVIEW = { good: ['✓ reviewed', 'good'], fixed: ['✓ fixed by review', 'good'], 'needs-you': ['needs you', 'wait'], reviewed: ['reviewed', ''] };
+const PR_REVIEW = { good: ['✓ reviewed', 'good'], fixed: ['✓ fixed by review', 'good'], 'needs-you': ['needs you', 'wait'], outdated: ['changed since review', 'wait'], reviewed: ['reviewed', ''] };
 function prChip(p) {
   if (p.checks === 'failing') return '<span class="pr-chip bad">checks fail</span>';
   if (p.draft) return '<span class="pr-chip">draft</span>';
@@ -2438,7 +2438,7 @@ $('#pr-list').addEventListener('click', async (e) => {
   if (!p || p.state !== 'OPEN') return;
   const act = btn.dataset.act;
   if (!btn.classList.contains('armed')) {
-    const unreviewed = act === 'merge' && p.job && !p.review;
+    const unreviewed = act === 'merge' && p.job && (!p.review || p.review.verdict === 'outdated');
     btn.classList.add('armed'); btn.textContent = act === 'merge' ? (unreviewed ? 'Not reviewed yet. Merge?' : 'Merge?') : 'Close?';
     btn.title = act === 'merge' ? `Click again to merge #${p.number} into its base. It deploys if that branch is deployed.` : `Click again to close #${p.number} without merging.`;
     setTimeout(() => { if (btn.isConnected) { btn.classList.remove('armed'); btn.textContent = act === 'merge' ? 'Merge' : 'Close'; } }, 4000);
