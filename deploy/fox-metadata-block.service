@@ -1,0 +1,14 @@
+# Keeps the fox user (and so every agent) away from the cloud provider's metadata service, which can hold the
+# server's setup data. Root still reaches it. Applied at every boot; harmless at home, where there is none.
+[Unit]
+Description=Block the metadata service for the fox user
+After=network-pre.target
+Before=fox.service fox-jobs.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'iptables -C OUTPUT -m owner --uid-owner fox -d 169.254.169.254 -j REJECT 2>/dev/null || iptables -A OUTPUT -m owner --uid-owner fox -d 169.254.169.254 -j REJECT'
+
+[Install]
+WantedBy=multi-user.target

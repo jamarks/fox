@@ -1,0 +1,20 @@
+# A user service of fox (~fox/.config/systemd/user/): the tmux server where every fx session runs, apart from
+# fox's own service so restarting fox never kills a session. Needs `loginctl enable-linger fox`.
+[Unit]
+Description=tmux server for fox (fx sessions live here, apart from fox)
+
+[Service]
+Type=forking
+# fox.env too: commands fx runs (fox-job, fox-expose) read the same settings as fox.
+EnvironmentFile=-/etc/fox/fox.env
+Environment=TMUX_TMPDIR=/home/fox/.tmux
+Environment=LANG=C.UTF-8
+Environment=PATH=/home/fox/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStartPre=/usr/bin/mkdir -p -m 700 /home/fox/.tmux
+ExecStart=/usr/bin/tmux new-session -d -s keepalive
+ExecStop=/usr/bin/tmux kill-server
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

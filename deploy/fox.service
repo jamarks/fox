@@ -1,0 +1,26 @@
+# fox's web panel. Code in /opt/fox/current, root-owned and read-only for fox (fox-update switches it).
+# fx sessions do not live here but in fox-tmux, so restarting or updating fox never stops an agent.
+[Unit]
+Description=fox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=fox
+Group=fox
+WorkingDirectory=/opt/fox/current
+EnvironmentFile=/etc/fox/fox.env
+# Secrets for fx (API keys), readable by root only: fox.env is world-readable.
+EnvironmentFile=-/etc/fox/secrets.env
+Environment=HOME=/home/fox
+Environment=LANG=C.UTF-8
+Environment=PATH=/home/fox/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/node /opt/fox/current/server.mjs
+Restart=always
+RestartSec=2
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

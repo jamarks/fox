@@ -1,0 +1,10 @@
+[Unit]
+Description=Check fox's deploy branch every minute
+
+[Timer]
+OnCalendar=minutely
+AccuracySec=5s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
