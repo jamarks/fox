@@ -55,7 +55,13 @@ All of it: [CHANGELOG.md](CHANGELOG.md).
 
 ## Set up
 
-**On your server:** [docs/server.md](docs/server.md) goes from a fresh server to fox on your phone.
+**On your server** (Ubuntu or Debian), one script sets up everything but your logins, which it tells you how to do. With a domain on Cloudflare, or `--tailscale` instead:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jamarks/fox/release/setup-server.sh | sudo bash -s -- --cloudflare fox.example.com
+```
+
+What it does and the steps after it: [docs/server.md](docs/server.md).
 
 **To try it first on your own computer** (macOS or Linux), one command checks Node, tmux and fx, installs what is missing, installs fox and opens it at http://127.0.0.1:4848, where you create a passkey:
 

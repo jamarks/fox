@@ -58,6 +58,7 @@ const DROP_DIR = join(STATE_DIR, 'drops');
 const DROP_LIMIT = 25 * 1024 * 1024;
 const STATE_FILE = join(STATE_DIR, 'state.json');
 const DEPLOY_FILE = join(STATE_DIR, 'deploy-branch');
+const FOX_UPDATE = process.env.FOX_UPDATE_BIN || '/usr/local/sbin/fox-update';
 const DEPLOY_BRANCHES = ['release', 'main'];
 const deployBranch = async () => (await readFile(DEPLOY_FILE, 'utf8').catch(() => '')).trim() === 'main' ? 'main' : 'release';
 if (process.env.FOX_PUBLIC_ORIGIN && (process.env.FOX_SHARE_PORT || process.env.FOX_MOBILE_PORT)) {
@@ -714,10 +715,12 @@ async function handlePanelRequest(req, res) {
       } catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
     }
     // On a server, which branch fox-update deploys (/usr/local/sbin/fox-update reads this file every minute):
-    // release (merged pull requests) or main (every push).
-    if (p === '/api/deploy' && req.method === 'GET') return send(res, 200, { available: Boolean(process.env.FOX_PUBLIC_ORIGIN), branch: await deployBranch() });
+    // release (merged pull requests) or main (every push). Only where fox-update is installed (setup-server.sh):
+    // anywhere else the choice would change nothing.
+    const deployable = Boolean(process.env.FOX_PUBLIC_ORIGIN) && existsSync(FOX_UPDATE);
+    if (p === '/api/deploy' && req.method === 'GET') return send(res, 200, { available: deployable, branch: await deployBranch() });
     if (p === '/api/deploy' && req.method === 'POST') {
-      if (!process.env.FOX_PUBLIC_ORIGIN) return send(res, 404, { error: 'only on a server' });
+      if (!deployable) return send(res, 404, { error: 'only on a server updated by fox-update' });
       const { branch } = JSON.parse(await readBody(req) || '{}');
       if (!DEPLOY_BRANCHES.includes(branch)) return send(res, 400, { error: 'release or main' });
       await mkdir(STATE_DIR, { recursive: true, mode: 0o700 });
