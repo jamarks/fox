@@ -2173,15 +2173,16 @@ function renderJobsEntry() {
 }
 function renderJobList() {
   const box = $('#job-list');
-  if (!state.jobs.length) { box.innerHTML = '<div class="jobs-none">No jobs yet. A job is a script on a schedule: New job to make one, or ask fx.</div>'; return; }
-  box.innerHTML = state.jobs.map((j) => {
+  const html = !state.jobs.length ? '<div class="jobs-none">No jobs yet. A job is a script on a schedule: New job to make one, or ask fx.</div>' : state.jobs.map((j) => {
     const st = jobState(j), r = j.lastRun;
     const right = st === 'running' ? `<span class="jnext running">running ${runDur(r)}</span>` : !j.enabled ? `<span class="jnext${j.pendingApproval ? ' approve' : ''}">${pausedText(j)}</span>` : `<span class="jnext">${esc(whenText(j.nextRun))}</span>`;
     // Last run: when, and whether it went well. The summary and its links live in the job's page.
     const last = r ? `<div class="jlast" title="${esc(r.summary ?? '')}"><span>last ${esc(whenText(r.startedAt))} · <b class="${r.status === 'running' ? '' : BAD.includes(r.status) ? 'bad' : 'ok'}">${r.status === 'running' ? 'running' : BAD.includes(r.status) ? 'failed' : 'ok'}</b></span></div>` : '<div class="jlast"><span>never ran</span></div>';
     return `<div class="jl-row" data-job="${j.id}" role="listitem"><span class="jdot ${st}"></span><span class="jname">${esc(j.name)}</span><span class="jwhen">${esc(j.scheduleText)}</span>${right}${last}</div>`;
   }).join('');
+  if (html !== jobListHtml) { box.innerHTML = html; jobListHtml = html; } // polled: only when something changed
 }
+let jobListHtml = '';
 $('#jobs-entry').addEventListener('click', () => (state.jobView ? closeJob() : openJobs()));
 $('#job-list').addEventListener('click', (e) => { if (e.target.closest('[data-link]')) return; const row = e.target.closest('[data-job]'); if (row) openJob(row.dataset.job); });
 function showJobView(mode) {
@@ -2217,17 +2218,30 @@ async function renderJobView() {
   const runs = await (await fetch(`/api/jobs/${j.id}/runs`)).json().catch(() => []);
   if (state.jobView !== j.id) return;
   const box = $('#job-runs');
-  if (!runs.length) { box.innerHTML = '<div class="jobs-none">No runs yet. Run now to try it.</div>'; return; }
-  box.innerHTML = runs.map((r) => `<div class="run-row" data-run="${r.id}" role="listitem"><span class="jdot ${r.status}" title="${esc(r.status)}"></span><span class="rwhen">${esc(whenText(r.startedAt))}${r.reason === 'manual' ? ' · now' : ''}</span><span class="rsum ${BAD.includes(r.status) ? 'bad' : r.summary ? '' : 'quiet'}">${esc(r.summary ?? (r.status === 'running' ? 'running…' : r.status))}</span><span class="rlinks">${linkChips(r.links)}</span><span class="rdur">${runDur(r)}</span></div>${state.openRun === r.id ? '<div class="run-detail" id="run-detail"></div>' : ''}`).join('');
+  const html = !runs.length ? '<div class="jobs-none">No runs yet. Run now to try it.</div>' : runs.map((r) => `<div class="run-row" data-run="${r.id}" role="listitem"><span class="jdot ${r.status}" title="${esc(r.status)}"></span><span class="rwhen">${esc(whenText(r.startedAt))}${r.reason === 'manual' ? ' · now' : ''}</span><span class="rsum ${BAD.includes(r.status) ? 'bad' : r.summary ? '' : 'quiet'}">${esc(r.summary ?? (r.status === 'running' ? 'running…' : r.status))}</span><span class="rlinks">${linkChips(r.links)}</span><span class="rdur">${runDur(r)}</span></div>${state.openRun === r.id ? '<div class="run-detail" id="run-detail"></div>' : ''}`).join('');
+  // The page polls every few seconds: rebuild only when something changed, so an open log never blinks or jumps.
+  if (html !== jobRunsHtml) { box.innerHTML = html; jobRunsHtml = html; }
   if (state.openRun) showRunDetail(j.id, runs.find((r) => r.id === state.openRun));
 }
+let jobRunsHtml = '';
+const runDetails = new Map(); // run id -> { html, final }: a finished run's log is fetched once
 // Logs are plain text; web addresses in them become links (escaped first, so nothing else turns into HTML).
 const linkify = (text) => esc(text).replace(/https?:\/\/[^\s<>"'`)]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
 async function showRunDetail(jobId, run) {
   const box = $('#run-detail'); if (!box || !run) return;
+  const cached = runDetails.get(run.id);
+  if (cached && box.innerHTML !== cached.html) box.innerHTML = cached.html; // at once, also right after a rebuild
+  if (cached?.final) return;
   const files = (run.outputs ?? []).map((o) => `<a href="/api/jobs/${jobId}/runs/${run.id}/files/${encodeURIComponent(o.name)}" target="_blank" rel="noopener">${esc(o.name)}</a>`).join('');
-  const log = await (await fetch(`/api/jobs/${jobId}/runs/${run.id}/log`)).text().catch(() => '');
-  box.innerHTML = `${files ? `<div class="run-files">${files}</div>` : ''}<pre>${log ? linkify(log) : '(no output)'}</pre>`;
+  const log = await (await fetch(`/api/jobs/${jobId}/runs/${run.id}/log`)).text().catch(() => null);
+  if (log === null) return;
+  const html = `${files ? `<div class="run-files">${files}</div>` : ''}<pre>${log ? linkify(log) : '(no output)'}</pre>`;
+  runDetails.set(run.id, { html, final: run.status !== 'running' });
+  const now = $('#run-detail'); if (!now || now.innerHTML === html) return;
+  // A running log grows: keep the reader where they were, or at the bottom if they were following it.
+  const pre = now.querySelector('pre'), atEnd = pre && pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4, top = pre?.scrollTop ?? 0;
+  now.innerHTML = html;
+  const next = now.querySelector('pre'); if (next) next.scrollTop = atEnd ? next.scrollHeight : top;
 }
 $('#job-runs').addEventListener('click', (e) => {
   if (e.target.closest('[data-link]') || e.target.closest('.run-detail')) return;
@@ -2250,6 +2264,7 @@ setInterval(loadJobs, 5000);
 // first arms the button for a few seconds, so nothing that deploys or throws work away happens on a stray click.
 const prKey = (p) => `${p.repo}#${p.number}`;
 const prFiles = new Map();
+let prListHtml = '';
 async function loadPrs(force = false) {
   try { state.prs = await (await fetch('/api/prs' + (force ? '?fresh' : ''))).json(); } catch { return; }
   renderPrsEntry();
@@ -2295,7 +2310,10 @@ function renderPrList() {
       + `<input class="pr-reason" placeholder="Why close it? Optional, it goes on the PR" maxlength="1000" /></div></div>`;
   });
   const errors = (data.errors ?? []).map((e) => `<div>${esc(e.repo)}: ${esc(e.error)}</div>`).join('');
-  box.innerHTML = (rows.join('') || '<div class="jobs-none">No open pull requests in your workspaces\' repos.</div>') + (errors ? `<div class="pr-errors">${errors}</div>` : '');
+  const html = (rows.join('') || '<div class="jobs-none">No open pull requests in your workspaces\' repos.</div>') + (errors ? `<div class="pr-errors">${errors}</div>` : '');
+  // Polled: rebuild only when something changed, and never under someone typing why they close a PR.
+  const typing = document.activeElement?.classList.contains('pr-reason') && box.contains(document.activeElement);
+  if (html !== prListHtml && !typing) { box.innerHTML = html; prListHtml = html; }
   if (state.prOpen && !prFiles.has(state.prOpen)) loadPrFiles(state.prOpen);
 }
 async function loadPrFiles(key) {
