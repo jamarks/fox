@@ -2313,19 +2313,25 @@ setInterval(loadJobs, 5000);
 // first arms the button for a few seconds, so nothing that deploys or throws work away happens on a stray click.
 const prKey = (p) => `${p.repo}#${p.number}`;
 const prFiles = new Map();
-let prFilter = 'open', mergedLimit = 50, prListHtml = '';
+let prFilter = 'open', prListHtml = '';
+const prLimits = { merged: 50, all: 50 };
+const prLoading = new Set(), prFailed = new Set();
 async function loadPrs(force = false, filter = 'open') {
-  const query = new URLSearchParams({ state: filter, ...(filter === 'merged' ? { limit: mergedLimit } : {}), ...(force ? { fresh: '' } : {}) });
+  prLoading.add(filter); prFailed.delete(filter);
+  if (state.prView && prFilter === filter) renderPrList();
+  const query = new URLSearchParams({ state: filter, ...(filter !== 'open' ? { limit: prLimits[filter] } : {}), ...(force ? { fresh: '' } : {}) });
+  let ok = true;
   try {
     const response = await fetch(`/api/prs?${query}`);
     if (!response.ok) throw new Error('Could not load pull requests');
     const data = await response.json();
-    if (filter === 'merged') state.mergedPrs = data;
-    else state.prs = data;
-  } catch { return false; }
+    if (filter === 'open') state.prs = data;
+    else state[`${filter}Prs`] = data;
+  } catch { ok = false; prFailed.add(filter); }
+  prLoading.delete(filter);
   renderPrsEntry();
   if (state.prView && prFilter === filter) renderPrList();
-  return true;
+  return ok;
 }
 function renderPrsEntry() {
   const list = state.prs?.prs ?? [], ready = list.filter((p) => p.ready).length, btn = $('#prs-entry');
@@ -2346,20 +2352,22 @@ function prChip(p) {
 const ANSI = /(?:\x1b|\^\[)\[[0-9;]*m/g;
 const prText = (body) => String(body ?? '').replace(ANSI, '').split(/\n\s*\n/).filter((para) => !/^(\*\*Change|Made by a fox job|Linear: |Merging publishes)/.test(para.trim())).join('\n\n').trim();
 function renderPrList() {
-  const data = (prFilter === 'merged' ? state.mergedPrs : state.prs) ?? { prs: [], errors: [] }, box = $('#pr-list');
+  const data = (prFilter === 'open' ? state.prs : state[`${prFilter}Prs`]) ?? { prs: [], errors: [] }, box = $('#pr-list');
   for (const btn of $('#pr-filters').children) btn.classList.toggle('on', btn.dataset.prFilter === prFilter);
-  $('#pr-more').classList.toggle('hidden', prFilter !== 'merged' || !data.hasMore);
+  $('#pr-more').classList.toggle('hidden', prFilter === 'open' || !data.hasMore);
   const repos = [...new Set(data.prs.map((p) => p.repo))];
   $('#pr-repos').textContent = repos.length ? repos.join(' · ') : '';
   $('#pr-repos').classList.toggle('hidden', !repos.length);
   const rows = data.prs.map((p) => {
     const key = prKey(p), open = state.prOpen === key;
-    const merged = prFilter === 'merged';
-    const meta = [p.issue, p.repo.split('/')[1], ...(merged && p.mergedAt ? [new Date(p.mergedAt).toLocaleDateString('en')] : [])].filter(Boolean).map(esc).join(' · ');
-    const row = `<div class="pr-row${open ? ' open' : ''}" data-pr="${esc(key)}" role="listitem"><span class="jdot ${merged || p.ready ? 'ok' : p.checks === 'failing' ? 'failed' : 'paused'}"></span>`
-      + `<span class="pt"><b>#${p.number}</b> ${esc(p.title.replace(/^[A-Z]+-\d+:\s*/, ''))} <span class="pm">· ${meta}</span></span>${merged ? '<span class="pr-chip good">merged</span>' : prChip(p)}`
+    const status = String(p.state ?? (prFilter === 'merged' ? 'MERGED' : 'OPEN')).toLowerCase();
+    const done = status !== 'open';
+    const meta = [p.issue, p.repo.split('/')[1], ...(status === 'merged' && p.mergedAt ? [new Date(p.mergedAt).toLocaleDateString('en')] : [])].filter(Boolean).map(esc).join(' · ');
+    const statusChip = prFilter === 'all' || done ? `<span class="pr-chip status ${status === 'merged' ? 'good' : ''}">${esc(status)}</span>` : prChip(p);
+    const row = `<div class="pr-row${open ? ' open' : ''}${done ? ' done' : ''}${prFilter === 'all' ? ' all' : ''}" data-pr="${esc(key)}" role="listitem"><span class="jdot ${done ? status === 'merged' ? 'ok' : 'none' : p.ready ? 'ok' : p.checks === 'failing' ? 'failed' : 'paused'}"></span>`
+      + `<span class="pt"><b>#${p.number}</b> ${esc(p.title.replace(/^[A-Z]+-\d+:\s*/, ''))} <span class="pm">· ${meta}</span></span>${statusChip}`
       + `<span class="plines"><span class="pr-add">+${p.additions}</span> <span class="pr-del">−${p.deletions}</span></span>`
-      + (merged ? '<span></span>' : `<span class="pr-acts"><button type="button" class="merge" data-act="merge">Merge</button><button type="button" class="shut" data-act="close">Close</button></span>`) + '</div>';
+      + (done ? '<span></span>' : `<span class="pr-acts"><button type="button" class="merge" data-act="merge">Merge</button><button type="button" class="shut" data-act="close">Close</button></span>`) + '</div>';
     if (!open) return row;
     const files = prFiles.get(key);
     const filesHtml = files ? `<div class="pr-files">${files.map((x) => `<span class="pf" title="${esc(x.path)}">${esc(x.path)}</span><span class="pr-add">+${x.additions}</span><span class="pr-del">−${x.deletions}</span>`).join('')}</div>` : '<div class="muted">Loading files…</div>';
@@ -2372,10 +2380,11 @@ function renderPrList() {
     const shots = p.run?.shots?.length ? `<div class="pr-shots">${p.run.shots.map((n) => `<figure><a href="${runUrl}${encodeURIComponent(n)}" target="_blank" rel="noopener"><img src="${runUrl}${encodeURIComponent(n)}" alt="${esc(n)}" loading="lazy" /></a><figcaption>${shotLabel(n)}</figcaption></figure>`).join('')}</div>` : '';
     return row + `<div class="pr-open">${text ? `<div class="pbody md">${renderMarkdown(text)}</div>` : ''}${shots}${filesHtml}${review}`
       + `<div class="pr-links">${p.linear ? `<a class="pr-chip" href="${esc(p.linear)}" target="_blank" rel="noopener">${esc(p.issue ?? 'Linear')} ↗</a>` : ''}<a class="pr-chip" href="${esc(p.url)}" target="_blank" rel="noopener">GitHub ↗</a><a class="pr-chip" href="${esc(p.url)}/files" target="_blank" rel="noopener">diff ↗</a>${p.run ? `<a class="pr-chip" href="/?job=${encodeURIComponent(p.run.job)}&run=${encodeURIComponent(p.run.run)}">job run</a>` : ''}`
-      + `${merged ? '' : '<input class="pr-reason" placeholder="Why close it? Optional, it goes on the PR" maxlength="1000" />'}</div></div>`;
+      + `${done ? '' : '<input class="pr-reason" placeholder="Why close it? Optional, it goes on the PR" maxlength="1000" />'}</div></div>`;
   });
   const errors = (data.errors ?? []).map((e) => `<div>${esc(e.repo)}: ${esc(e.error)}</div>`).join('');
-  const html = (rows.join('') || `<div class="jobs-none">No ${prFilter} pull requests in your workspaces' repos.</div>`) + (errors ? `<div class="pr-errors">${errors}</div>` : '');
+  const empty = prLoading.has(prFilter) ? 'Loading pull requests…' : prFailed.has(prFilter) ? 'Could not load pull requests. Refresh to try again.' : `No ${prFilter} pull requests in your workspaces' repos.`;
+  const html = (rows.join('') || `<div class="jobs-none" role="status">${empty}</div>`) + (errors ? `<div class="pr-errors">${errors}</div>` : '');
   // Polled: rebuild only when something changed, and never under someone typing why they close a PR.
   const typing = document.activeElement?.classList.contains('pr-reason') && box.contains(document.activeElement);
   if (html !== prListHtml && !typing) { box.innerHTML = html; prListHtml = html; }
@@ -2393,7 +2402,7 @@ function openPrs() {
   state.prView = true;
   $('#pr-view').classList.remove('hidden');
   if (mobileLayout.matches) showMobileView('terminal');
-  renderPrsEntry(); renderPrList(); loadPrs(true, prFilter);
+  renderPrsEntry(); loadPrs(true, prFilter);
   syncUrl(true);
 }
 function closePrs({ sync = true } = {}) {
@@ -2410,12 +2419,13 @@ $('#pr-filters').addEventListener('click', (e) => {
   const filter = e.target.closest('[data-pr-filter]')?.dataset.prFilter;
   if (!filter || filter === prFilter) return;
   prFilter = filter; state.prOpen = null;
-  renderPrList(); loadPrs(false, filter);
+  loadPrs(false, filter);
 });
 $('#pr-more').addEventListener('click', async () => {
   const btn = $('#pr-more'); btn.disabled = true; btn.textContent = 'Loading…';
-  mergedLimit += 50;
-  if (!await loadPrs(false, 'merged')) { mergedLimit -= 50; toast('Could not load more pull requests'); }
+  const filter = prFilter;
+  prLimits[filter] += 50;
+  if (!await loadPrs(false, filter)) { prLimits[filter] -= 50; toast('Could not load more pull requests'); }
   btn.disabled = false; btn.textContent = 'Load more';
 });
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.prView && !e.defaultPrevented && !e.target.closest?.('input')) closePrs(); });
@@ -2424,7 +2434,8 @@ $('#pr-list').addEventListener('click', async (e) => {
   const rowEl = e.target.closest('[data-pr]'); if (!rowEl) return;
   const key = rowEl.dataset.pr, btn = e.target.closest('[data-act]');
   if (!btn) { state.prOpen = state.prOpen === key ? null : key; renderPrList(); syncUrl(true); return; }
-  const p = (state.prs?.prs ?? []).find((x) => prKey(x) === key); if (!p) return;
+  const p = (prFilter === 'open' ? state.prs?.prs : state[`${prFilter}Prs`]?.prs)?.find((x) => prKey(x) === key);
+  if (!p || p.state !== 'OPEN') return;
   const act = btn.dataset.act;
   if (!btn.classList.contains('armed')) {
     const unreviewed = act === 'merge' && p.job && !p.review;
@@ -2442,7 +2453,8 @@ $('#pr-list').addEventListener('click', async (e) => {
   toast(act === 'merge' ? `Merged #${p.number}` : `Closed #${p.number}`);
   if (state.prOpen === key) state.prOpen = null;
   prFiles.delete(key);
-  await loadPrs(true);
+  await loadPrs(true, prFilter);
+  if (prFilter !== 'open') loadPrs(true);
   syncUrl();
 });
 loadPrs();
