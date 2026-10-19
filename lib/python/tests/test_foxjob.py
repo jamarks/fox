@@ -117,6 +117,16 @@ class FoxJobTest(unittest.TestCase):
         self.fj.CHILD_ENV.update({"FAKE_FX_MODE": "flaky", "FAKE_FX_FLAKY": str(self.tmp / "flaky")})
         self.assertEqual(self.propose().status, "opened")
 
+    def test_a_run_that_stopped_half_way_does_not_block_the_next(self):
+        self.fj.CHILD_ENV["FAKE_FX_MODE"] = "down"
+        with self.assertRaises(self.fj.Failure):
+            self.propose()
+        copy = self.fj.checkout("o/r")
+        (copy / "README").write_text("left half done\n")  # what fx had changed when the provider failed
+        self.fj.CHILD_ENV["FAKE_FX_MODE"] = "done"
+        self.assertEqual(self.fj.propose_change("o/r", branch="agent/next", title="Next", task="Add hello.txt", test="test -f hello.txt").status, "opened")
+        self.assertEqual(sh("git", "show", "agent/next:README", cwd=self.origin), "hi", "nothing of the stopped run went in")
+
     def test_a_provider_that_keeps_failing_is_a_transient_failure(self):
         self.fj.CHILD_ENV["FAKE_FX_MODE"] = "down"
         with self.assertRaises(self.fj.Failure) as caught:

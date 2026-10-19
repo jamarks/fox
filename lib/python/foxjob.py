@@ -208,7 +208,8 @@ def propose_change(repo, *, branch, title, task, test, base="main", setup=None, 
         log(f"{branch} already has an open PR")
         return Proposal("exists", branch=branch)
     start = f"origin/{base}"
-    git("checkout", "--quiet", "-B", branch, start, cwd=path)
+    # The job's copy is the job's own: whatever a run that stopped half way left in it is thrown away first.
+    git("checkout", "--quiet", "--force", "-B", branch, start, cwd=path)
     git("reset", "--quiet", "--hard", start, cwd=path)
     git("clean", "-qfdx", cwd=path)
     if setup:
