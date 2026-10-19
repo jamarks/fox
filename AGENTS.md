@@ -41,8 +41,8 @@ Docs: `README.md` for users, short (detail in `docs/server.md`, `docs/install.md
 
 Look at it with real data, not an empty fox: a page that works with no sessions can be wrong with real ones.
 
-- Start a throwaway fox from your checkout that reads the real sessions: `PORT=4870 FOX_STATE_DIR=$(mktemp -d) FOX_AUTH_DISABLED=1 FOX_MEMORY_HIGH_PCT=0 node server.mjs` (same user and HOME as the real fox, so it sees `~/.fx` and the tmux sessions; it listens on 127.0.0.1 only and its own state is thrown away). Stop it when you are done.
-- It is read-only for you: never open a real session's terminal in it (that attaches to the person's tmux, resizes it and can type), never send to a session, never put one to sleep. Reading lists, transcripts and screen captures is fine.
+- Start a throwaway fox from your checkout that reads the real sessions: `PORT=4870 FOX_STATE_DIR=$(mktemp -d) FOX_AUTH_DISABLED=1 FOX_MEMORY_HIGH_PCT=0 FOX_IDLE_SLEEP_MIN=0 node server.mjs` (same user and HOME as the real fox, so it sees `~/.fx` and the tmux sessions; it listens on 127.0.0.1 only and its own state is thrown away). Stop it when you are done.
+- It is read-only for you: never click a session in the sidebar, open `?open=<id>` or a terminal tab (that attaches to the person's tmux, resizes it and can type, or wakes a sleeping session); to show one session use `?session=<id>`, which only selects it. Never send to a session, put one to sleep, archive, rename or create anything, run or approve jobs, merge or close PRs. Reading lists, transcripts, screen snapshots, the mosaic, Jobs and Pull requests is fine.
 - Check what the change is about with sessions in different states: one working mid-turn, one waiting, one with subagents if it matters.
 - Save the screenshots the job asks for from that fox, so the person reviewing sees real content.
 
