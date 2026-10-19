@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { latestCompletedReply } from '../inbox.mjs';
+import { latestCompletedReply, lastAnswerModel } from '../inbox.mjs';
 
 const record = (event, timestamp_ms) => JSON.stringify({ event, timestamp_ms }) + '\n';
 
@@ -57,4 +57,11 @@ test('first load baselines history, polling adds unread, selection clears only t
   ctx.mobileLayout.matches = true;
   handlers['reply-inbox-list:click']({ target: { closest: () => ({ dataset: { reply: 'abcd' } }) } });
   assert.deepEqual(ctx.opened, ['abcd']);
+});
+
+test('the model of a session is the one that answered last, not fx\'s default in session.json', () => {
+  const reply = (model) => JSON.stringify({ event: { assistant: { text: 'hi', provider_replay: { source: { model } } } } });
+  assert.equal(lastAnswerModel([JSON.stringify({ event: { user: { text: 'q' } } })]), null);
+  assert.equal(lastAnswerModel([reply('gpt-6.1-sol'), JSON.stringify({ event: { user: { text: 'q' } } }), reply('gpt-6-luna'), '{"event":{"tool":{}}}']), 'gpt-6-luna');
+  assert.equal(lastAnswerModel([reply('gpt-6-luna'), '{not json "provider_replay"']), 'gpt-6-luna');
 });

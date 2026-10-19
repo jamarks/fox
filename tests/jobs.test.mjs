@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { createJobStore, createRunner, commandFor } from '../jobs.mjs';
 
 const tz = 'Europe/Berlin';
@@ -164,8 +165,11 @@ test('what a script leaves running in the background ends with its run', async (
   await runner.tick(); await runner.idle();
   const [run] = await store.runs(job.id);
   const pid = Number(await readFile(await store.outputPath(job.id, run.id, 'pid'), 'utf8'));
-  await new Promise((r) => setTimeout(r, 200));
-  assert.throws(() => process.kill(pid, 0), 'the background sleep was stopped');
+  // Stopped means gone or a zombie: under a subreaper that does not reap (fx running the tests, some containers)
+  // the killed sleep stays in the table as Z, and kill(pid, 0) still succeeds on it.
+  const running = () => { try { process.kill(pid, 0); return !/Z/.test(execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' })); } catch { return false; } };
+  for (let i = 0; i < 20 && running(); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.equal(running(), false, 'the background sleep was stopped');
 });
 
 test('two writers at once both land in jobs.json', async () => {

@@ -41,7 +41,10 @@ test('HTTPS passkey enrollment needs SSH code and exact origin; session has Secu
   await chmod(fakeTmux, 0o755);
   await mkdir(join(home, '.fx', 'sessions', 'sample'), { recursive: true });
   await writeFile(join(home, '.fx', 'sessions', 'sample', 'session.json'), JSON.stringify({ title: 'Secret', workspace_root: '/repo' }));
-  const env = { ...process.env, HOME: home, PORT: String(port), FOX_PUBLIC_ORIGIN: origin, TMUX_BIN: fakeTmux };
+  // Settings → Deploy only shows where fox-update is installed: a stand-in file says it is.
+  const fakeUpdate = join(home, 'fox-update');
+  await writeFile(fakeUpdate, '');
+  const env = { ...process.env, HOME: home, PORT: String(port), FOX_PUBLIC_ORIGIN: origin, TMUX_BIN: fakeTmux, FOX_UPDATE_BIN: fakeUpdate };
   let child = spawn(process.execPath, ['server.mjs'], { cwd: new URL('..', import.meta.url), env, stdio: 'pipe' });
   const request = (path, { method = 'GET', data, cookie, host = 'fox.example.test', browserOrigin = origin } = {}) =>
     new Promise((resolve, reject) => {

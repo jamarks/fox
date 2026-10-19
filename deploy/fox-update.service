@@ -1,0 +1,8 @@
+[Unit]
+Description=Update fox from its deploy branch, with rollback
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/fox-update

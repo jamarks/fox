@@ -1,10 +1,10 @@
-# Open the same fox from another device
+# Sharing fox from a laptop
 
-**VPS passkey mode is opt-in and not a deployment recipe.** From a Fox checkout on a fresh Linux VM with its own HOME, set `FOX_PUBLIC_ORIGIN=https://fox.your-domain` and run `npm start` (not `fox`, which opens a local browser). Fox continues listening only on `127.0.0.1:4848`; you must configure DNS, a TLS reverse proxy that preserves the original `Host` and forwards WebSockets, firewall rules that keep port 4848 private, process supervision and backups before exposing it. The public domain must be stable: a `localhost` passkey cannot be used on that domain, and Fox refuses to start if its credential belongs to a different RP ID. Do not copy `~/.config/fox/passkey.json` from the Mac to the VPS.
+**To use fox from every device, run it on a server: [server.md](server.md).** That is the supported setup, with a passkey that works on any device.
 
-For **first enrollment only**, run `FOX_PUBLIC_ORIGIN=https://fox.your-domain node bin/fox-enroll.mjs` over SSH as the same user/HOME that runs Fox. It prints a single-use code valid for 10 minutes. Open the HTTPS Fox URL, type the code into the enrollment page, and create a new passkey. Never place the code in a URL or share it. Once registered, normal visits go straight to Fox's passkey login. This mode uses `Secure`, `HttpOnly`, `SameSite=Strict` cookies and checks the exact configured host and browser origin on requests and WebSockets; it cannot be combined with `FOX_SHARE_PORT`, `FOX_MOBILE_PORT` or `FOX_AUTH_DISABLED=1`. **Do not publish it until HTTPS, unauthorized HTTP/API/WebSocket rejection and a real browser passkey flow have been tested on the VPS.**
+The two ways below are older: they share a fox running on your Mac while it stays awake. With local passkey mode on (the default), nonlocal hosts are denied even if Tailscale Serve or phone pairing is configured.
 
-The access methods below describe the older Mac setup; they are not a substitute for the VPS configuration above. With local passkey mode enabled, nonlocal hosts are denied even if Tailscale Serve or phone pairing is configured.
+## Tailscale Serve
 
 Keep fox and fx running on the Mac. Install Tailscale on the Mac and each phone/computer you want to use, and sign in to the same tailnet. On the Mac, with fox running on its default port:
 

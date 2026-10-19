@@ -1,0 +1,12 @@
+# /etc/cloudflared/config.yml. setup-server.sh --cloudflare writes it; this is what it looks like.
+tunnel: <tunnel id>
+credentials-file: /root/.cloudflared/<tunnel id>.json
+ingress:
+  - hostname: fox.example.com
+    service: http://127.0.0.1:4848
+  # Optional previews, one hostname per port. Dev servers reject unknown hosts, hence the localhost header.
+  # - hostname: fox-5173.example.com
+  #   service: http://127.0.0.1:5173
+  #   originRequest:
+  #     httpHostHeader: localhost
+  - service: http_status:404

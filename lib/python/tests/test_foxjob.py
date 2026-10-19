@@ -21,7 +21,7 @@ if mode == "big":
 elif mode == "done":
     open("hello.txt", "w").write("hello\\n")
 status = "skip" if mode == "skip" else "done"
-print(json.dumps({"final_output": 'Made it.\\nRESULT: {"status": "%s", "summary": "said hello", "verified": "ran the tests"}' % status}))
+print(json.dumps({"final_output": 'Made it.\\nRESULT: {"status": "%s", "summary": "said hello", "try": "open hello.txt", "verified": "ran the tests"}' % status}))
 """
 FAKE_GH = """#!/usr/bin/env python3
 import json, os, sys
@@ -33,7 +33,7 @@ if args[:2] == ["pr", "list"]:
 elif args[:2] == ["pr", "create"]:
     n = len(state["open"]) + 1
     url = "https://github.com/o/r/pull/%d" % n
-    state["open"].append({"number": n, "headRefName": args[args.index("--head") + 1], "url": url, "title": args[args.index("--title") + 1]})
+    state["open"].append({"number": n, "headRefName": args[args.index("--head") + 1], "url": url, "title": args[args.index("--title") + 1], "body": args[args.index("--body") + 1]})
     json.dump(state, open(state_file, "w"))
     print(url)
 """
@@ -82,6 +82,15 @@ class FoxJobTest(unittest.TestCase):
         self.assertEqual(sh("git", "rev-parse", "main", cwd=self.origin), sh("git", "rev-parse", "release", cwd=self.origin),
                          "main and release untouched")
         self.assertEqual(self.propose().status, "exists")
+
+    def test_the_pull_request_says_why_where_to_try_it_and_asks_for_screenshots(self):
+        args = self.tmp / "fx-args.json"
+        self.fj.CHILD_ENV["FAKE_FX_ARGS"] = str(args)
+        self.propose(why="People could not say hello.")
+        prompt = json.loads(args.read_text())[-1]
+        self.assertIn(f"screenshot-1.png, screenshot-2.png… in {self.fj.output_dir()}", prompt)
+        body = json.loads(Path(os.environ["FAKE_GH_STATE"]).read_text())["open"][0]["body"]
+        self.assertTrue(body.startswith("**Why:** People could not say hello.\n\nsaid hello\n\n**Try it:** open hello.txt\n\n**Verified:**"), body)
 
     def test_a_job_can_pick_the_model_and_effort(self):
         args = self.tmp / "fx-args.json"

@@ -1,0 +1,25 @@
+[Unit]
+Description=fox jobs runner (scripts on a schedule; apart from fox so a deploy never kills a job)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=fox
+Group=fox
+WorkingDirectory=/opt/fox/current
+EnvironmentFile=/etc/fox/fox.env
+EnvironmentFile=-/etc/fox/secrets.env
+Environment=HOME=/home/fox
+Environment=LANG=C.UTF-8
+Environment=PATH=/home/fox/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/node /opt/fox/current/bin/fox-jobs.mjs
+Restart=always
+RestartSec=3
+UMask=0077
+NoNewPrivileges=yes
+# Stopping waits for the job in progress (the runner exits after it); jobs stop after their own time limit anyway.
+KillMode=mixed
+TimeoutStopSec=4h
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Saves the GitHub token of one owner (a user or an org): fox-git-token my-org
+# Typed hidden, kept in ~/.config/fox-git/tokens/<owner>, readable by fox only. For your own account,
+# `gh auth login` is enough; this is for a second owner, since a fine-grained token has a single owner.
+set -euo pipefail
+owner="$(printf %s "${1:-}" | tr A-Z a-z)"
+[[ "$owner" =~ ^[A-Za-z0-9-]+$ ]] || { echo "usage: fox-git-token <owner>   (e.g. fox-git-token my-org)"; exit 1; }
+dir="$HOME/.config/fox-git/tokens"; install -d -m 700 "$dir"
+read -rsp "Paste $owner's token and press Enter (hidden): " tok; echo
+[ -n "$tok" ] || { echo "empty, nothing saved"; exit 1; }
+umask 077; printf '%s' "$tok" > "$dir/$owner"
+if GH_TOKEN="$tok" /usr/bin/gh api user >/dev/null 2>&1 || GH_TOKEN="$tok" /usr/bin/gh api "orgs/$owner/repos?per_page=1" >/dev/null 2>&1; then
+  echo "✓ $owner's token saved."
+else
+  echo "✗ GitHub refused the token (expired, waiting for approval or mistyped?). It was saved anyway; check it."
+fi

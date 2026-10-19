@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# gh, with the token of the repo's owner (from -R/--repo or the folder's origin remote) when fox-git-token has
+# one. Installed ahead of /usr/bin/gh in fox's PATH.
+owner=""
+args=("$@")
+for ((i=0; i<${#args[@]}; i++)); do
+  case "${args[i]}" in
+    -R|--repo) owner="${args[i+1]%%/*}" ;;
+    --repo=*) v="${args[i]#--repo=}"; owner="${v%%/*}" ;;
+  esac
+done
+if [ -z "$owner" ]; then
+  url=$(git remote get-url origin 2>/dev/null)
+  case "$url" in
+    https://github.com/*) r="${url#https://github.com/}"; owner="${r%%/*}" ;;
+    git@github.com:*) r="${url#git@github.com:}"; owner="${r%%/*}" ;;
+  esac
+fi
+owner="$(printf %s "$owner" | tr A-Z a-z)"
+file="$HOME/.config/fox-git/tokens/$owner"
+if [ -z "${GH_TOKEN:-}" ] && [ -n "$owner" ] && [ -f "$file" ]; then export GH_TOKEN="$(cat "$file")"; fi
+exec /usr/bin/gh "$@"

@@ -2,7 +2,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
+import { realpathSync } from 'node:fs';
 
 const execFileAsync = promisify(execFile);
 export async function runFox({
@@ -15,6 +15,8 @@ export async function runFox({
     if (!command) throw new Error('No browser opener available on this platform');
     await execFileAsync(command, [url]);
   },
+  // A server has no screen: say where to open fox instead of failing on a missing xdg-open.
+  headless = process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY,
   stdout = process.stdout,
   stderr = process.stderr,
 } = {}) {
@@ -48,6 +50,10 @@ export async function runFox({
     }
     stdout.write(`fox running at ${url} · Ctrl+C stops the panel, not fx sessions.\n`);
   }
+  if (headless) {
+    stdout.write(`No browser on this machine. To use fox from your other devices, open http://127.0.0.1:${Number(port)} through a tunnel: https://github.com/jamarks/fox#install-and-run\n`);
+    return 0;
+  }
   try { await openUrl(url); }
   catch (error) {
     stderr.write(`Could not open the browser: ${error.message}\nOpen ${url} manually.\n`);
@@ -57,7 +63,9 @@ export async function runFox({
   return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// npm installs `fox` as a symlink to this file: compare real paths, or the command quietly does nothing.
+const invokedPath = (() => { try { return realpathSync(process.argv[1]); } catch { return null; } })();
+if (process.argv[1] && invokedPath === realpathSync(fileURLToPath(import.meta.url))) {
   if (process.argv.length !== 2) {
     process.stderr.write('Usage: fox\n');
     process.exitCode = 1;

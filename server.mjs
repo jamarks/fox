@@ -16,7 +16,7 @@ import * as pty from 'node-pty';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createSearchIndex } from './search.mjs';
-import { latestCompletedReply } from './inbox.mjs';
+import { latestCompletedReply, lastAnswerModel } from './inbox.mjs';
 import { readMetrics } from './metrics.mjs';
 import { TOOLS, isInstalled, isEnabled, withEnabled, addArgs } from './tools.mjs';
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
@@ -26,10 +26,11 @@ import { createFxSettings } from './fxsettings.mjs';
 import { fastForward, SAFE_GIT } from './gitsync.mjs';
 import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
 import { createJobStore, createRunner, updateJobRepo } from './jobs.mjs';
-import { createPrStates } from './prstate.mjs';
+import { createPrStates, PR_URL } from './prstate.mjs';
 import { createPrs } from './prs.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 import { ensureFoxNotes, foxNotes } from './notes.mjs';
+import { createModels } from './models.mjs';
 const execFileP = promisify(execFile);
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -57,6 +58,7 @@ const DROP_DIR = join(STATE_DIR, 'drops');
 const DROP_LIMIT = 25 * 1024 * 1024;
 const STATE_FILE = join(STATE_DIR, 'state.json');
 const DEPLOY_FILE = join(STATE_DIR, 'deploy-branch');
+const FOX_UPDATE = process.env.FOX_UPDATE_BIN || '/usr/local/sbin/fox-update';
 const DEPLOY_BRANCHES = ['release', 'main'];
 const deployBranch = async () => (await readFile(DEPLOY_FILE, 'utf8').catch(() => '')).trim() === 'main' ? 'main' : 'release';
 if (process.env.FOX_PUBLIC_ORIGIN && (process.env.FOX_SHARE_PORT || process.env.FOX_MOBILE_PORT)) {
@@ -91,10 +93,13 @@ const PREVIEW = (() => {
 })();
 // AGENTS.md at the root of every new workspace: how the folder is laid out. How to run dev servers and jobs
 // lives in fx's personal instructions (see notes.mjs), so every session knows it, in any folder.
-function workspaceAgentNotes() {
+function workspaceAgentNotes(ws) {
+  const repos = (ws?.repos ?? []).map((r) => `- \`${r.dir}/\`: ${r.owner}/${r.name}`).join('\n');
   return `# Workspace notes (written by fox)
 
-This folder is a fox workspace. Each subfolder with a \`.git\` is its own GitHub repo: run git (status, commit, push, pull requests) inside that subfolder. Other files here are notes, scratch work and job scripts.
+This folder is a fox workspace, not a git repo. Each repo is its own subfolder: run git (status, commit, push, pull requests) and search inside it, and read its AGENTS.md before changing it.
+${repos ? `\n${repos}\n` : ''}
+Other files here are notes, scratch work and job scripts.
 `;
 }
 const workspaces = createWorkspaces({ stateDir: STATE_DIR, rootDir: join(homedir(), 'workspaces'), agentNotes: workspaceAgentNotes });
@@ -130,6 +135,22 @@ async function jobScripts(cwd) {
 }
 const repoCatalog = createRepoCatalog({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
 const prStates = createPrStates({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
+// Which job run opened a pull request (its FOX_LINK), and the screenshots fx saved there, for the Pull requests page.
+let prRunsCache = { at: 0, map: new Map() };
+async function prRuns() {
+  if (Date.now() - prRunsCache.at < 30_000) return prRunsCache.map;
+  const map = new Map();
+  for (const job of await jobStore.list().catch(() => [])) {
+    for (const run of await jobStore.runs(job.id).catch(() => [])) { // newest first: the newest run that linked a PR wins
+      for (const l of run.links ?? []) {
+        if (!PR_URL.test(l.url) || map.has(l.url.replace(/[?#].*$/, ''))) continue;
+        map.set(l.url.replace(/[?#].*$/, ''), { job: job.id, run: run.id, shots: (run.outputs ?? []).map((o) => o.name).filter((n) => /^screenshot[\w.-]*\.(png|jpe?g|webp)$/i.test(n)).sort() });
+      }
+    }
+  }
+  prRunsCache = { at: Date.now(), map };
+  return map;
+}
 // Pull requests of the workspaces' repos (prs.mjs): open work and merged history.
 const prs = createPrs({
   tokensDir: join(homedir(), '.config', 'fox-git', 'tokens'),
@@ -186,7 +207,7 @@ async function listSessions() {
       outcome: c.last_outcome ?? null,
       failure: c.last_failure ?? null,
     }));
-    let lastKind = null, partial = null;
+    let lastKind = null, partial = null, answeredBy = null;
     try {
       const raw = await readFile(join(dir, 'events.jsonl'), 'utf8');
       const lines = raw.trim().split('\n');
@@ -198,6 +219,7 @@ async function listSessions() {
           if (lastKind === 'interrupted') partial = ev.interrupted?.partial_text || null;
         } catch {}
       }
+      answeredBy = lastAnswerModel(lines);
     } catch {}
     sessions.push({
       id,
@@ -212,7 +234,8 @@ async function listSessions() {
       latestReply,
       workspace: meta.workspace_root ?? meta.origin_workspace_root ?? '?',
       provider: meta.provider,
-      model: meta.model,
+      // session.json keeps fx's default; the model that answered is in each reply (picked at start or with /model).
+      model: answeredBy ?? meta.model,
       createdAt: meta.created_at_ms,
       updatedAt: meta.updated_at_ms,
       subagentChild: Boolean(meta.subagent_child),
@@ -365,44 +388,12 @@ async function gitInfo(ws) {
 }
 
 // ---------- catálogo de modelos ----------
-// `fx models` only lists the active provider, so we switch provider, list, and switch back. Cached on disk.
-const MODELS_FILE = join(STATE_DIR, 'models.json');
-let modelsCache = null;
 async function fxJson(args, env = {}) {
   const { stdout } = await execFileP(FX_BIN, args, { timeout: 20000, env: { ...process.env, ...env } });
   return stdout;
 }
 async function readFxSettings() { return (await readJson(join(homedir(), '.fx', 'settings.json'))) ?? {}; }
-async function fetchModels() {
-  const settings = await readFxSettings();
-  const original = settings.provider ?? 'codex';
-  const status = await fxJson(['status']).catch(() => '');
-  const connected = (status.match(/connected_providers=(.*)/)?.[1] ?? '').split(',').map((x) => x.trim()).filter(Boolean);
-  const providers = [];
-  if (connected.some((c) => /codex/i.test(c))) providers.push({ id: 'codex', label: 'ChatGPT subscription' });
-  if (connected.some((c) => /gateway/i.test(c))) providers.push({ id: 'gateway', label: 'Vercel AI Gateway' });
-  const out = { fetchedAt: Date.now(), default: { provider: original, model: settings.models?.[original] ?? null }, providers: [] };
-  try {
-    for (const p of providers) {
-      await fxJson(['provider', p.id]).catch(() => {});
-      let ids = [];
-      try { ids = JSON.parse(await fxJson(['models', '--json'])).ids ?? []; } catch {}
-      out.providers.push({ ...p, models: ids, default: settings.models?.[p.id] ?? null });
-    }
-  } finally {
-    await fxJson(['provider', original]).catch(() => {});
-  }
-  modelsCache = out;
-  await mkdir(STATE_DIR, { recursive: true, mode: 0o700 });
-  await writeFile(MODELS_FILE, JSON.stringify(out, null, 2), { mode: 0o600 });
-  return out;
-}
-async function getModels() {
-  if (modelsCache) return modelsCache;
-  const cached = await readJson(MODELS_FILE);
-  if (cached) { modelsCache = cached; return cached; }
-  return fetchModels();
-}
+const models = createModels({ fx: fxJson, file: join(STATE_DIR, 'models.json'), readSettings: readFxSettings });
 
 // ---------- optional tools for fx (MCP servers) ----------
 let mcpPath = null;
@@ -546,6 +537,15 @@ async function handlePanelRequest(req, res) {
       return send(res, 200, { sessions, terminals, repos, workspaces: await listWorkspaces() });
     }
     let m;
+    if ((m = p.match(/^\/api\/terminals\/([^/]+)\/snapshot$/))) {
+      const name = m[1];
+      // Only fox-owned terminals currently listed by tmux may be captured; never accept a raw tmux target.
+      if (!/^fx-[A-Za-z0-9_-]{1,100}$/.test(name)) return send(res, 404, { error: 'terminal not found' });
+      const resume = await tmuxOption(name, '@fx_resume').catch(() => null);
+      if (!safeSessionId(resume) || !existsSync(join(SESSIONS_DIR, resume, 'session.json'))) return send(res, 404, { error: 'terminal not found' });
+      const screen = await tmux('capture-pane', '-p', '-S', '-32', '-E', '-1', '-t', name);
+      return send(res, 200, { text: screen.replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))|[\x00-\x08\x0b-\x1f\x7f]/g, '').trimEnd().split('\n').slice(-32).join('\n').slice(-6000) });
+    }
     if ((m = p.match(/^\/api\/sessions\/([^/]+)\/events$/))) {
       const id = safeSessionId(m[1]);
       if (!id) return send(res, 400, { error: 'bad id' });
@@ -672,7 +672,11 @@ async function handlePanelRequest(req, res) {
     }
     // ---------- pull requests ----------
     if (p === '/api/prs' && req.method === 'GET') {
-      try { return send(res, 200, await prs.list({ force: url.searchParams.has('fresh'), state: url.searchParams.get('state') ?? 'open', limit: url.searchParams.get('limit') ?? 50 })); }
+      try {
+        const out = await prs.list({ force: url.searchParams.has('fresh'), state: url.searchParams.get('state') ?? 'open', limit: url.searchParams.get('limit') ?? 50 });
+        const runs = await prRuns();
+        return send(res, 200, { ...out, prs: out.prs.map((pr) => ({ ...pr, run: runs.get(pr.url) ?? null })) });
+      }
       catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
     }
     if ((m = p.match(/^\/api\/prs\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)\/(\d+)(?:\/(files|merge|close))$/))) {
@@ -720,10 +724,12 @@ async function handlePanelRequest(req, res) {
       } catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
     }
     // On a server, which branch fox-update deploys (/usr/local/sbin/fox-update reads this file every minute):
-    // release (merged pull requests) or main (every push).
-    if (p === '/api/deploy' && req.method === 'GET') return send(res, 200, { available: Boolean(process.env.FOX_PUBLIC_ORIGIN), branch: await deployBranch() });
+    // release (merged pull requests) or main (every push). Only where fox-update is installed (setup-server.sh):
+    // anywhere else the choice would change nothing.
+    const deployable = Boolean(process.env.FOX_PUBLIC_ORIGIN) && existsSync(FOX_UPDATE);
+    if (p === '/api/deploy' && req.method === 'GET') return send(res, 200, { available: deployable, branch: await deployBranch() });
     if (p === '/api/deploy' && req.method === 'POST') {
-      if (!process.env.FOX_PUBLIC_ORIGIN) return send(res, 404, { error: 'only on a server' });
+      if (!deployable) return send(res, 404, { error: 'only on a server updated by fox-update' });
       const { branch } = JSON.parse(await readBody(req) || '{}');
       if (!DEPLOY_BRANCHES.includes(branch)) return send(res, 400, { error: 'release or main' });
       await mkdir(STATE_DIR, { recursive: true, mode: 0o700 });
@@ -751,8 +757,8 @@ async function handlePanelRequest(req, res) {
         return send(res, 405, { error: 'method not allowed' });
       } catch (err) { return send(res, err.status ?? 500, { error: err.message, blockers: err.blockers }); }
     }
-    if (p === '/api/models' && req.method === 'GET') return send(res, 200, await getModels());
-    if (p === '/api/models/refresh' && req.method === 'POST') { try { return send(res, 200, await fetchModels()); } catch (err) { return send(res, 500, { error: String(err.stderr || err.message) }); } }
+    if (p === '/api/models' && req.method === 'GET') return send(res, 200, await models.get());
+    if (p === '/api/models/refresh' && req.method === 'POST') { try { return send(res, 200, await models.refresh()); } catch (err) { return send(res, 500, { error: String(err.stderr || err.message) }); } }
     if (p === '/api/terminals' && req.method === 'GET') return send(res, 200, await listTerminals());
     if (p === '/api/terminals' && req.method === 'POST') {
       const body = JSON.parse(await readBody(req) || '{}');

@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runFox } from '../bin/fox.mjs';
+import { execFile } from 'node:child_process';
+import { mkdtemp, symlink, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const stream = () => ({ text: '', write(chunk) { this.text += chunk; } });
 const foxPage = { ok: true, text: async () => '<title>fox</title>' };
@@ -8,7 +13,7 @@ const foxPage = { ok: true, text: async () => '<title>fox</title>' };
 test('fox opens an already running panel without starting another server', async () => {
   const stdout = stream(), stderr = stream();
   const opened = [];
-  const code = await runFox({ port: '4848', stdout, stderr,
+  const code = await runFox({ port: '4848', stdout, stderr, headless: false,
     fetchPage: async (url) => { assert.equal(url, 'http://127.0.0.1:4848/'); return foxPage; },
     startServer: () => { throw new Error('must not start'); },
     openUrl: async (url) => opened.push(url),
@@ -21,7 +26,7 @@ test('fox opens an already running panel without starting another server', async
 test('fox starts the panel when offline, waits for readiness, then opens the browser', async () => {
   let started = false, probes = 0;
   const stdout = stream(), opened = [];
-  const code = await runFox({ stdout, stderr: stream(),
+  const code = await runFox({ stdout, stderr: stream(), headless: false,
     fetchPage: async () => { probes++; if (!started || probes < 3) throw new Error('not ready'); return foxPage; },
     startServer: async () => { started = true; }, wait: async () => {},
     openUrl: async (url) => opened.push(url),
@@ -44,4 +49,25 @@ test('fox refuses another app, invalid ports and start failures', async () => {
     assert.equal(code, 1);
     assert.match(stderr.text, error);
   }
+});
+
+test('fox on a machine without a screen says how to reach it instead of opening a browser', async () => {
+  const stdout = stream();
+  const code = await runFox({ stdout, stderr: stream(), headless: true,
+    fetchPage: async () => foxPage, openUrl: async () => { throw new Error('must not open'); } });
+  assert.equal(code, 0);
+  assert.match(stdout.text, /No browser on this machine/);
+});
+
+// npm installs the command as a symlink: run through one, the way `fox` really starts, with a bad argument
+// so it answers right away instead of starting a server.
+test('fox runs when started through a symlink, as npm installs it', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'fox-bin-'));
+  try {
+    const link = join(dir, 'fox');
+    await symlink(fileURLToPath(new URL('../bin/fox.mjs', import.meta.url)), link);
+    const result = await new Promise((done) => execFile(process.execPath, [link, 'extra'], (error, stdout, stderr) => done({ code: error?.code ?? 0, stderr })));
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /Usage: fox/);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });

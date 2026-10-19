@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# fox-update: deploys the fox branch chosen in Settings → Deploy (`release` or `main`), with automatic rollback.
+#   fox-update              looks for a new commit and deploys it
+#   fox-update --rollback   goes back to the previous version, by hand
+# Runs as root from fox-update.timer, every minute. The repo's code only ever runs as `foxbuild` (npm ci and
+# npm test run install scripts). setup-server.sh installs this file once, root-owned: it is never deployed by
+# itself, so an agent pushing to the repo cannot change a script that runs as root.
+set -euo pipefail
+
+# Which repo: /etc/fox/update.conf (FOX_REPO=https://github.com/<you>/fox.git) for a fork.
+FOX_REPO="https://github.com/jamarks/fox.git"
+[ -f /etc/fox/update.conf ] && . /etc/fox/update.conf
+# The branch is chosen in fox's Settings: fox writes "main" or "release" here as the fox user, so only the
+# exact word main is taken; anything else is release.
+BRANCH_FILE=/home/fox/.config/fox/deploy-branch
+BRANCH="release"
+if [ -f "$BRANCH_FILE" ] && [ ! -L "$BRANCH_FILE" ] && [ "$(head -c 16 "$BRANCH_FILE" | tr -d '[:space:]')" = "main" ]; then BRANCH="main"; fi
+STATE=/var/lib/fox-update
+MIRROR="$STATE/repo.git"
+BAD="$STATE/bad-commits"
+BASE=/opt/fox
+RELEASES="$BASE/releases"
+BUILD_ROOT=/var/lib/foxbuild/builds
+ENV_FILE=/etc/fox/fox.env
+KEEP=3
+
+log() { echo "fox-update: $*"; logger -t fox-update -- "$*" 2>/dev/null || true; }
+fail() { log "ERROR: $*"; exit 1; }
+
+[ "$(id -u)" = 0 ] || fail "run as root"
+exec 9>/run/fox-update.lock
+flock -n 9 || { log "another update is running"; exit 0; }
+
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+PORT="${PORT:-4848}"
+# The Host fox accepts: its public address, or localhost:<port> without one (reached through an SSH tunnel).
+HOST="${FOX_PUBLIC_ORIGIN:-}"; HOST="${HOST#https://}"
+HOST="${HOST:-localhost:$PORT}"
+
+# Healthy: the service is up and serves its sign-in page (or the enrollment page, before the first passkey).
+healthy() {
+  local i body
+  for i in $(seq 1 30); do
+    if systemctl is-active --quiet fox; then
+      body=$(curl -fsS -m 3 -H "Host: $HOST" "http://127.0.0.1:$PORT/" 2>/dev/null || true)
+      if grep -qE '<title>(Set up )?fox</title>' <<<"$body"; then return 0; fi
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+switch_to() { # points current at a version, atomically
+  ln -sfn "$1" "$BASE/current.tmp"
+  mv -T "$BASE/current.tmp" "$BASE/current"
+}
+
+current_commit() { [ -L "$BASE/current" ] && basename "$(readlink -f "$BASE/current")" || true; }
+
+rollback() { # $1=auto: the version left behind is bad, it does not become "previous"
+  local mode="${1:-manual}" prev
+  prev=$(readlink -f "$BASE/previous" 2>/dev/null || true)
+  [ -n "$prev" ] && [ -d "$prev" ] || fail "no previous version to go back to"
+  local from; from=$(current_commit)
+  switch_to "$prev"
+  if [ "$mode" = auto ]; then rm -f "$BASE/previous"; else ln -sfn "$RELEASES/$from" "$BASE/previous"; fi
+  systemctl restart fox
+  if healthy; then log "rollback: from ${from:0:12} to $(current_commit | cut -c1-12), fox answers"
+  else fail "rolled back to $(current_commit | cut -c1-12), but fox does not answer: see journalctl -u fox"; fi
+}
+
+if [ "${1:-}" = "--rollback" ]; then rollback; exit 0; fi
+
+mkdir -p "$STATE" "$RELEASES"; chmod 700 "$STATE"; touch "$BAD"
+[ -d "$MIRROR" ] || git clone --quiet --bare --single-branch --branch "$BRANCH" "$FOX_REPO" "$MIRROR"
+git -C "$MIRROR" remote set-url origin "$FOX_REPO" # FOX_REPO may change after the first clone (a fork)
+git -C "$MIRROR" fetch --quiet origin "+refs/heads/$BRANCH:refs/heads/$BRANCH"
+NEW=$(git -C "$MIRROR" rev-parse "refs/heads/$BRANCH")
+CUR=$(current_commit)
+
+[ "$NEW" = "$CUR" ] && exit 0
+if grep -qx "$NEW" "$BAD"; then exit 0; fi
+# Back from main to release: the running version already has what release has. Stay, quietly, until release
+# moves past it.
+if [ -n "$CUR" ] && git -C "$MIRROR" merge-base --is-ancestor "$NEW" "$CUR" 2>/dev/null; then exit 0; fi
+if [ -n "$CUR" ] && ! git -C "$MIRROR" merge-base --is-ancestor "$CUR" "$NEW"; then
+  log "ERROR: $BRANCH (${NEW:0:12}) is not a fast-forward from the running version (${CUR:0:12}); not deploying"
+  echo "$NEW" >> "$BAD"; exit 1
+fi
+
+log "deploying ${NEW:0:12} from $BRANCH (running: ${CUR:0:12})"
+if [ -d "$RELEASES/$NEW" ]; then
+  log "${NEW:0:12} was already built"
+else
+  BUILD="$BUILD_ROOT/$NEW"
+  rm -rf "$BUILD"; install -d -o foxbuild -g foxbuild -m 755 "$BUILD"
+  git -C "$MIRROR" archive "$NEW" | runuser -u foxbuild -- tar -x -C "$BUILD"
+  if ! runuser -u foxbuild -- bash -c "cd '$BUILD' && npm ci --no-audit --no-fund --loglevel=error && npm test" >"$STATE/build-${NEW:0:12}.log" 2>&1; then
+    log "ERROR: npm ci or npm test failed on ${NEW:0:12}; not deploying (log: $STATE/build-${NEW:0:12}.log)"
+    echo "$NEW" >> "$BAD"; rm -rf "$BUILD"; exit 1
+  fi
+  # Which version this is: a release folder has no .git, so fox reads it from here (sidebar footer).
+  REPO_NAME=$(sed -E 's#^https://github.com/##; s#\.git$##' <<<"$FOX_REPO")
+  git -C "$MIRROR" log -1 --format='%H%n%cI%n%s' "$NEW" | BRANCH="$BRANCH" REPO_NAME="$REPO_NAME" python3 -c 'import json, os, sys, datetime; c, d, s = sys.stdin.read().split("\n")[:3]; print(json.dumps({"commit": c, "date": d, "subject": s, "branch": os.environ["BRANCH"], "repo": os.environ["REPO_NAME"], "deployedAt": datetime.datetime.now(datetime.timezone.utc).isoformat()}))' > "$BUILD/VERSION.json"
+  mv "$BUILD" "$RELEASES/$NEW"
+  chown -R root:root "$RELEASES/$NEW"
+  chmod -R u+rwX,go+rX,go-w "$RELEASES/$NEW"
+fi
+
+[ -n "$CUR" ] && ln -sfn "$RELEASES/$CUR" "$BASE/previous"
+switch_to "$RELEASES/$NEW"
+systemctl restart fox
+
+if healthy; then
+  log "fox ${NEW:0:12} deployed and answering"
+  # The jobs runner restarts on the new version when it is idle, never in the middle of a job.
+  install -d -o fox -g fox -m 700 /home/fox/.config/fox /home/fox/.config/fox/jobs
+  touch /home/fox/.config/fox/jobs/restart-requested && chown fox:fox /home/fox/.config/fox/jobs/restart-requested
+  systemctl start fox-jobs 2>/dev/null || true
+else
+  echo "$NEW" >> "$BAD"
+  if [ -n "$CUR" ]; then log "ERROR: ${NEW:0:12} failed the health check; going back to ${CUR:0:12}"; rollback auto; exit 1
+  else fail "first deploy ${NEW:0:12} failed the health check: see journalctl -u fox"; fi
+fi
+
+# Keep the last $KEEP versions, never the running one or the previous one.
+keep_cur=$(readlink -f "$BASE/current"); keep_prev=$(readlink -f "$BASE/previous" 2>/dev/null || true)
+ls -1dt "$RELEASES"/*/ 2>/dev/null | sed 's#/$##' | tail -n +$((KEEP + 1)) | while read -r dir; do
+  [ "$dir" = "$keep_cur" ] || [ "$dir" = "$keep_prev" ] || rm -rf "$dir"
+done

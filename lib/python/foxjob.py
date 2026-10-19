@@ -89,15 +89,17 @@ def checkout(repo):
     return path
 
 
-def agent_rules(test):
+def agent_rules(test, shots=None):
+    shot = (f" Save one to three of those screenshots, the ones that show the change best, as PNG files named "
+            f"screenshot-1.png, screenshot-2.png… in {shots}: the person reviewing sees them next to the pull request.") if shots else ""
     return f"""Rules:
 - Work only in this repository folder. Do not commit, push, create branches or open pull requests: the job that started you does that after checking your work, and a person reviews it.
 - Keep the change small and focused. If it needs a large change, a product decision the task does not answer, new dependencies, or secrets, change nothing and explain why.
 - Follow AGENTS.md and the conventions of the code around you. Add or update tests for what you change.
 - Run the tests (`{test}`) and make them pass.
-- If the change shows in a UI, run it and look at it with the browser tool (screenshot, console errors) before you finish.
+- If the change shows in a UI, run it and look at it with the browser tool (screenshot, console errors) before you finish.{shot}
 - End your answer with exactly one line like this, and nothing after it:
-RESULT: {{"status": "done" or "skip", "summary": "<one sentence in the task's language: what you changed, or why you skipped>", "verified": "<how you checked it>"}}"""
+RESULT: {{"status": "done" or "skip", "summary": "<one sentence in the task's language: what you changed, or why you skipped>", "try": "<where a person sees or uses it: what to open or click, one or two sentences; empty if nothing shows>", "verified": "<how you checked it>"}}"""
 
 
 def parse_result(final):
@@ -180,10 +182,12 @@ class Proposal:
 
 
 def propose_change(repo, *, branch, title, task, test, base="main", setup=None, max_lines=400, max_open=3,
-                   prefix="agent/", timeout_min=25, body="", commit_message=None, dry=False, model=None, effort=None):
+                   prefix="agent/", timeout_min=25, body="", commit_message=None, dry=False, model=None, effort=None, why=""):
     """fx does `task` in a clean copy of `repo`; the job checks size and tests itself and opens a PR to `base`.
 
     commit_message may use {title} and {summary} (fx's one-line summary of what it did).
+    why opens the PR's text: the problem the change solves, so a reviewer knows what it is about before what it does.
+    fx is asked where to try it (the PR says so) and to save screenshots of a UI change to the run's files.
 
     Raises Failure when fx skips, changes nothing, goes over max_lines or the tests fail: nothing is pushed then.
     """
@@ -201,7 +205,7 @@ def propose_change(repo, *, branch, title, task, test, base="main", setup=None, 
     git("clean", "-qfdx", cwd=path)
     if setup:
         sh(setup, path)
-    result = ask_fx(f"{task.strip()}\n\n{agent_rules(test)}", path, timeout_min, model=model, effort=effort)
+    result = ask_fx(f"{task.strip()}\n\n{agent_rules(test, shots=output_dir())}", path, timeout_min, model=model, effort=effort)
     log(f"fx says {result['status']}: {result['summary']}")
     if result["status"] == "skip":
         raise Failure("fx did not do it: " + result["summary"])
@@ -220,7 +224,10 @@ def propose_change(repo, *, branch, title, task, test, base="main", setup=None, 
     sh(test, path)
     message = (commit_message or "{title}\n\n{summary}").replace("{title}", title).replace("{summary}", result["summary"])
     git("commit", "--quiet", "-m", message, cwd=path)
-    pr_body = (f"{result['summary']}\n\n**Verified:** {result.get('verified', '')}\n\n"
+    tryit = str(result.get("try") or "").strip()
+    pr_body = ((f"**Why:** {why.strip()}\n\n" if why.strip() else "")
+               + f"{result['summary']}\n\n" + (f"**Try it:** {tryit}\n\n" if tryit else "")
+               + f"**Verified:** {result.get('verified', '')}\n\n"
                f"**Change:** {files} files, {lines} lines. Tests pass (`{test}`), run by the job.\n\n"
                + (body.strip() + "\n\n" if body.strip() else "") + f"Made by a fox job ({RUN_ID}).")
     done = Proposal("dry-run", result["summary"], result.get("verified", ""), files=files, lines=lines, branch=branch)

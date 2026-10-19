@@ -8,7 +8,9 @@ const state = {
   renaming: null, // keep the inline editor mounted while overview polling updates the rest of the UI
   pinned: new Set(), // tmux names pinned as tabs; restored after reload. Everything else is a preview or runs unseen.
   preview: null,     // the one unpinned terminal currently shown; replaced when you click another session
+  mosaic: false, mosaicIds: [], // only selected live sessions; tiles never connect to /pty
 };
+try { state.mosaicIds = JSON.parse(localStorage.getItem('fox.mosaic') ?? '[]').filter((id) => typeof id === 'string').slice(0, 4); } catch {}
 try { state.pinned = new Set(JSON.parse(localStorage.getItem('fox.pinned') ?? '[]')); } catch {}
 const savePinned = () => { try { localStorage.setItem('fox.pinned', JSON.stringify([...state.pinned])); } catch {} };
 function setPinned(name, on) {
@@ -92,6 +94,7 @@ async function refresh() {
   renderSummary();
   renderReplyInbox();
   syncTabsWithTerminals();
+  if (state.mosaic) renderMosaic();
 }
 
 function detectTransitions() {
@@ -528,7 +531,7 @@ const dictation = createDictationController(SpeechRecognition, {
 });
 function updateDictationAvailability() {
   const tab = state.tabs.get(state.activeTab);
-  dictationButton.disabled = !SpeechRecognition || !tab || tab.closed || tab.ws?.readyState !== WebSocket.OPEN;
+  dictationButton.disabled = state.mosaic || !SpeechRecognition || !tab || tab.closed || tab.ws?.readyState !== WebSocket.OPEN;
   if (!SpeechRecognition) dictationButton.title = 'Dictation needs Chrome';
   else if (!tab) dictationButton.title = 'Open a terminal to dictate';
 }
@@ -852,6 +855,51 @@ function tabLabel(name) {
   return (s ? displayTitle(s) : 'new') + ' · ' + shortPath(t?.cwd ?? '').split('/').pop();
 }
 
+// The mosaic reads the overview and a short tmux screen capture. It never creates an xterm or a socket.
+function renderMosaic() {
+  if (!state.mosaic) return;
+  const available = state.sessions.filter((s) => s.terminal && !s.archived && !s.parentId);
+  const ids = new Set(state.sessions.filter((s) => !s.archived && !s.parentId).map((s) => s.id));
+  state.mosaicIds = state.mosaicIds.filter((id) => ids.has(id)).slice(0, 4);
+  try { localStorage.setItem('fox.mosaic', JSON.stringify(state.mosaicIds)); } catch {}
+  $('#mosaic-choices').innerHTML = `<span>Watch · ${state.mosaicIds.length}/4</span>${available.filter((s) => !state.mosaicIds.includes(s.id)).map((s) => `<button type="button" data-add="${esc(s.id)}" ${state.mosaicIds.length === 4 ? 'disabled' : ''} title="Add ${esc(displayTitle(s))}">+ ${esc(displayTitle(s))}</button>`).join('')}`;
+  const tiles = $('#mosaic-tiles');
+  const scroll = new Map([...tiles.querySelectorAll('[data-tile]')].map((el) => [el.dataset.tile, el.querySelector('pre')?.scrollTop ?? 0]));
+  tiles.innerHTML = state.mosaicIds.length ? state.mosaicIds.map((id) => {
+    const s = sessionById(id);
+    return `<article class="mosaic-tile" data-tile="${esc(id)}"><header><span class="st ${esc(s.state)}" title="${esc(STATE_LABEL[s.state] ?? s.state)}"><i></i></span><strong title="${esc(displayTitle(s))}">${esc(displayTitle(s))}</strong><button type="button" data-remove="${esc(id)}" aria-label="Remove ${esc(displayTitle(s))} from mosaic" title="Remove">×</button></header><div class="mosaic-meta" title="${esc(s.workspace)}">${esc(shortPath(s.workspace))} · ${esc(modelShort(s.model) || 'model unknown')}</div><pre class="mosaic-screen" aria-label="Recent terminal output">${s.terminal ? 'Loading…' : 'No live terminal'}</pre><div class="mosaic-reply"><span>Last reply</span><p>${esc(s.latestReply?.text ?? 'No reply yet')}</p></div><button type="button" class="mosaic-open" data-expand="${esc(id)}">Open terminal ↗</button></article>`;
+  }).join('') : '<p class="mosaic-empty">Choose up to four live sessions above to watch here.</p>';
+  for (const id of state.mosaicIds) {
+    const s = sessionById(id);
+    const pre = [...tiles.querySelectorAll('[data-tile]')].find((el) => el.dataset.tile === id)?.querySelector('pre');
+    if (!s?.terminal || !pre) continue;
+    fetch(`/api/terminals/${encodeURIComponent(s.terminal)}/snapshot`).then((r) => { if (!r.ok) throw new Error('capture unavailable'); return r.json(); })
+      .then(({ text }) => { if (pre.isConnected) { pre.textContent = text.trim() || 'No terminal output yet'; pre.scrollTop = scroll.get(id) ?? 0; } })
+      .catch(() => { if (pre.isConnected) pre.textContent = 'Capture unavailable'; });
+  }
+}
+function setMosaic(on) {
+  state.mosaic = on;
+  $('#mosaic').classList.toggle('hidden', !on);
+  $('#terminals').classList.toggle('show-mosaic', on);
+  $('#toggle-mosaic').setAttribute('aria-pressed', String(on));
+  $('#toggle-mosaic').setAttribute('aria-label', on ? 'Show terminal' : 'Show session mosaic');
+  if (on) {
+    renderMosaic();
+    dictation.cancel();
+  } else safeFit(state.tabs.get(state.activeTab));
+  updateDictationAvailability();
+}
+$('#toggle-mosaic').addEventListener('click', () => setMosaic(!state.mosaic));
+$('#mosaic').addEventListener('click', (e) => {
+  const id = e.target.closest('[data-add], [data-remove], [data-expand]')?.dataset;
+  if (!id) return;
+  if (id.add && state.mosaicIds.length < 4 && !state.mosaicIds.includes(id.add)) state.mosaicIds.push(id.add);
+  if (id.remove) state.mosaicIds = state.mosaicIds.filter((s) => s !== id.remove);
+  if (id.expand) { setMosaic(false); openSession(id.expand); return; }
+  renderMosaic();
+});
+
 function renderTabs() {
   const root = $('#tabs');
   root.innerHTML = '';
@@ -918,6 +966,7 @@ async function applyUrl() {
 }
 window.addEventListener('popstate', applyUrl);
 function activateTab(name) {
+  if (state.mosaic) setMosaic(false);
   if (state.activeTab !== name) dictation.cancel();
   if (state.waking && state.terminals.find((x) => x.name === name)?.resume !== state.waking.id) state.waking = null;
   state.activeTab = name;
@@ -1879,8 +1928,8 @@ function setFontSize(px) {
 
 // ---------- new session sheet (folder + optional model) ----------
 let modelsCatalog = null;
+// Asked each time a sheet opens: the server answers from its cache and only lists again after an fx login.
 async function loadModels(force = false) {
-  if (modelsCatalog && !force) return modelsCatalog;
   modelsCatalog = await (await fetch(force ? '/api/models/refresh' : '/api/models', { method: force ? 'POST' : 'GET' })).json();
   const sel = $('#ns-model');
   sel.innerHTML = `<option value="">fx default${modelsCatalog.default?.model ? ` (${esc(modelsCatalog.default.model)})` : ''}</option>`;
@@ -1900,6 +1949,7 @@ async function loadModels(force = false) {
       sel.appendChild(g);
     }
   }
+  $('#ns-auth').classList.toggle('hidden', (modelsCatalog.providers ?? []).length > 0);
   try { const last = localStorage.getItem('fox.lastModel'); if (last && [...sel.options].some((o) => o.value === last)) sel.value = last; } catch {}
   updateNsBadge();
   return modelsCatalog;
@@ -2172,15 +2222,16 @@ function renderJobsEntry() {
 }
 function renderJobList() {
   const box = $('#job-list');
-  if (!state.jobs.length) { box.innerHTML = '<div class="jobs-none">No jobs yet. A job is a script on a schedule: New job to make one, or ask fx.</div>'; return; }
-  box.innerHTML = state.jobs.map((j) => {
+  const html = !state.jobs.length ? '<div class="jobs-none">No jobs yet. A job is a script on a schedule: New job to make one, or ask fx.</div>' : state.jobs.map((j) => {
     const st = jobState(j), r = j.lastRun;
     const right = st === 'running' ? `<span class="jnext running">running ${runDur(r)}</span>` : !j.enabled ? `<span class="jnext${j.pendingApproval ? ' approve' : ''}">${pausedText(j)}</span>` : `<span class="jnext">${esc(whenText(j.nextRun))}</span>`;
     // Last run: when, and whether it went well. The summary and its links live in the job's page.
     const last = r ? `<div class="jlast" title="${esc(r.summary ?? '')}"><span>last ${esc(whenText(r.startedAt))} · <b class="${r.status === 'running' ? '' : BAD.includes(r.status) ? 'bad' : 'ok'}">${r.status === 'running' ? 'running' : BAD.includes(r.status) ? 'failed' : 'ok'}</b></span></div>` : '<div class="jlast"><span>never ran</span></div>';
     return `<div class="jl-row" data-job="${j.id}" role="listitem"><span class="jdot ${st}"></span><span class="jname">${esc(j.name)}</span><span class="jwhen">${esc(j.scheduleText)}</span>${right}${last}</div>`;
   }).join('');
+  if (html !== jobListHtml) { box.innerHTML = html; jobListHtml = html; } // polled: only when something changed
 }
+let jobListHtml = '';
 $('#jobs-entry').addEventListener('click', () => (state.jobView ? closeJob() : openJobs()));
 $('#job-list').addEventListener('click', (e) => { if (e.target.closest('[data-link]')) return; const row = e.target.closest('[data-job]'); if (row) openJob(row.dataset.job); });
 function showJobView(mode) {
@@ -2216,17 +2267,30 @@ async function renderJobView() {
   const runs = await (await fetch(`/api/jobs/${j.id}/runs`)).json().catch(() => []);
   if (state.jobView !== j.id) return;
   const box = $('#job-runs');
-  if (!runs.length) { box.innerHTML = '<div class="jobs-none">No runs yet. Run now to try it.</div>'; return; }
-  box.innerHTML = runs.map((r) => `<div class="run-row" data-run="${r.id}" role="listitem"><span class="jdot ${r.status}" title="${esc(r.status)}"></span><span class="rwhen">${esc(whenText(r.startedAt))}${r.reason === 'manual' ? ' · now' : ''}</span><span class="rsum ${BAD.includes(r.status) ? 'bad' : r.summary ? '' : 'quiet'}">${esc(r.summary ?? (r.status === 'running' ? 'running…' : r.status))}</span><span class="rlinks">${linkChips(r.links)}</span><span class="rdur">${runDur(r)}</span></div>${state.openRun === r.id ? '<div class="run-detail" id="run-detail"></div>' : ''}`).join('');
+  const html = !runs.length ? '<div class="jobs-none">No runs yet. Run now to try it.</div>' : runs.map((r) => `<div class="run-row" data-run="${r.id}" role="listitem"><span class="jdot ${r.status}" title="${esc(r.status)}"></span><span class="rwhen">${esc(whenText(r.startedAt))}${r.reason === 'manual' ? ' · now' : ''}</span><span class="rsum ${BAD.includes(r.status) ? 'bad' : r.summary ? '' : 'quiet'}">${esc(r.summary ?? (r.status === 'running' ? 'running…' : r.status))}</span><span class="rlinks">${linkChips(r.links)}</span><span class="rdur">${runDur(r)}</span></div>${state.openRun === r.id ? '<div class="run-detail" id="run-detail"></div>' : ''}`).join('');
+  // The page polls every few seconds: rebuild only when something changed, so an open log never blinks or jumps.
+  if (html !== jobRunsHtml) { box.innerHTML = html; jobRunsHtml = html; }
   if (state.openRun) showRunDetail(j.id, runs.find((r) => r.id === state.openRun));
 }
+let jobRunsHtml = '';
+const runDetails = new Map(); // run id -> { html, final }: a finished run's log is fetched once
 // Logs are plain text; web addresses in them become links (escaped first, so nothing else turns into HTML).
 const linkify = (text) => esc(text).replace(/https?:\/\/[^\s<>"'`)]+/g, (u) => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
 async function showRunDetail(jobId, run) {
   const box = $('#run-detail'); if (!box || !run) return;
+  const cached = runDetails.get(run.id);
+  if (cached && box.innerHTML !== cached.html) box.innerHTML = cached.html; // at once, also right after a rebuild
+  if (cached?.final) return;
   const files = (run.outputs ?? []).map((o) => `<a href="/api/jobs/${jobId}/runs/${run.id}/files/${encodeURIComponent(o.name)}" target="_blank" rel="noopener">${esc(o.name)}</a>`).join('');
-  const log = await (await fetch(`/api/jobs/${jobId}/runs/${run.id}/log`)).text().catch(() => '');
-  box.innerHTML = `${files ? `<div class="run-files">${files}</div>` : ''}<pre>${log ? linkify(log) : '(no output)'}</pre>`;
+  const log = await (await fetch(`/api/jobs/${jobId}/runs/${run.id}/log`)).text().catch(() => null);
+  if (log === null) return;
+  const html = `${files ? `<div class="run-files">${files}</div>` : ''}<pre>${log ? linkify(log) : '(no output)'}</pre>`;
+  runDetails.set(run.id, { html, final: run.status !== 'running' });
+  const now = $('#run-detail'); if (!now || now.innerHTML === html) return;
+  // A running log grows: keep the reader where they were, or at the bottom if they were following it.
+  const pre = now.querySelector('pre'), atEnd = pre && pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4, top = pre?.scrollTop ?? 0;
+  now.innerHTML = html;
+  const next = now.querySelector('pre'); if (next) next.scrollTop = atEnd ? next.scrollHeight : top;
 }
 $('#job-runs').addEventListener('click', (e) => {
   if (e.target.closest('[data-link]') || e.target.closest('.run-detail')) return;
@@ -2249,7 +2313,7 @@ setInterval(loadJobs, 5000);
 // first arms the button for a few seconds, so nothing that deploys or throws work away happens on a stray click.
 const prKey = (p) => `${p.repo}#${p.number}`;
 const prFiles = new Map();
-let prFilter = 'open', mergedLimit = 50;
+let prFilter = 'open', mergedLimit = 50, prListHtml = '';
 async function loadPrs(force = false, filter = 'open') {
   const query = new URLSearchParams({ state: filter, ...(filter === 'merged' ? { limit: mergedLimit } : {}), ...(force ? { fresh: '' } : {}) });
   try {
@@ -2277,8 +2341,10 @@ function prChip(p) {
   const [text, cls] = p.review ? PR_REVIEW[p.review.verdict] ?? PR_REVIEW.reviewed : ['not reviewed yet', 'wait'];
   return `<span class="pr-chip ${cls}">${text}</span>`;
 }
-// The PR's own text without the job's footer lines (verified, change size, made by): the summary is what reads.
-const prText = (body) => esc(String(body ?? '').split(/\n\s*\n/).filter((para) => !/^(\*\*Verified|\*\*Change|Made by a fox job|Linear: |Merging publishes)/.test(para.trim())).join('\n\n').trim());
+// The PR's own text, formatted like fx's answers, without the job's footer lines (change size, made by…) and without
+// terminal colour codes an agent pasted from its output (real ESC sequences, or written out as ^[[32m).
+const ANSI = /(?:\x1b|\^\[)\[[0-9;]*m/g;
+const prText = (body) => String(body ?? '').replace(ANSI, '').split(/\n\s*\n/).filter((para) => !/^(\*\*Change|Made by a fox job|Linear: |Merging publishes)/.test(para.trim())).join('\n\n').trim();
 function renderPrList() {
   const data = (prFilter === 'merged' ? state.mergedPrs : state.prs) ?? { prs: [], errors: [] }, box = $('#pr-list');
   for (const btn of $('#pr-filters').children) btn.classList.toggle('on', btn.dataset.prFilter === prFilter);
@@ -2297,14 +2363,20 @@ function renderPrList() {
     if (!open) return row;
     const files = prFiles.get(key);
     const filesHtml = files ? `<div class="pr-files">${files.map((x) => `<span class="pf" title="${esc(x.path)}">${esc(x.path)}</span><span class="pr-add">+${x.additions}</span><span class="pr-del">−${x.deletions}</span>`).join('')}</div>` : '<div class="muted">Loading files…</div>';
-    const review = p.review ? `<div class="pr-review ${esc(p.review.verdict)}"><b>fox review</b> ${esc(p.review.text)}</div>` : '';
+    const review = p.review ? `<div class="pr-review md ${esc(p.review.verdict)}"><b>fox review</b> ${renderMarkdown(p.review.text.replace(ANSI, ''))}</div>` : '';
     const text = prText(p.body);
-    return row + `<div class="pr-open">${text ? `<div class="pbody">${text}</div>` : ''}${filesHtml}${review}`
-      + `<div class="pr-links">${p.linear ? `<a class="pr-chip" href="${esc(p.linear)}" target="_blank" rel="noopener">${esc(p.issue ?? 'Linear')} ↗</a>` : ''}<a class="pr-chip" href="${esc(p.url)}" target="_blank" rel="noopener">GitHub ↗</a><a class="pr-chip" href="${esc(p.url)}/files" target="_blank" rel="noopener">diff ↗</a>`
+    // What the job's run kept: the screenshots fx took of the change, and the run itself (log, files).
+    const runUrl = p.run ? `/api/jobs/${encodeURIComponent(p.run.job)}/runs/${encodeURIComponent(p.run.run)}/files/` : '';
+    const shots = p.run?.shots?.length ? `<div class="pr-shots">${p.run.shots.map((n) => `<a href="${runUrl}${encodeURIComponent(n)}" target="_blank" rel="noopener"><img src="${runUrl}${encodeURIComponent(n)}" alt="${esc(n)}" loading="lazy" /></a>`).join('')}</div>` : '';
+    return row + `<div class="pr-open">${text ? `<div class="pbody md">${renderMarkdown(text)}</div>` : ''}${shots}${filesHtml}${review}`
+      + `<div class="pr-links">${p.linear ? `<a class="pr-chip" href="${esc(p.linear)}" target="_blank" rel="noopener">${esc(p.issue ?? 'Linear')} ↗</a>` : ''}<a class="pr-chip" href="${esc(p.url)}" target="_blank" rel="noopener">GitHub ↗</a><a class="pr-chip" href="${esc(p.url)}/files" target="_blank" rel="noopener">diff ↗</a>${p.run ? `<a class="pr-chip" href="/?job=${encodeURIComponent(p.run.job)}&run=${encodeURIComponent(p.run.run)}">job run</a>` : ''}`
       + `${merged ? '' : '<input class="pr-reason" placeholder="Why close it? Optional, it goes on the PR" maxlength="1000" />'}</div></div>`;
   });
   const errors = (data.errors ?? []).map((e) => `<div>${esc(e.repo)}: ${esc(e.error)}</div>`).join('');
-  box.innerHTML = (rows.join('') || `<div class="jobs-none">No ${prFilter} pull requests in your workspaces' repos.</div>`) + (errors ? `<div class="pr-errors">${errors}</div>` : '');
+  const html = (rows.join('') || `<div class="jobs-none">No ${prFilter} pull requests in your workspaces' repos.</div>`) + (errors ? `<div class="pr-errors">${errors}</div>` : '');
+  // Polled: rebuild only when something changed, and never under someone typing why they close a PR.
+  const typing = document.activeElement?.classList.contains('pr-reason') && box.contains(document.activeElement);
+  if (html !== prListHtml && !typing) { box.innerHTML = html; prListHtml = html; }
   if (state.prOpen && !prFiles.has(state.prOpen)) loadPrFiles(state.prOpen);
 }
 async function loadPrFiles(key) {
