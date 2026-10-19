@@ -585,10 +585,13 @@ html, body { overscroll-behavior-y: none; }
 .pr-chip.bad { color: var(--err); border-color: color-mix(in srgb, var(--err) 40%, var(--border)); }
 a.pr-chip { color: var(--accent); } a.pr-chip:hover { border-color: var(--accent); }
 .pr-open { padding: 12px 16px 14px 38px; border-bottom: 1px solid var(--border); background: var(--panel); display: grid; gap: 10px; }
-.pr-open .pbody { white-space: pre-line; color: var(--text); max-height: 12em; overflow: auto; }
+.pr-open .pbody { color: var(--text); max-height: 16em; overflow: auto; }
+.pr-open .md > :first-child { margin-top: 0; } .pr-open .md > :last-child { margin-bottom: 0; }
+.pr-open .md h1, .pr-open .md h2, .pr-open .md h3 { font-size: 13px; margin: 10px 0 4px; }
 .pr-files { font-family: var(--mono); font-size: 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 2px 14px; }
 .pr-files span:first-child, .pr-files .pf { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pr-review { border-left: 2px solid var(--ok); padding: 2px 10px; white-space: pre-line; }
+.pr-review { border-left: 2px solid var(--ok); padding: 2px 10px; }
+.pr-review > b { display: block; margin-bottom: 2px; }
 .pr-review.needs-you { border-left-color: var(--warn); }
 .pr-review b { font-weight: 600; }
 .pr-links { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

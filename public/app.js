@@ -2268,8 +2268,10 @@ function prChip(p) {
   const [text, cls] = p.review ? PR_REVIEW[p.review.verdict] ?? PR_REVIEW.reviewed : ['not reviewed yet', 'wait'];
   return `<span class="pr-chip ${cls}">${text}</span>`;
 }
-// The PR's own text without the job's footer lines (verified, change size, made by): the summary is what reads.
-const prText = (body) => esc(String(body ?? '').split(/\n\s*\n/).filter((para) => !/^(\*\*Verified|\*\*Change|Made by a fox job|Linear: |Merging publishes)/.test(para.trim())).join('\n\n').trim());
+// The PR's own text, formatted like fx's answers, without the job's footer lines (change size, made by…) and without
+// terminal colour codes an agent pasted from its output (real ESC sequences, or written out as ^[[32m).
+const ANSI = /(?:\x1b|\^\[)\[[0-9;]*m/g;
+const prText = (body) => String(body ?? '').replace(ANSI, '').split(/\n\s*\n/).filter((para) => !/^(\*\*Change|Made by a fox job|Linear: |Merging publishes)/.test(para.trim())).join('\n\n').trim();
 function renderPrList() {
   const data = state.prs ?? { prs: [], errors: [] }, box = $('#pr-list');
   const repos = [...new Set(data.prs.map((p) => p.repo))];
@@ -2285,9 +2287,9 @@ function renderPrList() {
     if (!open) return row;
     const files = prFiles.get(key);
     const filesHtml = files ? `<div class="pr-files">${files.map((x) => `<span class="pf" title="${esc(x.path)}">${esc(x.path)}</span><span class="pr-add">+${x.additions}</span><span class="pr-del">−${x.deletions}</span>`).join('')}</div>` : '<div class="muted">Loading files…</div>';
-    const review = p.review ? `<div class="pr-review ${esc(p.review.verdict)}"><b>fox review</b> ${esc(p.review.text)}</div>` : '';
+    const review = p.review ? `<div class="pr-review md ${esc(p.review.verdict)}"><b>fox review</b> ${renderMarkdown(p.review.text.replace(ANSI, ''))}</div>` : '';
     const text = prText(p.body);
-    return row + `<div class="pr-open">${text ? `<div class="pbody">${text}</div>` : ''}${filesHtml}${review}`
+    return row + `<div class="pr-open">${text ? `<div class="pbody md">${renderMarkdown(text)}</div>` : ''}${filesHtml}${review}`
       + `<div class="pr-links">${p.linear ? `<a class="pr-chip" href="${esc(p.linear)}" target="_blank" rel="noopener">${esc(p.issue ?? 'Linear')} ↗</a>` : ''}<a class="pr-chip" href="${esc(p.url)}" target="_blank" rel="noopener">GitHub ↗</a><a class="pr-chip" href="${esc(p.url)}/files" target="_blank" rel="noopener">diff ↗</a>`
       + `<input class="pr-reason" placeholder="Why close it? Optional, it goes on the PR" maxlength="1000" /></div></div>`;
   });
