@@ -81,8 +81,9 @@ const STATE_ORDER = { needs_input: 0, working: 1, ready: 2, external: 3, done: 4
 
 // ---------- data ----------
 async function refresh() {
-  const { sessions, terminals, repos, workspaces } = await (await fetch('/api/overview')).json();
+  const { sessions, terminals, repos, workspaces, missions } = await (await fetch('/api/overview')).json();
   state.sessions = sessions;
+  state.missions = missions ?? [];
   state.workspaces = workspaces ?? [];
   state.terminals = terminals;
   state.repos = repos ?? {};
@@ -191,13 +192,46 @@ function wsRepoSummary(wsp) {
   return `<div class="ws-repos-line">${attention.map(wsRepoLine).join('')}${clean ? `<div class="ws-line" title="${esc(wsp.repos.filter((r) => !attention.includes(r)).map((r) => r.dir).join(', '))}"><span>${attention.length ? `${clean} more` : `${GITHUB_MARK}${n}`}</span></div>` : ''}</div>`;
 }
 
+// One mission per member; links remain visible even after the source disappears.
+state.missionFilter = null;
+const missionName = (id) => state.missions?.find((m) => m.id === id)?.name;
+function renderMissions(root) {
+  const heading = document.createElement('div');
+  heading.className = 'mission-heading';
+  heading.innerHTML = `<span>Missions${state.missionFilter ? ` · ${esc(missionName(state.missionFilter) ?? '')}` : ''}</span><button type="button" data-new-mission title="New mission" aria-label="New mission">+</button>`;
+  root.appendChild(heading);
+  for (const m of state.missions ?? []) {
+    const members = m.members.map((x) => {
+      const item = x.type === 'session' ? sessionById(x.id) : x.type === 'job' ? state.jobs?.find((j) => j.id === x.id) : state.prs?.prs?.find((p) => p.url === x.id);
+      const title = item ? x.type === 'session' ? displayTitle(item) : item.name ?? item.title : x.type === 'pr' ? x.id.split('/').slice(-3).join('/') : x.id.slice(0, 8);
+      const href = x.type === 'session' ? `?session=${encodeURIComponent(x.id)}` : x.type === 'job' ? `?job=${encodeURIComponent(x.id)}` : item ? `?view=prs&pr=${encodeURIComponent(item.repo + '#' + item.number)}` : x.id;
+      const status = item ? x.type === 'session' ? item.state : x.type === 'job' ? jobState(item) : 'open' : 'missing';
+      return `<a href="${esc(href)}" title="${esc(x.type)} · ${esc(status)}" class="mission-member"><span>${esc(title)}</span><small>${esc(x.type)} · ${esc(status)}</small></a>`;
+    });
+    const live = m.members.filter((x) => x.type === 'session' && ['working', 'needs_input'].includes(sessionById(x.id)?.state)).length + m.members.filter((x) => x.type === 'job' && state.jobs?.find((j) => j.id === x.id)?.lastRun?.status === 'running').length;
+    const completed = Math.max(0, ...m.members.map((x) => {
+      if (x.type === 'session') return sessionById(x.id)?.latestReply?.at ?? 0;
+      if (x.type === 'job') { const r = state.jobs?.find((j) => j.id === x.id)?.lastRun; return r?.status !== 'running' ? r?.endedAt ?? 0 : 0; }
+      return 0;
+    }));
+    const expanded = !collapsed.has('mission:' + m.id);
+    const row = document.createElement('div'); row.className = 'mission' + (state.missionFilter === m.id ? ' selected' : '');
+    row.innerHTML = `<div class="mission-row"><button type="button" data-toggle-mission="${esc(m.id)}" aria-expanded="${expanded}">${expanded ? '▾' : '▸'}</button><button type="button" class="mission-label" data-filter-mission="${esc(m.id)}">${esc(m.name)}</button><span class="mission-count">${m.members.length}</span><button type="button" data-delete-mission="${esc(m.id)}" title="Delete mission" aria-label="Delete ${esc(m.name)}">×</button></div><div class="mission-meta">${live ? `${live} active · ` : ''}${completed ? `last completed ${esc(fmtTime(completed))}` : m.members.length ? 'No completed runs' : 'No members yet'}</div>${expanded ? `<div class="mission-members">${members.join('')}</div>` : ''}`;
+    root.appendChild(row);
+  }
+  if (state.missionFilter) {
+    const all = document.createElement('button'); all.className = 'mission-all'; all.textContent = 'Show all'; all.dataset.filterMission = '';
+    root.appendChild(all);
+  }
+}
 function renderSessions() {
   if (state.renaming) return; // replacing the sidebar would blur the input and save prematurely
-  const active = state.sessions.filter((s) => !s.archived && !s.parentId);
-  const archived = state.sessions.filter((s) => s.archived && !s.parentId);
+  const visible = (s) => !state.missionFilter || s.missionId === state.missionFilter;
+  const active = state.sessions.filter((s) => !s.archived && !s.parentId && visible(s));
+  const archived = state.sessions.filter((s) => s.archived && !s.parentId && visible(s));
   const groups = new Map();
   // Sessions inside a workspace folder group under the workspace; workspaces show even before their first session.
-  for (const w of state.workspaces ?? []) groups.set(w.dir, []);
+  if (!state.missionFilter) for (const w of state.workspaces ?? []) groups.set(w.dir, []);
   for (const s of active) {
     const key = workspaceFor(s.workspace)?.dir ?? s.workspace;
     if (!groups.has(key)) groups.set(key, []);
@@ -205,6 +239,7 @@ function renderSessions() {
   }
   const root = $('#session-groups');
   root.innerHTML = '';
+  renderMissions(root);
   // Stable order: manual order (drag the project header) first, then alphabetical. Never by activity,
   // so nothing jumps around when you pick a session; the state dots say what is busy.
   const rank = (ws) => { const i = groupOrder.indexOf(ws); return i < 0 ? Infinity : i; };
@@ -260,6 +295,7 @@ function sessionCard(s, index = null) {
       <div class="title" title="${esc(s.title)}${s.firstPrompt ? '\n' + esc(s.firstPrompt) : ''}">${esc(displayTitle(s))}</div>
       <div class="actions">
         ${s.terminal ? `<button class="icon ${state.pinned.has(s.terminal) ? 'on' : ''}" data-pin="${esc(s.terminal)}" title="${state.pinned.has(s.terminal) ? 'Unpin tab' : 'Pin as tab'}">${ICON.pin}</button>` : ''}
+        <button class="icon" data-mission-session="${esc(s.id)}" title="${s.missionId ? 'Change mission' : 'Add to mission'}" aria-label="Mission">◇</button>
         <button class="icon" data-rename="${esc(s.id)}" title="Rename">${ICON.rename}</button>
         <button class="icon" data-${s.archived ? 'unarchive' : 'archive'}="${esc(s.id)}" title="${s.archived ? 'Restore' : (s.terminal ? 'Archive (stops the fx process)' : 'Archive')}">${s.archived ? ICON.restore : ICON.archive}</button>
       </div>
@@ -268,6 +304,7 @@ function sessionCard(s, index = null) {
       ${stateHtml}
       <span class="model mono" title="${esc(s.model ?? '')} via ${esc(providerLabel(s.provider))}">${esc(modelShort(s.model))}${providerTag(s.provider)}</span>
       <span>${fmtTime(s.updatedAt)}</span>
+      ${s.missionId ? `<span class="mission-tag" title="Mission">◇ ${esc(missionName(s.missionId) ?? '')}</span>` : ''}
     </div>
     ${childrenHtml(s)}`;
   return el;
@@ -312,9 +349,63 @@ $('#session-groups').addEventListener('drop', (e) => {
 });
 $('#session-groups').addEventListener('dragend', () => { dragWs = null; document.querySelectorAll('.group').forEach((x) => x.classList.remove('dragging', 'drop-before', 'drop-after')); });
 
+let missionTarget = null;
+function missionSheet(type = null, id = null) {
+  missionTarget = type ? { type, id } : null;
+  const current = type === 'session' ? sessionById(id)?.missionId : type === 'job' ? state.jobs?.find((j) => j.id === id)?.missionId : state.prs?.prs?.find((p) => p.url === id)?.missionId;
+  $('#mission-title').textContent = type ? 'Assign to mission' : 'New mission';
+  $('#mission-choice').innerHTML = `<option value="">${type ? 'No mission' : 'Create new'}</option>${(state.missions ?? []).map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('')}`;
+  $('#mission-choice').value = current ?? '';
+  $('#mission-choice').classList.toggle('hidden', !type);
+  $('#mission-name').value = '';
+  $('#mission-error').textContent = '';
+  $('#missiondialog').classList.remove('hidden');
+  (type ? $('#mission-choice') : $('#mission-name')).focus();
+}
+function closeMissionSheet() { $('#missiondialog').classList.add('hidden'); missionTarget = null; }
+$('#mission-cancel').addEventListener('click', closeMissionSheet);
+$('#missionform').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('#mission-name').value.trim();
+  let id = $('#mission-choice').value || null;
+  try {
+    if (name) {
+      const r = await post('/api/missions', { name }); const m = r;
+      if (m.error) throw new Error(m.error);
+      id = m.id;
+    } else if (!missionTarget) throw new Error('Enter a mission name');
+    if (missionTarget) {
+      const result = await post('/api/missions/member', { ...missionTarget, missionId: id });
+      if (result.error) throw new Error(result.error);
+    }
+    closeMissionSheet(); await refresh(); await loadJobs(); await loadPrs();
+  } catch (err) { $('#mission-error').textContent = err.message; }
+});
 $('#session-groups').addEventListener('click', async (e) => {
+  const member = e.target.closest('.mission-member');
+  if (member && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+    const q = new URL(member.href).searchParams;
+    if (q.has('session')) { e.preventDefault(); setTranscript(true); return selectSession(q.get('session')); }
+    if (q.has('job')) { e.preventDefault(); return openJob(q.get('job')); }
+    if (q.get('view') === 'prs') { e.preventDefault(); state.prOpen = q.get('pr'); return openPrs(); }
+  }
   const btn = e.target.closest('button');
   const d = btn?.dataset ?? {};
+  if (d.newMission !== undefined) return missionSheet();
+  if (d.missionSession) return missionSheet('session', d.missionSession);
+  if (d.toggleMission) { const key = 'mission:' + d.toggleMission; collapsed.has(key) ? collapsed.delete(key) : collapsed.add(key); saveCollapsed(); return renderSessions(); }
+  if (d.filterMission !== undefined) {
+    state.missionFilter = d.filterMission || null; renderSessions();
+    if (state.jobView === 'list') renderJobList(); if (state.prView) renderPrList();
+    return;
+  }
+  if (d.deleteMission) {
+    if (!confirm('Delete this mission? Its members remain unchanged.')) return;
+    const result = await post(`/api/missions/${d.deleteMission}`, null, 'DELETE');
+    if (result.error) return alert(result.error);
+    if (state.missionFilter === d.deleteMission) state.missionFilter = null;
+    return refresh();
+  }
   if (d.new) return newSessionSheet(d.new);
   if (d.editWs) return openWorkspaceDialog(d.editWs);
   if (d.pin) return setPinned(d.pin, !state.pinned.has(d.pin));
@@ -2157,7 +2248,7 @@ const PR_TITLE = { open: 'Open: waiting for a merge', merged: 'Merged', closed: 
 const linkChips = (links = []) => links.filter((l) => /^https?:\/\//.test(l.url)).map((l) => `<a class="run-link${l.pr ? ' ' + l.pr : ''}" href="${esc(l.url)}" target="_blank" rel="noopener" data-link title="${esc(PR_TITLE[l.pr] ?? '')}">${esc(l.label)}</a>`).join('');
 async function loadJobs() {
   try { state.jobs = await (await fetch('/api/jobs')).json(); } catch { return; }
-  renderJobsEntry();
+  renderJobsEntry(); renderSessions();
   if (state.jobView === 'list') renderJobList();
   else if (state.jobView) renderJobView();
 }
@@ -2173,18 +2264,19 @@ function renderJobsEntry() {
 }
 function renderJobList() {
   const box = $('#job-list');
-  const html = !state.jobs.length ? '<div class="jobs-none">No jobs yet. A job is a script on a schedule: New job to make one, or ask fx.</div>' : state.jobs.map((j) => {
+  const jobs = state.jobs.filter((j) => !state.missionFilter || j.missionId === state.missionFilter);
+  const html = !jobs.length ? '<div class="jobs-none">No jobs in this view.</div>' : jobs.map((j) => {
     const st = jobState(j), r = j.lastRun;
     const right = st === 'running' ? `<span class="jnext running">running ${runDur(r)}</span>` : !j.enabled ? `<span class="jnext${j.pendingApproval ? ' approve' : ''}">${pausedText(j)}</span>` : `<span class="jnext">${esc(whenText(j.nextRun))}</span>`;
     // Last run: when, and whether it went well. The summary and its links live in the job's page.
     const last = r ? `<div class="jlast" title="${esc(r.summary ?? '')}"><span>last ${esc(whenText(r.startedAt))} · <b class="${r.status === 'running' ? '' : BAD.includes(r.status) ? 'bad' : 'ok'}">${r.status === 'running' ? 'running' : BAD.includes(r.status) ? 'failed' : 'ok'}</b></span></div>` : '<div class="jlast"><span>never ran</span></div>';
-    return `<div class="jl-row" data-job="${j.id}" role="listitem"><span class="jdot ${st}"></span><span class="jname">${esc(j.name)}</span><span class="jwhen">${esc(j.scheduleText)}</span>${right}${last}</div>`;
+    return `<div class="jl-row" data-job="${j.id}" role="listitem"><span class="jdot ${st}"></span><span class="jname">${esc(j.name)}</span><button type="button" class="mission-action" data-mission-job="${esc(j.id)}" title="${j.missionId ? 'Change mission' : 'Add to mission'}">◇ ${esc(missionName(j.missionId) ?? 'Mission')}</button><span class="jwhen">${esc(j.scheduleText)}</span>${right}${last}</div>`;
   }).join('');
   if (html !== jobListHtml) { box.innerHTML = html; jobListHtml = html; } // polled: only when something changed
 }
 let jobListHtml = '';
 $('#jobs-entry').addEventListener('click', () => (state.jobView ? closeJob() : openJobs()));
-$('#job-list').addEventListener('click', (e) => { if (e.target.closest('[data-link]')) return; const row = e.target.closest('[data-job]'); if (row) openJob(row.dataset.job); });
+$('#job-list').addEventListener('click', (e) => { const action = e.target.closest('[data-mission-job]'); if (action) return missionSheet('job', action.dataset.missionJob); if (e.target.closest('[data-link]')) return; const row = e.target.closest('[data-job]'); if (row) openJob(row.dataset.job); });
 function showJobView(mode) {
   closeSettings({ sync: false });
   if (state.prView) closePrs({ sync: false });
@@ -2267,7 +2359,7 @@ const prFiles = new Map();
 let prListHtml = '';
 async function loadPrs(force = false) {
   try { state.prs = await (await fetch('/api/prs' + (force ? '?fresh' : ''))).json(); } catch { return; }
-  renderPrsEntry();
+  renderPrsEntry(); renderSessions();
   if (state.prView) renderPrList();
 }
 function renderPrsEntry() {
@@ -2293,11 +2385,11 @@ function renderPrList() {
   const repos = [...new Set(data.prs.map((p) => p.repo))];
   $('#pr-repos').textContent = repos.length ? repos.join(' · ') : '';
   $('#pr-repos').classList.toggle('hidden', !repos.length);
-  const rows = data.prs.map((p) => {
+  const rows = data.prs.filter((p) => !state.missionFilter || p.missionId === state.missionFilter).map((p) => {
     const key = prKey(p), open = state.prOpen === key;
     const meta = [p.issue, p.repo.split('/')[1]].filter(Boolean).map(esc).join(' · ');
     const row = `<div class="pr-row${open ? ' open' : ''}" data-pr="${esc(key)}" role="listitem"><span class="jdot ${p.ready ? 'ok' : p.checks === 'failing' ? 'failed' : 'paused'}"></span>`
-      + `<span class="pt"><b>#${p.number}</b> ${esc(p.title.replace(/^[A-Z]+-\d+:\s*/, ''))} <span class="pm">· ${meta}</span></span>${prChip(p)}`
+      + `<span class="pt"><b>#${p.number}</b> ${esc(p.title.replace(/^[A-Z]+-\d+:\s*/, ''))} <span class="pm">· ${meta}</span></span>${prChip(p)}<button type="button" class="mission-action" data-mission-pr="${esc(p.url)}" title="${p.missionId ? 'Change mission' : 'Add to mission'}">◇ ${esc(missionName(p.missionId) ?? 'Mission')}</button>`
       + `<span class="plines"><span class="pr-add">+${p.additions}</span> <span class="pr-del">−${p.deletions}</span></span>`
       + `<span class="pr-acts"><button type="button" class="merge" data-act="merge">Merge</button><button type="button" class="shut" data-act="close">Close</button></span></div>`;
     if (!open) return row;
@@ -2348,6 +2440,8 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.prVi
 $('#pr-list').addEventListener('click', async (e) => {
   if (e.target.closest('a, input')) return;
   const rowEl = e.target.closest('[data-pr]'); if (!rowEl) return;
+  const missionAction = e.target.closest('[data-mission-pr]');
+  if (missionAction) return missionSheet('pr', missionAction.dataset.missionPr);
   const key = rowEl.dataset.pr, btn = e.target.closest('[data-act]');
   if (!btn) { state.prOpen = state.prOpen === key ? null : key; renderPrList(); syncUrl(true); return; }
   const p = (state.prs?.prs ?? []).find((x) => prKey(x) === key); if (!p) return;

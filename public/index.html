@@ -36,6 +36,17 @@
       <div id="reply-inbox-list" class="hidden"></div>
     </div>
     <div id="session-groups"></div>
+    <div id="missiondialog" class="hidden" role="dialog" aria-modal="true" aria-label="Mission">
+      <form class="sheet" id="missionform">
+        <div class="ns-head" id="mission-title">Mission</div>
+        <label class="ns-label" for="mission-choice">Assign to</label>
+        <select id="mission-choice"></select>
+        <label class="ns-label" for="mission-name">Or create a mission</label>
+        <input id="mission-name" maxlength="60" placeholder="Short name" />
+        <div id="mission-error" class="hint err" role="alert"></div>
+        <div class="row ns-actions"><button type="button" id="mission-cancel">Cancel</button><button type="submit" class="primary">Save</button></div>
+      </form>
+    </div>
     <button type="button" id="jobs-entry" title="Jobs: scripts on a schedule"></button>
     <button type="button" id="prs-entry" title="Open pull requests of your workspaces"></button>
     <footer class="sidebar-footer">
