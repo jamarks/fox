@@ -1409,7 +1409,7 @@ function fileRow(f) {
   const others = contentionView?.id === state.selected ? contentionView.paths[f.path] ?? [] : [];
   return `<div class="file ${f.exists ? '' : 'missing'}" ${target}>
     <div class="file-head"><span class="file-kind" aria-hidden="true">${kind}</span><span class="file-path" title="${esc(f.path)}"><span class="file-name">${esc(name)}</span>${dir ? `<span class="file-dir">${esc(dir.replace(/\/$/, ''))}</span>` : ''}</span>${subs ? `<span class="file-by" title="by subagent ${subs}">${kids[0]}${kids.length > 1 ? ' +' + (kids.length - 1) : ''}</span>` : ''}${['write', 'edit'].includes(f.action) ? `<button type="button" class="contention-check" data-check-contention="${esc(f.path)}" title="Check recorded overlap in this checkout">check</button>` : ''}${f.exists ? `<a href="#" class="file-open" data-open-file="${esc(f.path)}" title="Open with the default app">↗</a>` : '<span class="file-by">deleted</span>'}</div>
-    ${others.length ? `<div class="file-collision">also edited by ${others.map((o) => `<a href="#" data-collision-session="${esc(o.id)}" data-collision-index="${o.eventIndex}">${esc(o.id)}${o.actor !== o.id ? ' · subagent' : ''}</a>`).join(', ')}</div>` : ''}
+    ${others.length ? `<div class="file-collision">also edited by ${others.map((o) => `<a href="#" data-collision-session="${esc(o.id)}" data-collision-index="${o.eventIndex}">${esc(displayTitle(sessionById(o.id) ?? { title: o.id }))}${o.actor !== o.id ? ' · subagent' : ''}</a>`).join(', ')}</div>` : ''}
   </div>`;
 }
 // What the session made or changed, newest change first. Files it only read are left out.
@@ -1427,9 +1427,13 @@ $('#transcript').addEventListener('click', async (e) => {
   if (check) {
     e.preventDefault(); e.stopPropagation();
     const id = state.selected;
-    const response = await fetch(`/api/sessions/${encodeURIComponent(id)}/contention?path=${encodeURIComponent(check.dataset.checkContention)}`);
-    if (!response.ok) { toast('Could not check this checkout'); return; }
-    contentionView = { id, ...await response.json() };
+    let result;
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(id)}/contention?path=${encodeURIComponent(check.dataset.checkContention)}`);
+      if (!response.ok) throw new Error('contention check failed');
+      result = await response.json();
+    } catch { toast('Could not check this checkout'); return; }
+    contentionView = { id, ...result };
     if (state.selected === id) { lastTranscriptKey = ''; await loadTranscript(id); }
     return;
   }

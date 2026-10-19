@@ -10,6 +10,10 @@ test('only file-tool writes in unfinished or latest completed turn; never reads,
     call('edit_file', 'a', 5), { kind: 'turn_completed' }];
   assert.deepEqual(latestWrites(events, '/repo', canon), [{ path: '/repo/a', eventIndex: 6 }]);
   assert.deepEqual(latestWrites([...events, { kind: 'user' }, call('write_file', 'new', 6)], '/repo', canon), [{ path: '/repo/new', eventIndex: 9 }]);
+  // Long-lived sessions must not exhaust the argument stack when locating the last turn.
+  const long = Array.from({ length: 150_000 }, () => ({ kind: 'assistant' }));
+  long.push({ kind: 'turn_completed' }, call('write_file', 'recent', 7));
+  assert.deepEqual(latestWrites(long, '/repo', canon), [{ path: '/repo/recent', eventIndex: 150_001 }]);
 });
 test('same parent and child are one actor; distinct roots only overlap on exact paths', () => {
   const writes = (path) => [{ path, ts: 10 }];

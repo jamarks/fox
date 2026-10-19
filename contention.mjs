@@ -2,15 +2,16 @@
 // Each member's latest turn is independent; a child and its parent count as one actor.
 export function latestWrites(events, cwd, canonicalize) {
   const end = events.at(-1)?.kind === 'turn_completed' || events.at(-1)?.kind === 'interrupted' ? events.length - 1 : events.length;
-  const last = Math.max(-1, ...events.slice(0, end).flatMap((ev, i) => ev.kind === 'turn_completed' || ev.kind === 'interrupted' ? [i] : []));
-  const turn = events.slice(last + 1, end);
+  let last = -1;
+  for (let i = 0; i < end; i++) if (events[i].kind === 'turn_completed' || events[i].kind === 'interrupted') last = i;
   const writes = new Map();
-  for (const [offset, ev] of turn.entries()) {
+  for (let i = last + 1; i < end; i++) {
+    const ev = events[i];
     if (ev.kind !== 'tool_call' || !['write_file', 'edit_file'].includes(ev.name) ||
         !ev.args || typeof ev.args.path !== 'string' || !ev.args.path || ev.args.path.length > 400 ||
         /error|fail/i.test(ev.result?.status ?? '')) continue;
     const path = canonicalize(cwd, ev.args.path);
-    if (path) writes.set(path, { path, eventIndex: last + 1 + offset });
+    if (path) writes.set(path, { path, eventIndex: i });
   }
   return [...writes.values()];
 }
