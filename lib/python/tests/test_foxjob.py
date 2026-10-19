@@ -89,6 +89,9 @@ class FoxJobTest(unittest.TestCase):
         self.propose(why="People could not say hello.")
         prompt = json.loads(args.read_text())[-1]
         self.assertIn(f"screenshot-1.png, screenshot-2.png… in {self.fj.output_dir()}", prompt)
+        self.assertIn("screenshot-option-a.png", prompt, "a UI change shows its alternatives in the PR")
+        self.fj.ask_fx("look", cwd=self.tmp, images=["/x/a.png", "/x/b.png"])
+        self.assertEqual(json.loads(args.read_text())[4:8], ["--image", "/x/a.png", "--image", "/x/b.png"])
         body = json.loads(Path(os.environ["FAKE_GH_STATE"]).read_text())["open"][0]["body"]
         self.assertTrue(body.startswith("**Why:** People could not say hello.\n\nsaid hello\n\n**Try it:** open hello.txt\n\n**Verified:**"), body)
 

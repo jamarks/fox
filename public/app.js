@@ -2367,7 +2367,9 @@ function renderPrList() {
     const text = prText(p.body);
     // What the job's run kept: the screenshots fx took of the change, and the run itself (log, files).
     const runUrl = p.run ? `/api/jobs/${encodeURIComponent(p.run.job)}/runs/${encodeURIComponent(p.run.run)}/files/` : '';
-    const shots = p.run?.shots?.length ? `<div class="pr-shots">${p.run.shots.map((n) => `<a href="${runUrl}${encodeURIComponent(n)}" target="_blank" rel="noopener"><img src="${runUrl}${encodeURIComponent(n)}" alt="${esc(n)}" loading="lazy" /></a>`).join('')}</div>` : '';
+    // screenshot-option-a.png… are the alternatives fx mocked up; the others show what it built.
+    const shotLabel = (n) => { const o = n.match(/^screenshot-option-([a-z0-9]+)\./i); return o ? `Option ${o[1].toUpperCase()}` : 'Built'; };
+    const shots = p.run?.shots?.length ? `<div class="pr-shots">${p.run.shots.map((n) => `<figure><a href="${runUrl}${encodeURIComponent(n)}" target="_blank" rel="noopener"><img src="${runUrl}${encodeURIComponent(n)}" alt="${esc(n)}" loading="lazy" /></a><figcaption>${shotLabel(n)}</figcaption></figure>`).join('')}</div>` : '';
     return row + `<div class="pr-open">${text ? `<div class="pbody md">${renderMarkdown(text)}</div>` : ''}${shots}${filesHtml}${review}`
       + `<div class="pr-links">${p.linear ? `<a class="pr-chip" href="${esc(p.linear)}" target="_blank" rel="noopener">${esc(p.issue ?? 'Linear')} ↗</a>` : ''}<a class="pr-chip" href="${esc(p.url)}" target="_blank" rel="noopener">GitHub ↗</a><a class="pr-chip" href="${esc(p.url)}/files" target="_blank" rel="noopener">diff ↗</a>${p.run ? `<a class="pr-chip" href="/?job=${encodeURIComponent(p.run.job)}&run=${encodeURIComponent(p.run.run)}">job run</a>` : ''}`
       + `${merged ? '' : '<input class="pr-reason" placeholder="Why close it? Optional, it goes on the PR" maxlength="1000" />'}</div></div>`;
@@ -2425,7 +2427,8 @@ $('#pr-list').addEventListener('click', async (e) => {
   const p = (state.prs?.prs ?? []).find((x) => prKey(x) === key); if (!p) return;
   const act = btn.dataset.act;
   if (!btn.classList.contains('armed')) {
-    btn.classList.add('armed'); btn.textContent = act === 'merge' ? 'Merge?' : 'Close?';
+    const unreviewed = act === 'merge' && p.job && !p.review;
+    btn.classList.add('armed'); btn.textContent = act === 'merge' ? (unreviewed ? 'Not reviewed yet. Merge?' : 'Merge?') : 'Close?';
     btn.title = act === 'merge' ? `Click again to merge #${p.number} into its base. It deploys if that branch is deployed.` : `Click again to close #${p.number} without merging.`;
     setTimeout(() => { if (btn.isConnected) { btn.classList.remove('armed'); btn.textContent = act === 'merge' ? 'Merge' : 'Close'; } }, 4000);
     return;

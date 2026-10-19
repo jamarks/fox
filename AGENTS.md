@@ -31,6 +31,21 @@ Server: `setup-server.sh` sets a server up; `deploy/` has what it installs (syst
 
 Docs: `README.md` for users, short (detail in `docs/server.md`, `docs/install.md`, `docs/remote-access.md`, `docs/how-it-works.md`, `docs/jobs.md`); its "What's new" block and `CHANGELOG.md` are written by a changelog job from merged PR titles, so a good PR title is the changelog line; `docs/plans/` for designs and the server setup (`2026-10-16-cloud-only-hetzner.md`).
 
+## Live or on disk
+
+- fx writes `events.jsonl` only at the end of each turn. A session in the middle of a turn (even a long first one) has nothing new on disk: anything that should look live (what a session is doing, its newest text, its model) comes from its tmux screen, as the sidebar's dots do.
+- Reading a screen: `tmux capture-pane -p -J -t <name>` gives the visible screen with wrapped lines joined; `-S -<n>` adds history above it. Never `-E -1`: that stops above the visible screen.
+- `session.json`'s model is fx's default, not what the session runs: the model is on each reply (`provider_replay.source.model`) and in fx's footer on screen.
+
+## Checking a UI change
+
+Look at it with real data, not an empty fox: a page that works with no sessions can be wrong with real ones.
+
+- Start a throwaway fox from your checkout that reads the real sessions: `PORT=4870 FOX_STATE_DIR=$(mktemp -d) FOX_AUTH_DISABLED=1 FOX_MEMORY_HIGH_PCT=0 node server.mjs` (same user and HOME as the real fox, so it sees `~/.fx` and the tmux sessions; it listens on 127.0.0.1 only and its own state is thrown away). Stop it when you are done.
+- It is read-only for you: never open a real session's terminal in it (that attaches to the person's tmux, resizes it and can type), never send to a session, never put one to sleep. Reading lists, transcripts and screen captures is fine.
+- Check what the change is about with sessions in different states: one working mid-turn, one waiting, one with subagents if it matters.
+- Save the screenshots the job asks for from that fox, so the person reviewing sees real content.
+
 ## Tests and shipping
 
 - `npm test` runs everything (`node --test`). Run it before every commit and check the exit code, not only the summary.

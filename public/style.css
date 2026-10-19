@@ -619,6 +619,7 @@ a.pr-chip { color: var(--accent); } a.pr-chip:hover { border-color: var(--accent
 .pr-review.needs-you { border-left-color: var(--warn); }
 .pr-review b { font-weight: 600; }
 .pr-shots { display: flex; gap: 10px; overflow-x: auto; }
+.pr-shots figure { margin: 0; flex: none; } .pr-shots figcaption { font-size: 11px; color: var(--muted); margin-top: 4px; }
 .pr-shots img { display: block; height: 180px; width: auto; max-width: 420px; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
 .pr-links { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .pr-reason { max-width: 420px; }

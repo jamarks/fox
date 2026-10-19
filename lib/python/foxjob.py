@@ -91,7 +91,11 @@ def checkout(repo):
 
 def agent_rules(test, shots=None):
     shot = (f" Save one to three of those screenshots, the ones that show the change best, as PNG files named "
-            f"screenshot-1.png, screenshot-2.png… in {shots}: the person reviewing sees them next to the pull request.") if shots else ""
+            f"screenshot-1.png, screenshot-2.png… in {shots}: the person reviewing sees them next to the pull request."
+            f" If the change adds a screen or changes how one looks, also show two or three real alternatives: mock each one up"
+            f" (a page in docs/mockups/ or a variant you switch on while you look) and save a screenshot of each as"
+            f" screenshot-option-a.png, screenshot-option-b.png… in the same folder; build the one you recommend and say in"
+            f" your summary which one it is and why.") if shots else ""
     return f"""Rules:
 - Work only in this repository folder. Do not commit, push, create branches or open pull requests: the job that started you does that after checking your work, and a person reviews it.
 - Keep the change small and focused. If it needs a large change, a product decision the task does not answer, new dependencies, or secrets, change nothing and explain why.
@@ -115,16 +119,17 @@ def parse_result(final):
     return result
 
 
-def ask_fx(prompt, cwd, timeout_min=25, model=None, effort=None):
+def ask_fx(prompt, cwd, timeout_min=25, model=None, effort=None, images=()):
     """fx works on its own (fx ask --auto) and answers with a RESULT line; its log and answer go to the output.
 
     model and effort pick them for this request (exact ids from `fx models --json`); without them fx uses its settings.
     A model or effort chosen for the job in fox (FOX_JOB_MODEL, FOX_JOB_EFFORT) wins over the script's own choice.
+    images are attached to the prompt (fx ask --image), for a model that should look at screenshots.
     """
     model = os.environ.get("FOX_JOB_MODEL") or model
     effort = os.environ.get("FOX_JOB_EFFORT") or effort
     log(f"fx working (up to {timeout_min} min{', ' + model if model else ''})…")
-    pick = (["--model", model] if model else []) + (["--effort", effort] if effort else [])
+    pick = (["--model", model] if model else []) + (["--effort", effort] if effort else []) + [a for i in images for a in ("--image", str(i))]
     for attempt in (1, 2):
         p = subprocess.run(["fx", "ask", "--auto", "--no-save", "--json", *pick, "--", prompt], cwd=cwd, env=CHILD_ENV,
                            capture_output=True, text=True, timeout=timeout_min * 60)
