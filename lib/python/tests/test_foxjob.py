@@ -6,6 +6,10 @@ HERE = Path(__file__).resolve().parent
 FAKE_FX = """#!/usr/bin/env python3
 import json, os, sys
 mode = os.environ.get("FAKE_FX_MODE", "done")
+if mode == "down":
+    sys.stderr.write("[notice] provider_error: Provider response failed\\n")
+    print(json.dumps({"final_output": ""}))
+    sys.exit(1)
 if mode == "flaky":
     marker = os.environ["FAKE_FX_FLAKY"]
     if not os.path.exists(marker):
@@ -112,6 +116,13 @@ class FoxJobTest(unittest.TestCase):
     def test_a_dropped_answer_from_the_provider_is_tried_once_more(self):
         self.fj.CHILD_ENV.update({"FAKE_FX_MODE": "flaky", "FAKE_FX_FLAKY": str(self.tmp / "flaky")})
         self.assertEqual(self.propose().status, "opened")
+
+    def test_a_provider_that_keeps_failing_is_a_transient_failure(self):
+        self.fj.CHILD_ENV["FAKE_FX_MODE"] = "down"
+        with self.assertRaises(self.fj.Failure) as caught:
+            self.propose()
+        self.assertTrue(caught.exception.transient)
+        self.assertIn("provider failed", caught.exception.reason)
 
     def test_nothing_is_pushed_when_fx_skips_goes_too_big_or_tests_fail(self):
         for mode, test, reason in (("skip", "true", "fx did not do it"), ("big", "true", "too big"), ("done", "false", "failed")):

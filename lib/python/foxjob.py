@@ -25,10 +25,11 @@ CHILD_ENV = {k: v for k, v in os.environ.items()
 
 
 class Failure(Exception):
-    """A step that did not work; `reason` is one line for people, `detail` the output behind it."""
-    def __init__(self, reason, detail=""):
+    """A step that did not work; `reason` is one line for people, `detail` the output behind it.
+    `transient` means nothing was wrong with the task (the model provider failed): try the same again later."""
+    def __init__(self, reason, detail="", transient=False):
         super().__init__(reason)
-        self.reason, self.detail = reason, detail
+        self.reason, self.detail, self.transient = reason, detail, transient
 
 
 def output_dir():
@@ -144,6 +145,8 @@ def ask_fx(prompt, cwd, timeout_min=25, model=None, effort=None, images=()):
     except json.JSONDecodeError:
         raise Failure(f"fx did not answer in JSON (exit {p.returncode})", (p.stdout + p.stderr)[-2000:])
     (output_dir() / "fx-answer.md").write_text(final)
+    if not final.strip() and "provider_error" in p.stderr:
+        raise Failure("the model provider failed the answer twice; try again later", p.stderr[-1500:], transient=True)
     return parse_result(final)
 
 
