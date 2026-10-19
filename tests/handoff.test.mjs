@@ -20,8 +20,9 @@ test('handoff requires a completed source turn and uses recorded model', () => {
 function harness() {
   const handlers = {}, elements = {}, sent = [];
   for (const id of ['handoff-status', 'handoff-target', 'handoff-choices', 'handoff-text', 'handoffsheet', 'handoff-boundary', 'handoff-refresh', 'handoff-cancel', 'handoffform']) {
+    const classes = new Set(['hidden']);
     elements[id] = { value: '', textContent: '', innerHTML: '', disabled: false,
-      classList: { add() {}, remove() {}, contains() { return false; } },
+      classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name), contains: (name) => classes.has(name) },
       addEventListener(type, callback) { handlers[`${id}:${type}`] = callback; },
     };
   }
@@ -31,11 +32,11 @@ function harness() {
   const dst = { id: 'dst', workspace: '/repo-b', title: 'Destination', state: 'ready', terminal: 'fx-dst' };
   const alt = { id: 'alt', workspace: '/repo-c', title: 'Other', state: 'ready', terminal: 'fx-alt' };
   let events = [{ kind: 'user', text: 'Task' }, { kind: 'assistant', text: 'Answer\x1b[31m\r\nline', model: 'actual-model', ts: 2 }, { kind: 'turn_completed', ts: 3 }];
-  let file = 'first';
+  let file = 'first', fileResponse;
   const ws = { readyState: 1, send: (value) => sent.push(JSON.parse(value)) };
   const tab = { ws, term: { focus() {} }, closed: false };
   const state = { sessions: [src, dst, alt], terminals: [{ resume: 'dst', name: 'fx-dst' }, { resume: 'alt', name: 'fx-alt' }], tabs: new Map([['fx-dst', tab], ['fx-alt', { ...tab, ws: { readyState: 3, send() { throw Error('closed'); } } }]]), repos: { '/repo-a': { repo: 'owner/repo-a', root: '/repo-a', branch: 'work' } } };
-  const fetch = async (url) => ({ ok: true, json: async () => url.endsWith('/events') ? events : url.endsWith('/files') ? [{ path: '/repo-a/a.js', action: 'edit' }] : { text: file } });
+  const fetch = async (url) => ({ ok: true, json: async () => url.endsWith('/events') ? events : url.endsWith('/files') ? [{ path: '/repo-a/a.js', action: 'edit' }] : fileResponse ? fileResponse() : { text: file } });
   const ctx = vm.createContext({ state, fetch, crypto: webcrypto, TextEncoder, WebSocket: { OPEN: 1 },
     $: (selector) => selector.startsWith('#handoffform ') ? submit : elements[selector.slice(1)], window: { addEventListener() {} },
     sessionById: (id) => state.sessions.find((s) => s.id === id), displayTitle: (s) => s.title,
@@ -44,7 +45,7 @@ function harness() {
   vm.runInContext(section, ctx);
   const open = () => vm.runInContext('openHandoff({ dataset: { handoffSession: "src", handoffKind: "answer", handoffIndex: "1" } })', ctx);
   const insert = () => handlers['handoffform:submit']({ preventDefault() {} });
-  return { ctx, handlers, elements, state, tab, ws, sent, open, insert, submit, setFile: (x) => { file = x; }, setEvents: (x) => { events = x; }, events: () => events };
+  return { ctx, handlers, elements, state, tab, ws, sent, open, insert, submit, setFile: (x) => { file = x; }, setFileResponse: (x) => { fileResponse = x; }, setEvents: (x) => { events = x; }, events: () => events };
 }
 
 test('destination switching never sends; outside-root warning and explicitly selected files', async () => {
@@ -68,6 +69,25 @@ test('destination switching never sends; outside-root warning and explicitly sel
   await h.insert();
   assert.equal(h.sent.length, 0, 'changed file must block insertion');
   assert.match(h.elements['handoff-status'].textContent, /File changed/);
+});
+
+test('unreadable file references are omitted rather than treated as verified', async () => {
+  const h = harness();
+  h.setFileResponse(() => ({}));
+  await h.open();
+  assert.doesNotMatch(h.elements['handoff-choices'].innerHTML, /a\.js/);
+});
+
+test('closing while evidence is loading cannot reopen the dialog', async () => {
+  const h = harness();
+  let release;
+  h.setFileResponse(() => new Promise((resolve) => { release = resolve; }));
+  const pending = h.open();
+  while (!release) await new Promise((resolve) => setImmediate(resolve));
+  h.handlers['handoff-cancel:click']();
+  release({ text: 'first' });
+  await pending;
+  assert.equal(h.elements.handoffsheet.classList.contains('hidden'), true);
 });
 
 test('source changes block insertion; safe bracketed paste inserts without Enter', async () => {

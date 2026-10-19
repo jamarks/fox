@@ -1404,6 +1404,7 @@ function filesSection(id, files) {
 // ---------- local handoff packet ----------
 // Only recorded events and explicitly selected file references enter the draft; never fetch a whole chat.
 let handoff = null;
+let handoffRequest = 0;
 const handoffLimit = 12000;
 const handoffUrl = (id, kind) => `/api/sessions/${encodeURIComponent(id)}/${kind}`;
 const handoffResult = (ev) => {
@@ -1433,12 +1434,12 @@ function handoffEvidence(events, source) {
 async function handoffFile(id, path) {
   try {
     const r = await fetch(`${handoffUrl(id, 'file')}?path=${encodeURIComponent(path)}`);
-    if (!r.ok) return 'unavailable';
+    if (!r.ok) return null;
     const j = await r.json();
-    if (typeof j.text !== 'string') return 'unavailable (binary or over 512 KB)';
+    if (typeof j.text !== 'string') return null;
     const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(j.text));
     return 'sha256:' + [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('');
-  } catch { return 'unavailable'; }
+  } catch { return null; }
 }
 function handoffRoot(id) {
   const s = sessionById(id);
@@ -1474,13 +1475,15 @@ function handoffPacket() {
 async function openHandoff(button) {
   const id = button.dataset.handoffSession;
   const source = { id, kind: button.dataset.handoffKind, index: Number(button.dataset.handoffIndex), model: button.dataset.handoffModel || null };
+  const request = ++handoffRequest;
   $('#handoff-status').textContent = 'Reading recorded evidence…';
   try {
     const [events, files] = await Promise.all([fetch(handoffUrl(id, 'events')).then((r) => r.json()), fetch(handoffUrl(id, 'files')).then((r) => r.json())]);
     const evidence = handoffEvidence(events, source);
     if (!evidence) throw new Error('Source turn is no longer complete or available');
     const listed = files.filter((f) => f.action !== 'read').slice(0, 20);
-    const digests = await Promise.all(listed.map(async (f) => ({ path: f.path, digest: await handoffFile(id, f.path) })));
+    const digests = (await Promise.all(listed.map(async (f) => ({ path: f.path, digest: await handoffFile(id, f.path) })))).filter((f) => f.digest);
+    if (request !== handoffRequest) return;
     const commands = events.map((ev, index) => ({ ev, index })).filter(({ ev }) => ev.kind === 'tool_call' && /^(shell|exec|bash|run_command)$/.test(ev.name) && ev.result).slice(-12).map(({ ev, index }) => ({ index, command: String(briefArgs(ev.args)).slice(0, 180), status: ev.result.status ?? 'unknown', result: String(ev.result.preview ?? '').slice(0, 180) }));
     handoff = { source, evidence, files: digests, commands, chosen: new Set(['task', 'answer']) };
     const targets = state.sessions.filter((s) => handoffRoot(s.id) && s.id !== id);
@@ -1491,9 +1494,9 @@ async function openHandoff(button) {
     $('#handoff-status').textContent = 'Select only what the recipient needs. Nothing is sent; insertion requires an open terminal.';
     handoffPacket();
     $('#handoffsheet').classList.remove('hidden');
-  } catch { $('#handoff-status').textContent = 'Recorded evidence unavailable. Try again.'; }
+  } catch { if (request === handoffRequest) $('#handoff-status').textContent = 'Recorded evidence unavailable. Try again.'; }
 }
-function closeHandoff() { $('#handoffsheet').classList.add('hidden'); handoff = null; }
+function closeHandoff() { handoffRequest++; $('#handoffsheet').classList.add('hidden'); handoff = null; }
 $('#handoff-choices').addEventListener('change', (e) => {
   const key = e.target.dataset.handoffChoice;
   if (!handoff || !key) return;
