@@ -31,3 +31,13 @@ export function lastAnswerModel(lines) {
   }
   return null;
 }
+
+// fx's footer shows the current model even when the latest turn is not yet on disk.
+export function screenModel(screen) {
+  // The first field is the fx mode/provider, not necessarily "auto".
+  for (const line of screen.split('\n').reverse()) {
+    const model = /^\s*[a-z][a-z0-9_-]*\s*·\s*([^·\n]+?)\s*·/i.exec(line)?.[1]?.trim();
+    if (model) return model;
+  }
+  return null;
+}

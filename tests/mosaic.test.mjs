@@ -5,6 +5,46 @@ import { createServer } from 'node:net';
 import { mkdtemp, mkdir, writeFile, chmod, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { runInNewContext } from 'node:vm';
+import { screenModel } from '../inbox.mjs';
+
+test('screen model reads the footer regardless of fx mode', () => {
+  assert.equal(screenModel('answer\nauto · gpt-6-sol · tokens\n'), 'gpt-6-sol');
+  assert.equal(screenModel('answer\ncodex · openai/gpt-5 · tokens\n'), 'openai/gpt-5');
+  assert.equal(screenModel('no footer\n'), null);
+});
+
+test('mosaic marks a first unfinished turn as working, not an absent reply', async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const markdown = await readFile(new URL('../public/markdown.js', import.meta.url), 'utf8');
+  const render = `${markdown}\n${source.slice(source.indexOf('function renderMosaic()'), source.indexOf('function setMosaic(on)'))}\nrenderMosaic()`;
+  const pre = { isConnected: true, textContent: '', scrollTop: 0, scrollHeight: 300 };
+  const meta = { textContent: '' };
+  const tile = { dataset: { tile: 'session-two' }, querySelector: (selector) => selector === 'pre' ? pre : meta };
+  const tiles = { dataset: {}, innerHTML: '', querySelectorAll: () => [tile] };
+  const choices = { innerHTML: '' };
+  const session = { id: 'session-two', title: 'Answering', terminal: 'fx-session-two', state: 'working', workspace: '/demo', model: 'old-default', latestReply: null };
+  const context = {
+    state: { mosaic: true, sessions: [session], mosaicIds: [session.id] },
+    $: (id) => id === '#mosaic-tiles' ? tiles : choices,
+    localStorage: { setItem() {} },
+    sessionById: () => session, displayTitle: (s) => s.title, shortPath: (p) => p, modelShort: (m) => m,
+    esc: (s) => String(s), STATE_LABEL: {},
+    fetch: async () => ({ ok: true, json: async () => ({ text: 'line at the bottom', model: 'gpt-6-sol' }) }),
+  };
+  runInNewContext(render, context);
+  assert.match(tiles.innerHTML, /Current turn<\/span><div class="md mosaic-reply-text"><p>Working…<\/p><\/div>/);
+  assert.doesNotMatch(tiles.innerHTML, /No reply yet/);
+  await new Promise(setImmediate);
+  assert.equal(pre.textContent, 'line at the bottom');
+  assert.equal(pre.scrollTop, 300);
+  assert.equal(meta.textContent, '/demo · gpt-6-sol');
+  session.latestReply = { text: 'Older answer' };
+  meta.textContent = '';
+  runInNewContext(render, context);
+  await new Promise(setImmediate);
+  assert.equal(meta.textContent, '/demo · gpt-6-sol'); // the current turn may use a different model
+});
 
 const freePort = () => new Promise((resolve) => {
   const server = createServer();
@@ -19,15 +59,22 @@ test('mosaic snapshot is bounded, plain text and only for a live fox session', a
   await writeFile(join(dir, 'events.jsonl'), [
     { event: { assistant: { text: 'Last answer' } } }, { event: { turn_completed: {} } },
   ].map(JSON.stringify).join('\n'));
+  const working = join(home, '.fx', 'sessions', 'session-two');
+  await mkdir(working, { recursive: true });
+  await writeFile(join(working, 'session.json'), JSON.stringify({ title: 'Answering', workspace_root: home, model: 'openai/old-default', updated_at_ms: 20 }));
+  await writeFile(join(working, 'events.jsonl'), '');
   const script = join(home, 'tmux.mjs'), log = join(home, 'captures.log');
   await writeFile(script, `#!/usr/bin/env node
 import { appendFileSync } from 'node:fs';
 const [cmd, ...args] = process.argv.slice(2);
-if (cmd === 'list-sessions') console.log('fx-session-one|1|0');
-else if (cmd === 'show-options') { if (!args.includes('fx-session-one')) process.exit(1); console.log(args.at(-1) === '@fx_resume' ? 'session-one' : ${JSON.stringify(home)}); }
+if (cmd === 'list-sessions') console.log('fx-session-one|1|0\\nfx-session-two|2|0');
+else if (cmd === 'show-options') { if (!['fx-session-one', 'fx-session-two'].some((s) => args.includes(s))) process.exit(1); console.log(args.at(-1) === '@fx_resume' ? args.find((s) => s.startsWith('fx-')).replace('fx-', '') : ${JSON.stringify(home)}); }
 else if (cmd === 'capture-pane') {
   appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
-  console.log(Array.from({length: 40}, (_, i) => i === 39 ? '\\x1b[31mLAST\\x1b[0m\\x00' : 'line-' + i).join('\\n'));
+  const two = args.includes('fx-session-two');
+  if (args.includes('-E')) console.log('old history banner');
+  else if (args.includes('-S')) console.log([...Array.from({length: 36}, (_, i) => 'line-' + i), two ? 'Live assistant answer' : '\\x1b[31mLAST\\x1b[0m\\x00', two ? 'codex · gpt-6-sol · tokens' : 'auto · gpt-6-sol · tokens', '', ''].join('\\n'));
+  else console.log(two ? 'Live assistant answer\\n• Thinking (4s)\\ncodex · gpt-6-sol · tokens' : 'LAST\\nauto · gpt-6-sol · tokens');
 }
 `);
   await chmod(script, 0o755);
@@ -42,19 +89,27 @@ else if (cmd === 'capture-pane') {
     }
     assert.ok(ready, 'server started');
     const overview = await (await fetch(`${base}/api/overview`)).json();
-    assert.equal(overview.sessions[0].terminal, 'fx-session-one');
-    assert.equal(overview.sessions[0].latestReply.text, 'Last answer');
+    const answered = overview.sessions.find((s) => s.id === 'session-one');
+    const answering = overview.sessions.find((s) => s.id === 'session-two');
+    assert.equal(answered.terminal, 'fx-session-one');
+    assert.equal(answered.latestReply.text, 'Last answer');
+    assert.equal(answering.state, 'working');
+    assert.equal(answering.latestReply, null);
+    assert.equal(answering.model, 'gpt-6-sol');
     const response = await fetch(`${base}/api/terminals/fx-session-one/snapshot`);
     assert.equal(response.status, 200);
     const { text } = await response.json();
     assert.equal(text.split('\n').length, 32);
-    assert.match(text, /LAST$/);
-    assert.doesNotMatch(text, /\x1b|\x00|line-0\n/);
+    assert.match(text, /LAST\nauto · gpt-6-sol · tokens$/);
+    assert.doesNotMatch(text, /\x1b|\x00|line-0\n|old history banner/);
+    const live = await (await fetch(`${base}/api/terminals/fx-session-two/snapshot`)).json();
+    assert.match(live.text, /Live assistant answer/);
+    assert.equal(live.model, 'gpt-6-sol');
     assert.equal((await fetch(`${base}/api/terminals/fx-missing/snapshot`)).status, 404);
     assert.equal((await fetch(`${base}/api/terminals/other/snapshot`)).status, 404);
     const captures = (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse);
-    assert.deepEqual(captures.find((args) => args.includes('-S')), ['-p', '-S', '-32', '-E', '-1', '-t', 'fx-session-one']);
-    assert.equal(captures.filter((args) => args.includes('-S')).length, 1); // invalid names never get a snapshot
+    assert.deepEqual(captures.find((args) => args.includes('-S')), ['-p', '-J', '-S', '-32', '-t', 'fx-session-one']);
+    assert.equal(captures.filter((args) => args.includes('-S')).length, 2); // invalid names never get a snapshot
   } finally {
     child.kill();
     await new Promise((resolve) => child.once('exit', resolve));

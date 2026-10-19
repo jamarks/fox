@@ -864,18 +864,23 @@ function renderMosaic() {
   try { localStorage.setItem('fox.mosaic', JSON.stringify(state.mosaicIds)); } catch {}
   $('#mosaic-choices').innerHTML = `<span>Watch · ${state.mosaicIds.length}/4</span>${available.filter((s) => !state.mosaicIds.includes(s.id)).map((s) => `<button type="button" data-add="${esc(s.id)}" ${state.mosaicIds.length === 4 ? 'disabled' : ''} title="Add ${esc(displayTitle(s))}">+ ${esc(displayTitle(s))}</button>`).join('')}`;
   const tiles = $('#mosaic-tiles');
-  const scroll = new Map([...tiles.querySelectorAll('[data-tile]')].map((el) => [el.dataset.tile, el.querySelector('pre')?.scrollTop ?? 0]));
   tiles.dataset.count = String(state.mosaicIds.length);
   tiles.innerHTML = state.mosaicIds.length ? state.mosaicIds.map((id) => {
     const s = sessionById(id);
-    return `<article class="mosaic-tile" data-tile="${esc(id)}"><header><span class="st ${esc(s.state)}" title="${esc(STATE_LABEL[s.state] ?? s.state)}"><i></i></span><strong title="${esc(displayTitle(s))}">${esc(displayTitle(s))}</strong><button type="button" data-remove="${esc(id)}" aria-label="Remove ${esc(displayTitle(s))} from mosaic" title="Remove">×</button></header><div class="mosaic-meta" title="${esc(s.workspace)}">${esc(shortPath(s.workspace))} · ${esc(modelShort(s.model) || 'model unknown')}</div><pre class="mosaic-screen" aria-label="Recent terminal output">${s.terminal ? 'Loading…' : 'No live terminal'}</pre><div class="mosaic-reply"><span>Last reply</span><div class="md mosaic-reply-text">${renderMarkdown(s.latestReply?.text ?? 'No reply yet')}</div></div><button type="button" class="mosaic-open" data-expand="${esc(id)}">Open terminal ↗</button></article>`;
+    return `<article class="mosaic-tile" data-tile="${esc(id)}"><header><span class="st ${esc(s.state)}" title="${esc(STATE_LABEL[s.state] ?? s.state)}"><i></i></span><strong title="${esc(displayTitle(s))}">${esc(displayTitle(s))}</strong><button type="button" data-remove="${esc(id)}" aria-label="Remove ${esc(displayTitle(s))} from mosaic" title="Remove">×</button></header><div class="mosaic-meta" title="${esc(s.workspace)}">${esc(shortPath(s.workspace))} · ${esc(modelShort(s.model) || 'model unknown')}</div><pre class="mosaic-screen" aria-label="Recent terminal output">${s.terminal ? 'Loading…' : 'No live terminal'}</pre><div class="mosaic-reply"><span>${s.latestReply ? 'Last reply' : 'Current turn'}</span><div class="md mosaic-reply-text">${renderMarkdown(s.latestReply?.text ?? (s.terminal && s.state === 'working' ? 'Working…' : 'No completed reply yet'))}</div></div><button type="button" class="mosaic-open" data-expand="${esc(id)}">Open terminal ↗</button></article>`;
   }).join('') : '<p class="mosaic-empty">Choose up to four live sessions above to watch here.</p>';
   for (const id of state.mosaicIds) {
     const s = sessionById(id);
-    const pre = [...tiles.querySelectorAll('[data-tile]')].find((el) => el.dataset.tile === id)?.querySelector('pre');
+    const tile = [...tiles.querySelectorAll('[data-tile]')].find((el) => el.dataset.tile === id);
+    const pre = tile?.querySelector('pre');
     if (!s?.terminal || !pre) continue;
     fetch(`/api/terminals/${encodeURIComponent(s.terminal)}/snapshot`).then((r) => { if (!r.ok) throw new Error('capture unavailable'); return r.json(); })
-      .then(({ text }) => { if (pre.isConnected) { pre.textContent = text.trim() || 'No terminal output yet'; pre.scrollTop = scroll.get(id) ?? 0; } })
+      .then(({ text, model }) => {
+        if (!pre.isConnected) return;
+        pre.textContent = text.trim() || 'No terminal output yet';
+        pre.scrollTop = pre.scrollHeight;
+        if (model) tile.querySelector('.mosaic-meta').textContent = `${shortPath(s.workspace)} · ${modelShort(model)}`;
+      })
       .catch(() => { if (pre.isConnected) pre.textContent = 'Capture unavailable'; });
   }
 }
@@ -2340,7 +2345,7 @@ function renderPrsEntry() {
   btn.classList.toggle('active', Boolean(state.prView));
   btn.innerHTML = `<span class="jdot ${ready ? 'ok' : list.length ? 'paused' : 'none'}"></span><span class="jtitle">Pull requests</span><span>${list.length || ''}</span><span class="jnext${ready ? ' ready' : ''}">${ready ? `${ready} ready` : list.length ? '' : 'none open'}</span>`;
 }
-const PR_REVIEW = { good: ['✓ reviewed', 'good'], fixed: ['✓ fixed by review', 'good'], 'needs-you': ['needs you', 'wait'], reviewed: ['reviewed', ''] };
+const PR_REVIEW = { good: ['✓ reviewed', 'good'], fixed: ['✓ fixed by review', 'good'], 'needs-you': ['needs you', 'wait'], outdated: ['changed since review', 'wait'], reviewed: ['reviewed', ''] };
 function prChip(p) {
   if (p.checks === 'failing') return '<span class="pr-chip bad">checks fail</span>';
   if (p.draft) return '<span class="pr-chip">draft</span>';
@@ -2439,7 +2444,7 @@ $('#pr-list').addEventListener('click', async (e) => {
   if (!p || p.state !== 'OPEN') return;
   const act = btn.dataset.act;
   if (!btn.classList.contains('armed')) {
-    const unreviewed = act === 'merge' && p.job && !p.review;
+    const unreviewed = act === 'merge' && p.job && (!p.review || p.review.verdict === 'outdated');
     btn.classList.add('armed'); btn.textContent = act === 'merge' ? (unreviewed ? 'Not reviewed yet. Merge?' : 'Merge?') : 'Close?';
     btn.title = act === 'merge' ? `Click again to merge #${p.number} into its base. It deploys if that branch is deployed.` : `Click again to close #${p.number} without merging.`;
     setTimeout(() => { if (btn.isConnected) { btn.classList.remove('armed'); btn.textContent = act === 'merge' ? 'Merge' : 'Close'; } }, 4000);
