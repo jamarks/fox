@@ -21,14 +21,15 @@ ask() { local answer=""; [ -r /dev/tty ] || return 1; printf '  %s [Y/n] ' "$1";
 # Debian and Ubuntu (a VPS, a home server, WSL): system packages through apt, with sudo unless already root.
 SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO="sudo"
 has_apt() { command -v apt-get >/dev/null 2>&1; }
-apt_install() { $SUDO apt-get update -qq && $SUDO apt-get install -y -qq "$@"; }
+# </dev/null: piped into bash, stdin is the rest of this script, and apt would read it. No questions (tzdata) either.
+apt_install() { $SUDO env DEBIAN_FRONTEND=noninteractive apt-get update -qq </dev/null && $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$@" </dev/null >/dev/null; }
 
 printf '\n%sfox%s %s· a local cockpit for fx%s\n\n' "$bold" "$reset" "$dim" "$reset"
 
 step "Node.js"
 if ! command -v node >/dev/null 2>&1; then
   if has_apt && ask "Node.js is missing. Install Node 22 from NodeSource with apt?"; then
-    curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO bash - >/dev/null && apt_install nodejs
+    curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO env DEBIAN_FRONTEND=noninteractive bash - >/dev/null 2>&1 && apt_install nodejs
   else
     fail "Node 20 or newer is needed: 'brew install node' on macOS, Node 22 from https://github.com/nodesource/distributions on Debian or Ubuntu."
   fi
