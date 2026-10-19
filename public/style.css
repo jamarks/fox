@@ -27,6 +27,26 @@ input { width: 100%; background: var(--bg); color: var(--text); border: 1px soli
 .hint { color: var(--muted); font-size: 11px; min-height: 14px; }
 .hint.ok { color: var(--ok); } .hint.err { color: var(--err); }
 #session-groups { overflow-y: auto; flex: 1; min-height: 0; }
+.mission-heading { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px 3px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.mission-heading button { font-size: 17px; }
+.mission { margin: 3px 8px; padding: 5px 4px; border: 1px solid var(--border); border-radius: 6px; }
+.mission.selected { border-color: var(--accent); background: var(--panel-2); }
+.mission-row { display: flex; align-items: center; gap: 3px; }
+.mission-label { flex: 1; text-align: left; color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mission-count, .mission-meta, .mission-member small { color: var(--muted); font-size: 11px; }
+.mission-meta { padding: 2px 8px 3px 25px; }
+.mission-members { border-top: 1px solid var(--border); margin: 3px 4px 0 25px; padding-top: 4px; }
+.mission-member { display: flex; justify-content: space-between; gap: 6px; color: var(--text); text-decoration: none; padding: 4px 0; }
+.mission-member:hover { color: var(--accent); }
+.mission-member span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mission-member small { flex: none; }
+.mission-all { margin: 3px 12px; color: var(--accent); }
+.mission-action { flex: none; color: var(--muted); font-size: 11px; }
+#missiondialog { position: fixed; inset: 0; z-index: 50; background: #0009; display: flex; align-items: center; justify-content: center; }
+#missiondialog.hidden { display: none; }
+#missiondialog .sheet { width: min(380px, calc(100vw - 32px)); }
+#mission-choice { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
+#mission-choice.hidden { display: none; }
 .sidebar-footer { flex: none; display: flex; align-items: center; justify-content: flex-end; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--panel); }
 #sign-out:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .group { padding: 8px 0; }

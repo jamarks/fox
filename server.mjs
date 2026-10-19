@@ -28,6 +28,7 @@ import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
 import { createJobStore, createRunner, updateJobRepo } from './jobs.mjs';
 import { createPrStates, PR_URL } from './prstate.mjs';
 import { createPrs } from './prs.mjs';
+import { missionsOf, createMission, setMember, missionFor, decorateSessions } from './missions.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 import { ensureFoxNotes, foxNotes } from './notes.mjs';
 import { createModels } from './models.mjs';
@@ -71,7 +72,7 @@ if (process.env.FOX_AUTH_DISABLED === '1') console.warn('WARNING: Fox passkey au
 async function loadState() {
   const st = await readJson(STATE_FILE, {});
   const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
-  return { archived: Array.isArray(st.archived) ? st.archived : [], names: obj(st.names), toolsSignedIn: obj(st.toolsSignedIn) };
+  return { archived: Array.isArray(st.archived) ? st.archived : [], names: obj(st.names), toolsSignedIn: obj(st.toolsSignedIn), missions: missionsOf(st.missions) };
 }
 async function saveState(st) {
   await mkdir(STATE_DIR, { recursive: true, mode: 0o700 });
@@ -251,7 +252,7 @@ async function listSessions() {
     });
   }
   sessions.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-  return sessions;
+  return decorateSessions(sessions, st.missions);
 }
 
 // fx deja owner.live con el pid del proceso dueño; si ese pid ya no existe, el candado es huérfano.
@@ -511,6 +512,40 @@ async function handlePanelRequest(req, res) {
       if (days !== 7 && days !== 30) return send(res, 400, { error: 'days must be 7 or 30' });
       return send(res, 200, await readMetrics(SESSIONS_DIR, days));
     }
+    let m;
+    if (p === '/api/missions') {
+      if (req.method === 'GET') return send(res, 200, (await loadState()).missions);
+      if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
+      try {
+        const st = await loadState();
+        const mission = createMission(st.missions, JSON.parse(await readBody(req) || '{}').name);
+        await saveState(st);
+        return send(res, 200, mission);
+      } catch (err) { return send(res, err.status ?? 400, { error: err.message }); }
+    }
+    if (p === '/api/missions/member' && req.method === 'POST') {
+      try {
+        const body = JSON.parse(await readBody(req) || '{}');
+        const st = await loadState();
+        const sessions = await listSessions();
+        const jobs = await jobStore.overview();
+        // Only an open PR in a known workspace can be newly attached. Closed PR links remain in state.
+        const prsNow = body.type === 'pr' && body.missionId ? (await prs.list()).prs : [];
+        const root = sessions.find((s) => s.id === body.id);
+        if (body.type === 'session' && root?.parentId) return send(res, 400, { error: 'Assign the parent session instead' });
+        setMember(st.missions, body, (type, id) => type === 'session' ? sessions.some((s) => s.id === id)
+          : type === 'job' ? jobs.some((j) => j.id === id) : prsNow.some((pr) => pr.url === id));
+        await saveState(st);
+        return send(res, 200, { ok: true });
+      } catch (err) { return send(res, err.status ?? 400, { error: err.message }); }
+    }
+    if ((m = p.match(/^\/api\/missions\/([0-9a-f-]{36})$/)) && req.method === 'DELETE') {
+      const st = await loadState();
+      if (!st.missions.some((x) => x.id === m[1])) return send(res, 404, { error: 'Unknown mission' });
+      st.missions = st.missions.filter((x) => x.id !== m[1]);
+      await saveState(st);
+      return send(res, 200, { ok: true });
+    }
     if (p === '/api/sessions') return send(res, 200, await listSessions());
     if (p === '/api/search') return send(res, 200, await searchSessions(url.searchParams.get('q')));
     if (p === '/api/overview') {
@@ -534,9 +569,8 @@ async function handlePanelRequest(req, res) {
           if (!child.firstPrompt && c.task) child.firstPrompt = c.task;
         }
       }
-      return send(res, 200, { sessions, terminals, repos, workspaces: await listWorkspaces() });
+      return send(res, 200, { sessions, terminals, repos, workspaces: await listWorkspaces(), missions: (await loadState()).missions });
     }
-    let m;
     if ((m = p.match(/^\/api\/sessions\/([^/]+)\/events$/))) {
       const id = safeSessionId(m[1]);
       if (!id) return send(res, 400, { error: 'bad id' });
@@ -666,7 +700,8 @@ async function handlePanelRequest(req, res) {
       try {
         const out = await prs.list({ force: url.searchParams.has('fresh') });
         const runs = await prRuns();
-        return send(res, 200, { ...out, prs: out.prs.map((pr) => ({ ...pr, run: runs.get(pr.url) ?? null })) });
+        const { missions } = await loadState();
+        return send(res, 200, { ...out, prs: out.prs.map((pr) => ({ ...pr, missionId: missionFor(missions, 'pr', pr.url), run: runs.get(pr.url) ?? null })) });
       }
       catch (err) { return send(res, 500, { error: err.message }); }
     }
@@ -680,7 +715,10 @@ async function handlePanelRequest(req, res) {
       } catch (err) { return send(res, err.status ?? 500, { error: String(err.stderr || err.message).trim().split('\n')[0] }); }
     }
     // ---------- jobs ----------
-    if (p === '/api/jobs' && req.method === 'GET') return send(res, 200, await jobStore.overview());
+    if (p === '/api/jobs' && req.method === 'GET') {
+      const [jobs, st] = await Promise.all([jobStore.overview(), loadState()]);
+      return send(res, 200, jobs.map((j) => ({ ...j, missionId: missionFor(st.missions, 'job', j.id) })));
+    }
     if (p === '/api/jobs' && req.method === 'POST') {
       try { return send(res, 200, await jobStore.create(JSON.parse(await readBody(req) || '{}'))); }
       catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
