@@ -16,7 +16,7 @@ import * as pty from 'node-pty';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createSearchIndex } from './search.mjs';
-import { latestCompletedReply } from './inbox.mjs';
+import { latestCompletedReply, lastAnswerModel } from './inbox.mjs';
 import { readMetrics } from './metrics.mjs';
 import { TOOLS, isInstalled, isEnabled, withEnabled, addArgs } from './tools.mjs';
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
@@ -189,7 +189,7 @@ async function listSessions() {
       outcome: c.last_outcome ?? null,
       failure: c.last_failure ?? null,
     }));
-    let lastKind = null, partial = null;
+    let lastKind = null, partial = null, answeredBy = null;
     try {
       const raw = await readFile(join(dir, 'events.jsonl'), 'utf8');
       const lines = raw.trim().split('\n');
@@ -201,6 +201,7 @@ async function listSessions() {
           if (lastKind === 'interrupted') partial = ev.interrupted?.partial_text || null;
         } catch {}
       }
+      answeredBy = lastAnswerModel(lines);
     } catch {}
     sessions.push({
       id,
@@ -215,7 +216,8 @@ async function listSessions() {
       latestReply,
       workspace: meta.workspace_root ?? meta.origin_workspace_root ?? '?',
       provider: meta.provider,
-      model: meta.model,
+      // session.json keeps fx's default; the model that answered is in each reply (picked at start or with /model).
+      model: answeredBy ?? meta.model,
       createdAt: meta.created_at_ms,
       updatedAt: meta.updated_at_ms,
       subagentChild: Boolean(meta.subagent_child),
