@@ -76,19 +76,25 @@ body.no-transcript #transcript { display: none; }
 #toggle-mosaic { flex: none; width: 28px; height: 28px; margin-right: 6px; }
 #toggle-mosaic[aria-pressed="true"] { color: var(--accent); background: var(--panel-2); }
 #terminals.show-mosaic > .term-wrap, #terminals.show-mosaic > #empty-state, #terminals.show-mosaic > #term-loading { display: none; }
-#mosaic { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 14px; gap: 12px; background: var(--bg); z-index: 5; }
-#mosaic-choices { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: none; max-height: 90px; overflow-y: auto; color: var(--muted); font-size: 11px; }
-#mosaic-choices button { border: 1px solid var(--border); padding: 5px 8px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#mosaic { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 14px; gap: 8px; background: var(--bg); z-index: 5; }
+#mosaic-choices { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: none; max-height: 66px; overflow-y: auto; color: var(--muted); font-size: 11px; }
+#mosaic-choices span { margin-right: 4px; white-space: nowrap; }
+#mosaic-choices button { border: 1px solid var(--border); color: var(--accent); padding: 4px 8px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #mosaic-tiles { flex: 1; min-height: 0; display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); }
-.mosaic-tile { min-height: 0; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--border); background: var(--panel); border-radius: 8px; overflow: hidden; }
-.mosaic-tile header { display: flex; gap: 8px; align-items: center; padding: 10px 12px 0; }
+#mosaic-tiles[data-count="1"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+#mosaic-tiles[data-count="2"] { grid-template-rows: minmax(0, 1fr); }
+#mosaic-tiles[data-count="3"] .mosaic-tile:last-child { grid-column: 1 / -1; }
+.mosaic-tile { min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--border); background: var(--panel); border-radius: 8px; overflow: hidden; }
+.mosaic-tile header { display: flex; gap: 8px; align-items: center; }
 .mosaic-tile header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .mosaic-tile header button { font-size: 18px; }
-.mosaic-meta { padding: 1px 12px 8px; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mosaic-screen { flex: 1; min-height: 40px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 10px; padding: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; font: 11px/1.45 var(--mono); color: var(--muted); }
-.mosaic-reply { padding: 8px 12px 0; font-size: 11px; color: var(--muted); }
-.mosaic-reply p { margin: 2px 0 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mosaic-open { align-self: flex-end; margin: 4px 8px 8px; color: var(--accent); padding: 5px; }
+.mosaic-meta { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The tile is the only surface; the capture shares the tile's inset instead of nesting a terminal frame. */
+.mosaic-screen { flex: 1; min-height: 40px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; padding: 8px 0 0; border-top: 1px solid var(--border); font: 11px/1.45 var(--mono); color: var(--muted); }
+.mosaic-reply { padding-top: 6px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); }
+.mosaic-reply-text { margin-top: 2px; max-height: 2.9em; line-height: 1.45; overflow: hidden; color: var(--text); overflow-wrap: anywhere; }
+.mosaic-reply-text :is(p, ul, ol, pre, blockquote, h3, h4, h5, h6) { margin: 0; }
+.mosaic-open { align-self: flex-end; color: var(--accent); padding: 2px 0; }
 .mosaic-empty { color: var(--muted); grid-column: 1 / -1; align-self: center; justify-self: center; text-align: center; }
 .term-wrap { position: absolute; inset: 0; padding: 8px 8px 10px; display: none; overflow: hidden; }
 .term-wrap.active { display: block; }
@@ -409,7 +415,8 @@ a.section-title.fold:hover { color: var(--text); }
   #tabbar { min-height: 48px; align-items: center; flex-wrap: wrap; padding: 0 16px; }
   #tabs, #toggle-transcript { display: none; }
   #mosaic { padding: 10px; }
-  #mosaic-tiles { overflow-y: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-rows: minmax(220px, 40vh); }
+  #mosaic-tiles, #mosaic-tiles[data-count] { overflow-y: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-rows: minmax(220px, 40vh); }
+  #mosaic-tiles[data-count="1"] { grid-template-rows: minmax(0, 1fr); }
   #mobile-terminal-title { display: block; flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; font-weight: 600; }
   #dictation { width: 44px; height: 44px; margin: 0 0 0 8px; }
     .term-wrap { padding: 8px 5px 5px; }
