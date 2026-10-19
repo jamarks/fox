@@ -6,10 +6,20 @@ import { mkdtemp, mkdir, writeFile, chmod, readFile, rm } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
+import { screenModel } from '../inbox.mjs';
+
+test('screen model reads the footer regardless of fx mode', () => {
+  assert.equal(screenModel('answer\nauto · gpt-6-sol · tokens\n'), 'gpt-6-sol');
+  assert.equal(screenModel('answer\ncodex · openai/gpt-5 · tokens\n'), 'openai/gpt-5');
+  assert.equal(screenModel('no footer\n'), null);
+});
 
 test('mosaic marks a first unfinished turn as working, not an absent reply', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  const tiles = { innerHTML: '', querySelectorAll: () => [] };
+  const pre = { isConnected: true, textContent: '', scrollTop: 0, scrollHeight: 300 };
+  const meta = { textContent: '' };
+  const tile = { dataset: { tile: 'session-two' }, querySelector: (selector) => selector === 'pre' ? pre : meta };
+  const tiles = { innerHTML: '', querySelectorAll: () => [tile] };
   const choices = { innerHTML: '' };
   const session = { id: 'session-two', title: 'Answering', terminal: 'fx-session-two', state: 'working', workspace: '/demo', model: 'old-default', latestReply: null };
   const context = {
@@ -18,10 +28,20 @@ test('mosaic marks a first unfinished turn as working, not an absent reply', asy
     localStorage: { setItem() {} },
     sessionById: () => session, displayTitle: (s) => s.title, shortPath: (p) => p, modelShort: (m) => m,
     esc: (s) => String(s), STATE_LABEL: {},
+    fetch: async () => ({ ok: true, json: async () => ({ text: 'line at the bottom', model: 'gpt-6-sol' }) }),
   };
   runInNewContext(source.slice(source.indexOf('function renderMosaic()'), source.indexOf('function setMosaic(on)')) + '\nrenderMosaic()', context);
   assert.match(tiles.innerHTML, /Current turn<\/span><p>Working…<\/p>/);
   assert.doesNotMatch(tiles.innerHTML, /No reply yet/);
+  await new Promise(setImmediate);
+  assert.equal(pre.textContent, 'line at the bottom');
+  assert.equal(pre.scrollTop, 300);
+  assert.equal(meta.textContent, '/demo · gpt-6-sol');
+  session.latestReply = { text: 'Older answer' };
+  meta.textContent = '';
+  runInNewContext(source.slice(source.indexOf('function renderMosaic()'), source.indexOf('function setMosaic(on)')) + '\nrenderMosaic()', context);
+  await new Promise(setImmediate);
+  assert.equal(meta.textContent, '/demo · gpt-6-sol'); // the current turn may use a different model
 });
 
 const freePort = () => new Promise((resolve) => {
@@ -51,8 +71,8 @@ else if (cmd === 'capture-pane') {
   appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
   const two = args.includes('fx-session-two');
   if (args.includes('-E')) console.log('old history banner');
-  else if (args.includes('-S')) console.log([...Array.from({length: 36}, (_, i) => 'line-' + i), two ? 'Live assistant answer' : '\\x1b[31mLAST\\x1b[0m\\x00', 'auto · gpt-6-sol · tokens', '', ''].join('\\n'));
-  else console.log(two ? 'Live assistant answer\\n• Thinking (4s)\\nauto · gpt-6-sol · tokens' : 'LAST\\nauto · gpt-6-sol · tokens');
+  else if (args.includes('-S')) console.log([...Array.from({length: 36}, (_, i) => 'line-' + i), two ? 'Live assistant answer' : '\\x1b[31mLAST\\x1b[0m\\x00', two ? 'codex · gpt-6-sol · tokens' : 'auto · gpt-6-sol · tokens', '', ''].join('\\n'));
+  else console.log(two ? 'Live assistant answer\\n• Thinking (4s)\\ncodex · gpt-6-sol · tokens' : 'LAST\\nauto · gpt-6-sol · tokens');
 }
 `);
   await chmod(script, 0o755);

@@ -518,7 +518,7 @@ async function handlePanelRequest(req, res) {
       await Promise.all([...new Set(sessions.map((s) => s.workspace))].map(async (ws) => { repos[ws] = await gitInfo(ws); }));
       const byResume = new Map(terminals.filter((t) => t.resume).map((t) => [t.resume, t]));
       const byId = new Map(sessions.map((s) => [s.id, s]));
-      for (const s of sessions) {
+      await Promise.all(sessions.map(async (s) => {
         const t = byResume.get(s.id);
         s.terminal = t ? t.name : null;
         s.state = t ? t.activity : (s.live ? 'external' : 'idle');
@@ -527,7 +527,7 @@ async function handlePanelRequest(req, res) {
           const screen = await tmux('capture-pane', '-p', '-t', t.name).catch(() => '');
           s.model = screenModel(screen) ?? s.model;
         }
-      }
+      }));
       // Los hijos no tienen terminal propia: su estado sale de children.json del padre.
       for (const s of sessions) {
         for (const c of s.children) {

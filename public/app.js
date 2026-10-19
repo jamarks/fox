@@ -878,7 +878,7 @@ function renderMosaic() {
         if (!pre.isConnected) return;
         pre.textContent = text.trim() || 'No terminal output yet';
         pre.scrollTop = pre.scrollHeight;
-        if (!s.latestReply && model) tile.querySelector('.mosaic-meta').textContent = `${shortPath(s.workspace)} · ${modelShort(model)}`;
+        if (model) tile.querySelector('.mosaic-meta').textContent = `${shortPath(s.workspace)} · ${modelShort(model)}`;
       })
       .catch(() => { if (pre.isConnected) pre.textContent = 'Capture unavailable'; });
   }

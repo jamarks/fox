@@ -32,8 +32,12 @@ export function lastAnswerModel(lines) {
   return null;
 }
 
-// Before the first reply is saved, fx's footer is the only source for the selected model.
+// fx's footer shows the current model even when the latest turn is not yet on disk.
 export function screenModel(screen) {
-  const footer = screen.split('\n').reverse().find((line) => /\bauto\s*·\s*[^·\n]+\s*·/.test(line));
-  return footer?.match(/\bauto\s*·\s*([^·\n]+?)\s*·/)?.[1]?.trim() ?? null;
+  // The first field is the fx mode/provider, not necessarily "auto".
+  for (const line of screen.split('\n').reverse()) {
+    const model = /^\s*[a-z][a-z0-9_-]*\s*·\s*([^·\n]+?)\s*·/i.exec(line)?.[1]?.trim();
+    if (model) return model;
+  }
+  return null;
 }
