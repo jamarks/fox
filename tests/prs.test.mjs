@@ -41,19 +41,33 @@ test('open PRs of every known repo in one list; a job PR is ready once reviewed'
 
 test('merged history is sorted by merge time, loads progressively, and has separate cache', async () => {
   const { run, calls } = fake((args) => args[args.indexOf('--state') + 1] === 'merged'
-    ? JSON.stringify([pr({ number: 1, mergedAt: '2026-10-18T08:00:00Z' }), pr({ number: 2, mergedAt: '2026-10-19T08:00:00Z' })]) : '[]');
+    ? JSON.stringify([pr({ number: 1, state: 'MERGED', mergedAt: '2026-10-18T08:00:00Z' }), pr({ number: 2, state: 'MERGED', mergedAt: '2026-10-19T08:00:00Z' })]) : '[]');
   const prs = createPrs({ repos: async () => ['o/r'], run });
   await prs.list();
   const history = await prs.list({ state: 'merged', limit: 2 });
   assert.deepEqual(history.prs.map((p) => p.number), [2, 1]);
   assert.equal(history.hasMore, true);
-  assert.deepEqual(calls.at(-1).args.slice(0, 8), ['pr', 'list', '--state', 'merged', '--limit', '2', '--json', 'number,title,url,headRefName,additions,deletions,changedFiles,createdAt,mergedAt,isDraft,body,comments,statusCheckRollup']);
+  assert.equal(history.prs[0].state, 'MERGED');
+  assert.deepEqual(calls.at(-1).args.slice(0, 8), ['pr', 'list', '--state', 'merged', '--limit', '2', '--json', 'number,title,url,headRefName,additions,deletions,changedFiles,createdAt,mergedAt,state,isDraft,body,comments,statusCheckRollup']);
   await prs.list({ state: 'merged', limit: 2 });
   assert.equal(calls.length, 2, 'same page is cached');
   await prs.list({ state: 'merged', limit: 3 });
   assert.equal(calls.length, 3, 'larger history fetches again');
   assert.equal((await prs.list({ state: 'merged', limit: 3 })).hasMore, false);
   await assert.rejects(prs.list({ state: 'closed' }), /invalid PR state/);
+});
+
+test('all PRs include open, merged and closed, ordered by creation date with more history available', async () => {
+  const { run, calls } = fake(() => JSON.stringify([
+    pr({ number: 1, state: 'MERGED', createdAt: '2026-10-18T08:00:00Z', mergedAt: '2026-10-19T00:00:00Z' }),
+    pr({ number: 2, state: 'CLOSED', createdAt: '2026-10-20T08:00:00Z' }),
+    pr({ number: 3, state: 'OPEN', createdAt: '2026-10-19T08:00:00Z' }),
+  ]));
+  const prs = createPrs({ repos: async () => ['o/r'], run });
+  const all = await prs.list({ state: 'all', limit: 3 });
+  assert.deepEqual(all.prs.map((p) => [p.number, p.state]), [[2, 'CLOSED'], [3, 'OPEN'], [1, 'MERGED']]);
+  assert.equal(all.hasMore, true);
+  assert.deepEqual(calls[0].args.slice(0, 6), ['pr', 'list', '--state', 'all', '--limit', '3']);
 });
 
 test('merge and close act only on known repos and real numbers, and drop the cache', async () => {

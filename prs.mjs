@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { REPO_PART } from './workspaces.mjs';
 const execFileP = promisify(execFile);
 
-const LIST_FIELDS = 'number,title,url,headRefName,additions,deletions,changedFiles,createdAt,mergedAt,isDraft,body,comments,statusCheckRollup';
+const LIST_FIELDS = 'number,title,url,headRefName,additions,deletions,changedFiles,createdAt,mergedAt,state,isDraft,body,comments,statusCheckRollup';
 const VERDICTS = [['✅', 'good'], ['🔧', 'fixed'], ['👀', 'needs-you']];
 
 // The review job's verdict, from its newest comment: good, fixed, needs-you, or null when not reviewed yet.
@@ -39,7 +39,7 @@ export function summarize(repo, pr) {
   const issue = (String(pr.headRefName).match(/^agent\/([a-z]+-\d+)/)?.[1] ?? '').toUpperCase() || null;
   const linear = String(pr.body ?? '').match(/https:\/\/linear\.app\/[^\s)]+/)?.[0] ?? null;
   return {
-    repo, number: pr.number, title: pr.title, url: pr.url, branch: pr.headRefName, draft: Boolean(pr.isDraft),
+    repo, number: pr.number, title: pr.title, url: pr.url, branch: pr.headRefName, draft: Boolean(pr.isDraft), state: pr.state ?? 'OPEN',
     additions: pr.additions ?? 0, deletions: pr.deletions ?? 0, files: pr.changedFiles ?? 0, createdAt: pr.createdAt, mergedAt: pr.mergedAt ?? null,
     job, issue, linear, checks, review,
     // Ready: nothing says no. Checks not failing, not a draft, and a job's PR reviewed as good or fixed.
@@ -66,7 +66,7 @@ export function createPrs({ repos, tokensDir = null, gh = 'gh', run = null, ttlM
   async function gh_(repo, args) { return exec([...args, '--repo', repo], await env(repo.split('/')[0])); }
   return {
     async list({ force = false, state = 'open', limit = 50 } = {}) {
-      if (!['open', 'merged'].includes(state)) throw Object.assign(new Error('invalid PR state'), { status: 400 });
+      if (!['open', 'merged', 'all'].includes(state)) throw Object.assign(new Error('invalid PR state'), { status: 400 });
       const count = state === 'open' ? 30 : Math.max(1, Math.floor(Number(limit) || 50));
       const key = `${state}:${count}`;
       const cached = cache.get(key);
@@ -77,7 +77,7 @@ export function createPrs({ repos, tokensDir = null, gh = 'gh', run = null, ttlM
         .then((out) => JSON.parse(out || '[]').map((pr) => summarize(repo, pr)))
         .catch((err) => { errors.push({ repo, error: String(err.stderr || err.message).trim().split('\n')[0].slice(0, 200) }); return []; })));
       const value = { prs: lists.flat().sort((a, b) => String(b[state === 'merged' ? 'mergedAt' : 'createdAt']).localeCompare(String(a[state === 'merged' ? 'mergedAt' : 'createdAt']))), errors,
-        hasMore: state === 'merged' && lists.some((list) => list.length === count) };
+        hasMore: state !== 'open' && lists.some((list) => list.length === count) };
       cache.set(key, { at: now(), value });
       return value;
     },
