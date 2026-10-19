@@ -26,7 +26,7 @@ import { createFxSettings } from './fxsettings.mjs';
 import { fastForward, SAFE_GIT } from './gitsync.mjs';
 import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
 import { createJobStore, createRunner, updateJobRepo } from './jobs.mjs';
-import { createPrStates, PR_URL } from './prstate.mjs';
+import { createPrStates } from './prstate.mjs';
 import { createPrs } from './prs.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 import { ensureFoxNotes, foxNotes } from './notes.mjs';
@@ -135,17 +135,16 @@ async function jobScripts(cwd) {
 }
 const repoCatalog = createRepoCatalog({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
 const prStates = createPrStates({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
-// Which job run opened a pull request (its FOX_LINK), and the screenshots fx saved there, for the Pull requests page.
+// Which job run opened a pull request, and the screenshots fx saved there, for the Pull requests page. The run is the
+// one the PR names ("Made by a fox job (<run id>)", written by foxjob): later runs link every PR still waiting, so a
+// link alone does not say who made it.
 let prRunsCache = { at: 0, map: new Map() };
 async function prRuns() {
   if (Date.now() - prRunsCache.at < 30_000) return prRunsCache.map;
-  const map = new Map();
+  const map = new Map(); // run id -> { job, run, shots }
   for (const job of await jobStore.list().catch(() => [])) {
-    for (const run of await jobStore.runs(job.id).catch(() => [])) { // newest first: the newest run that linked a PR wins
-      for (const l of run.links ?? []) {
-        if (!PR_URL.test(l.url) || map.has(l.url.replace(/[?#].*$/, ''))) continue;
-        map.set(l.url.replace(/[?#].*$/, ''), { job: job.id, run: run.id, shots: (run.outputs ?? []).map((o) => o.name).filter((n) => /^screenshot[\w.-]*\.(png|jpe?g|webp)$/i.test(n)).sort() });
-      }
+    for (const run of await jobStore.runs(job.id).catch(() => [])) {
+      map.set(run.id, { job: job.id, run: run.id, shots: (run.outputs ?? []).map((o) => o.name).filter((n) => /^screenshot[\w.-]*\.(png|jpe?g|webp)$/i.test(n)).sort() });
     }
   }
   prRunsCache = { at: Date.now(), map };
@@ -675,7 +674,7 @@ async function handlePanelRequest(req, res) {
       try {
         const out = await prs.list({ force: url.searchParams.has('fresh'), state: url.searchParams.get('state') ?? 'open', limit: url.searchParams.get('limit') ?? 50 });
         const runs = await prRuns();
-        return send(res, 200, { ...out, prs: out.prs.map((pr) => ({ ...pr, run: runs.get(pr.url) ?? null })) });
+        return send(res, 200, { ...out, prs: out.prs.map((pr) => ({ ...pr, run: runs.get(pr.madeBy) ?? null })) });
       }
       catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
     }

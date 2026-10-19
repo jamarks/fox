@@ -45,6 +45,8 @@ export function summarize(repo, pr) {
     // Ready: nothing says no. Checks not failing, not a draft, and a job's PR reviewed as good or fixed.
     ready: !pr.isDraft && checks !== 'failing' && checks !== 'pending' && (!job || ['good', 'fixed'].includes(review?.verdict)),
     body: String(pr.body ?? '').slice(0, 2000),
+    // The job run that made it, as foxjob writes it at the end of the PR's text (read before the text is cut).
+    madeBy: String(pr.body ?? '').match(/Made by a fox job \(([0-9A-Za-z_-]+)\)/)?.[1] ?? null,
   };
 }
 

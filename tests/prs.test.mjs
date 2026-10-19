@@ -34,6 +34,8 @@ test('open PRs of every known repo in one list; a job PR is ready once reviewed'
   assert.deepEqual(list.map((p) => [p.repo, p.number, p.ready]), [['o/r', 13, true], ['o/r', 12, false], ['o/mine', 3, true]], 'newest first; an unreviewed job PR is not ready, a person\'s is');
   assert.equal(list[1].issue, 'FOX-10');
   assert.equal(list[1].linear, 'https://linear.app/x/issue/FOX-10/hand-off');
+  assert.equal(list[1].madeBy, null);
+  assert.equal((await createPrs({ repos: async () => ['o/r'], run: async () => JSON.stringify([pr({ body: 'x'.repeat(3000) + '\n\nMade by a fox job (20261019-110006-2e14c1).' })]) }).list()).prs[0].madeBy, '20261019-110006-2e14c1', 'found even past the cut');
   assert.deepEqual(errors.map((e) => e.repo), ['o/gone'], 'a repo gh cannot read is reported, the rest still show');
   await prs.list();
   assert.equal(calls.length, 3, 'cached');
