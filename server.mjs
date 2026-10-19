@@ -30,6 +30,7 @@ import { createPrStates } from './prstate.mjs';
 import { createPrs } from './prs.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 import { ensureFoxNotes, foxNotes } from './notes.mjs';
+import { createModels } from './models.mjs';
 const execFileP = promisify(execFile);
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -370,44 +371,12 @@ async function gitInfo(ws) {
 }
 
 // ---------- catálogo de modelos ----------
-// `fx models` only lists the active provider, so we switch provider, list, and switch back. Cached on disk.
-const MODELS_FILE = join(STATE_DIR, 'models.json');
-let modelsCache = null;
 async function fxJson(args, env = {}) {
   const { stdout } = await execFileP(FX_BIN, args, { timeout: 20000, env: { ...process.env, ...env } });
   return stdout;
 }
 async function readFxSettings() { return (await readJson(join(homedir(), '.fx', 'settings.json'))) ?? {}; }
-async function fetchModels() {
-  const settings = await readFxSettings();
-  const original = settings.provider ?? 'codex';
-  const status = await fxJson(['status']).catch(() => '');
-  const connected = (status.match(/connected_providers=(.*)/)?.[1] ?? '').split(',').map((x) => x.trim()).filter(Boolean);
-  const providers = [];
-  if (connected.some((c) => /codex/i.test(c))) providers.push({ id: 'codex', label: 'ChatGPT subscription' });
-  if (connected.some((c) => /gateway/i.test(c))) providers.push({ id: 'gateway', label: 'Vercel AI Gateway' });
-  const out = { fetchedAt: Date.now(), default: { provider: original, model: settings.models?.[original] ?? null }, providers: [] };
-  try {
-    for (const p of providers) {
-      await fxJson(['provider', p.id]).catch(() => {});
-      let ids = [];
-      try { ids = JSON.parse(await fxJson(['models', '--json'])).ids ?? []; } catch {}
-      out.providers.push({ ...p, models: ids, default: settings.models?.[p.id] ?? null });
-    }
-  } finally {
-    await fxJson(['provider', original]).catch(() => {});
-  }
-  modelsCache = out;
-  await mkdir(STATE_DIR, { recursive: true, mode: 0o700 });
-  await writeFile(MODELS_FILE, JSON.stringify(out, null, 2), { mode: 0o600 });
-  return out;
-}
-async function getModels() {
-  if (modelsCache) return modelsCache;
-  const cached = await readJson(MODELS_FILE);
-  if (cached) { modelsCache = cached; return cached; }
-  return fetchModels();
-}
+const models = createModels({ fx: fxJson, file: join(STATE_DIR, 'models.json'), readSettings: readFxSettings });
 
 // ---------- optional tools for fx (MCP servers) ----------
 let mcpPath = null;
@@ -756,8 +725,8 @@ async function handlePanelRequest(req, res) {
         return send(res, 405, { error: 'method not allowed' });
       } catch (err) { return send(res, err.status ?? 500, { error: err.message, blockers: err.blockers }); }
     }
-    if (p === '/api/models' && req.method === 'GET') return send(res, 200, await getModels());
-    if (p === '/api/models/refresh' && req.method === 'POST') { try { return send(res, 200, await fetchModels()); } catch (err) { return send(res, 500, { error: String(err.stderr || err.message) }); } }
+    if (p === '/api/models' && req.method === 'GET') return send(res, 200, await models.get());
+    if (p === '/api/models/refresh' && req.method === 'POST') { try { return send(res, 200, await models.refresh()); } catch (err) { return send(res, 500, { error: String(err.stderr || err.message) }); } }
     if (p === '/api/terminals' && req.method === 'GET') return send(res, 200, await listTerminals());
     if (p === '/api/terminals' && req.method === 'POST') {
       const body = JSON.parse(await readBody(req) || '{}');

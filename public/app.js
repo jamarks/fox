@@ -1879,8 +1879,8 @@ function setFontSize(px) {
 
 // ---------- new session sheet (folder + optional model) ----------
 let modelsCatalog = null;
+// Asked each time a sheet opens: the server answers from its cache and only lists again after an fx login.
 async function loadModels(force = false) {
-  if (modelsCatalog && !force) return modelsCatalog;
   modelsCatalog = await (await fetch(force ? '/api/models/refresh' : '/api/models', { method: force ? 'POST' : 'GET' })).json();
   const sel = $('#ns-model');
   sel.innerHTML = `<option value="">fx default${modelsCatalog.default?.model ? ` (${esc(modelsCatalog.default.model)})` : ''}</option>`;
@@ -1900,6 +1900,7 @@ async function loadModels(force = false) {
       sel.appendChild(g);
     }
   }
+  $('#ns-auth').classList.toggle('hidden', (modelsCatalog.providers ?? []).length > 0);
   try { const last = localStorage.getItem('fox.lastModel'); if (last && [...sel.options].some((o) => o.value === last)) sel.value = last; } catch {}
   updateNsBadge();
   return modelsCatalog;

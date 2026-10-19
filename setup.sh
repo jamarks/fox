@@ -18,11 +18,21 @@ ok() { printf '  %s✓%s %s\n' "$green" "$reset" "$1"; }
 fail() { printf '  %s✗%s %s\n' "$red" "$reset" "$1" >&2; exit 1; }
 # Piped into bash, stdin is the script itself: ask questions on the terminal.
 ask() { local answer=""; [ -r /dev/tty ] || return 1; printf '  %s [Y/n] ' "$1"; read -r answer </dev/tty || return 1; [[ -z "$answer" || "$answer" =~ ^[Yy] ]]; }
+# Debian and Ubuntu (a VPS, a home server, WSL): system packages through apt, with sudo unless already root.
+SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO="sudo"
+has_apt() { command -v apt-get >/dev/null 2>&1; }
+apt_install() { $SUDO apt-get update -qq && $SUDO apt-get install -y -qq "$@"; }
 
 printf '\n%sfox%s %s· a local cockpit for fx%s\n\n' "$bold" "$reset" "$dim" "$reset"
 
 step "Node.js"
-command -v node >/dev/null 2>&1 || fail "Node 20 or newer is needed. Install it from https://nodejs.org or with 'brew install node', then run this again."
+if ! command -v node >/dev/null 2>&1; then
+  if has_apt && ask "Node.js is missing. Install Node 22 from NodeSource with apt?"; then
+    curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO bash - >/dev/null && apt_install nodejs
+  else
+    fail "Node 20 or newer is needed: 'brew install node' on macOS, Node 22 from https://github.com/nodesource/distributions on Debian or Ubuntu."
+  fi
+fi
 major="$(node -p 'process.versions.node.split(".")[0]')"
 [ "$major" -ge 20 ] || fail "Node $(node -v) is too old; fox needs 20 or newer."
 ok "node $(node -v)"
@@ -31,11 +41,26 @@ step "tmux"
 if ! command -v tmux >/dev/null 2>&1; then
   if command -v brew >/dev/null 2>&1 && ask "tmux is missing. Install it with Homebrew?"; then
     brew install tmux
+  elif has_apt && ask "tmux is missing. Install it with apt?"; then
+    apt_install tmux
   else
     fail "tmux is needed: 'brew install tmux' on macOS, 'sudo apt install tmux' on Debian or Ubuntu."
   fi
 fi
 ok "$(tmux -V)"
+
+# node-pty, the terminal, ships no Linux binaries: npm compiles it, which needs a compiler, make and python3.
+if [ "$(uname -s)" = "Linux" ]; then
+  step "Build tools"
+  if ! command -v make >/dev/null 2>&1 || ! command -v g++ >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
+    if has_apt && ask "A compiler, make and python3 are needed to build the terminal. Install them with apt?"; then
+      apt_install build-essential python3
+    else
+      fail "Install a C++ compiler, make and python3 ('sudo apt install build-essential python3'), then run this again."
+    fi
+  fi
+  ok "g++, make, python3"
+fi
 
 step "fx"
 if command -v fx >/dev/null 2>&1 || [ -x "$HOME/.local/bin/fx" ]; then
@@ -48,10 +73,14 @@ else
 fi
 
 step "fox"
-npm install -g "$REPO" --no-fund --no-audit --loglevel=error \
-  || fail "npm could not install globally. If it is a permissions error, use a Node from nvm or Homebrew instead of the system one."
-FOX="$(command -v fox || echo "$(npm prefix -g)/bin/fox")"
+# A system Node (apt) keeps its global folder for root: install into ~/.local instead of asking for sudo.
+PREFIX="$(npm prefix -g)"
+if [ ! -w "$PREFIX/lib" ] && [ ! -w "$PREFIX" ]; then PREFIX="$HOME/.local"; mkdir -p "$PREFIX"; fi
+npm install -g --prefix "$PREFIX" "$REPO" --no-fund --no-audit --loglevel=error \
+  || fail "npm could not install fox into $PREFIX."
+FOX="$PREFIX/bin/fox"
 ok "installed $FOX (${COMMIT:0:12})"
+case ":$PATH:" in *":$PREFIX/bin:"*) ;; *) printf '  %sAdd it to your PATH: echo '\''export PATH="%s/bin:$PATH"'\'' >> ~/.bashrc%s\n' "$dim" "$PREFIX" "$reset" ;; esac
 
 if [ "${FOX_NO_START:-}" = "1" ]; then
   printf '\nRun %sfox%s to start it.\n' "$bold" "$reset"
