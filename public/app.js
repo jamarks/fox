@@ -8,7 +8,9 @@ const state = {
   renaming: null, // keep the inline editor mounted while overview polling updates the rest of the UI
   pinned: new Set(), // tmux names pinned as tabs; restored after reload. Everything else is a preview or runs unseen.
   preview: null,     // the one unpinned terminal currently shown; replaced when you click another session
+  mosaic: false, mosaicIds: [], // only selected live sessions; tiles never connect to /pty
 };
+try { state.mosaicIds = JSON.parse(localStorage.getItem('fox.mosaic') ?? '[]').filter((id) => typeof id === 'string').slice(0, 4); } catch {}
 try { state.pinned = new Set(JSON.parse(localStorage.getItem('fox.pinned') ?? '[]')); } catch {}
 const savePinned = () => { try { localStorage.setItem('fox.pinned', JSON.stringify([...state.pinned])); } catch {} };
 function setPinned(name, on) {
@@ -92,6 +94,7 @@ async function refresh() {
   renderSummary();
   renderReplyInbox();
   syncTabsWithTerminals();
+  if (state.mosaic) renderMosaic();
 }
 
 function detectTransitions() {
@@ -528,7 +531,7 @@ const dictation = createDictationController(SpeechRecognition, {
 });
 function updateDictationAvailability() {
   const tab = state.tabs.get(state.activeTab);
-  dictationButton.disabled = !SpeechRecognition || !tab || tab.closed || tab.ws?.readyState !== WebSocket.OPEN;
+  dictationButton.disabled = state.mosaic || !SpeechRecognition || !tab || tab.closed || tab.ws?.readyState !== WebSocket.OPEN;
   if (!SpeechRecognition) dictationButton.title = 'Dictation needs Chrome';
   else if (!tab) dictationButton.title = 'Open a terminal to dictate';
 }
@@ -852,6 +855,51 @@ function tabLabel(name) {
   return (s ? displayTitle(s) : 'new') + ' · ' + shortPath(t?.cwd ?? '').split('/').pop();
 }
 
+// The mosaic reads the overview and a short tmux screen capture. It never creates an xterm or a socket.
+function renderMosaic() {
+  if (!state.mosaic) return;
+  const available = state.sessions.filter((s) => s.terminal && !s.archived && !s.parentId);
+  const ids = new Set(state.sessions.filter((s) => !s.archived && !s.parentId).map((s) => s.id));
+  state.mosaicIds = state.mosaicIds.filter((id) => ids.has(id)).slice(0, 4);
+  try { localStorage.setItem('fox.mosaic', JSON.stringify(state.mosaicIds)); } catch {}
+  $('#mosaic-choices').innerHTML = `<span>Watch · ${state.mosaicIds.length}/4</span>${available.filter((s) => !state.mosaicIds.includes(s.id)).map((s) => `<button type="button" data-add="${esc(s.id)}" ${state.mosaicIds.length === 4 ? 'disabled' : ''} title="Add ${esc(displayTitle(s))}">+ ${esc(displayTitle(s))}</button>`).join('')}`;
+  const tiles = $('#mosaic-tiles');
+  const scroll = new Map([...tiles.querySelectorAll('[data-tile]')].map((el) => [el.dataset.tile, el.querySelector('pre')?.scrollTop ?? 0]));
+  tiles.innerHTML = state.mosaicIds.length ? state.mosaicIds.map((id) => {
+    const s = sessionById(id);
+    return `<article class="mosaic-tile" data-tile="${esc(id)}"><header><span class="st ${esc(s.state)}" title="${esc(STATE_LABEL[s.state] ?? s.state)}"><i></i></span><strong title="${esc(displayTitle(s))}">${esc(displayTitle(s))}</strong><button type="button" data-remove="${esc(id)}" aria-label="Remove ${esc(displayTitle(s))} from mosaic" title="Remove">×</button></header><div class="mosaic-meta" title="${esc(s.workspace)}">${esc(shortPath(s.workspace))} · ${esc(modelShort(s.model) || 'model unknown')}</div><pre class="mosaic-screen" aria-label="Recent terminal output">${s.terminal ? 'Loading…' : 'No live terminal'}</pre><div class="mosaic-reply"><span>Last reply</span><p>${esc(s.latestReply?.text ?? 'No reply yet')}</p></div><button type="button" class="mosaic-open" data-expand="${esc(id)}">Open terminal ↗</button></article>`;
+  }).join('') : '<p class="mosaic-empty">Choose up to four live sessions above to watch here.</p>';
+  for (const id of state.mosaicIds) {
+    const s = sessionById(id);
+    const pre = [...tiles.querySelectorAll('[data-tile]')].find((el) => el.dataset.tile === id)?.querySelector('pre');
+    if (!s?.terminal || !pre) continue;
+    fetch(`/api/terminals/${encodeURIComponent(s.terminal)}/snapshot`).then((r) => { if (!r.ok) throw new Error('capture unavailable'); return r.json(); })
+      .then(({ text }) => { if (pre.isConnected) { pre.textContent = text.trim() || 'No terminal output yet'; pre.scrollTop = scroll.get(id) ?? 0; } })
+      .catch(() => { if (pre.isConnected) pre.textContent = 'Capture unavailable'; });
+  }
+}
+function setMosaic(on) {
+  state.mosaic = on;
+  $('#mosaic').classList.toggle('hidden', !on);
+  $('#terminals').classList.toggle('show-mosaic', on);
+  $('#toggle-mosaic').setAttribute('aria-pressed', String(on));
+  $('#toggle-mosaic').setAttribute('aria-label', on ? 'Show terminal' : 'Show session mosaic');
+  if (on) {
+    renderMosaic();
+    dictation.cancel();
+  } else safeFit(state.tabs.get(state.activeTab));
+  updateDictationAvailability();
+}
+$('#toggle-mosaic').addEventListener('click', () => setMosaic(!state.mosaic));
+$('#mosaic').addEventListener('click', (e) => {
+  const id = e.target.closest('[data-add], [data-remove], [data-expand]')?.dataset;
+  if (!id) return;
+  if (id.add && state.mosaicIds.length < 4 && !state.mosaicIds.includes(id.add)) state.mosaicIds.push(id.add);
+  if (id.remove) state.mosaicIds = state.mosaicIds.filter((s) => s !== id.remove);
+  if (id.expand) { setMosaic(false); openSession(id.expand); return; }
+  renderMosaic();
+});
+
 function renderTabs() {
   const root = $('#tabs');
   root.innerHTML = '';
@@ -918,6 +966,7 @@ async function applyUrl() {
 }
 window.addEventListener('popstate', applyUrl);
 function activateTab(name) {
+  if (state.mosaic) setMosaic(false);
   if (state.activeTab !== name) dictation.cancel();
   if (state.waking && state.terminals.find((x) => x.name === name)?.resume !== state.waking.id) state.waking = null;
   state.activeTab = name;

@@ -520,6 +520,15 @@ async function handlePanelRequest(req, res) {
       return send(res, 200, { sessions, terminals, repos, workspaces: await listWorkspaces() });
     }
     let m;
+    if ((m = p.match(/^\/api\/terminals\/([^/]+)\/snapshot$/))) {
+      const name = m[1];
+      // Only fox-owned terminals currently listed by tmux may be captured; never accept a raw tmux target.
+      if (!/^fx-[A-Za-z0-9_-]{1,100}$/.test(name)) return send(res, 404, { error: 'terminal not found' });
+      const resume = await tmuxOption(name, '@fx_resume').catch(() => null);
+      if (!safeSessionId(resume) || !existsSync(join(SESSIONS_DIR, resume, 'session.json'))) return send(res, 404, { error: 'terminal not found' });
+      const screen = await tmux('capture-pane', '-p', '-S', '-32', '-E', '-1', '-t', name);
+      return send(res, 200, { text: screen.replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))|[\x00-\x08\x0b-\x1f\x7f]/g, '').trimEnd().split('\n').slice(-32).join('\n').slice(-6000) });
+    }
     if ((m = p.match(/^\/api\/sessions\/([^/]+)\/events$/))) {
       const id = safeSessionId(m[1]);
       if (!id) return send(res, 400, { error: 'bad id' });
