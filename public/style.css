@@ -567,7 +567,12 @@ html, body { overscroll-behavior-y: none; }
 #pr-view { position: absolute; inset: 0; z-index: 6; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
 #pr-view.hidden { display: none; }
 #pr-title { font-weight: 600; font-size: 14px; }
+.pr-filters { display: flex; gap: 6px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.pr-filters button { padding: 4px 10px; font-size: 12px; border: 1px solid var(--border); }
+.pr-filters button.on { color: var(--accent); border-color: var(--accent); }
 #pr-list { overflow-y: auto; flex: 1; }
+#pr-more { align-self: center; margin: 10px; padding: 5px 14px; border: 1px solid var(--border); }
+#pr-more.hidden { display: none; }
 .pr-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto auto; gap: 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
 .pr-row:hover, .pr-row.open { background: var(--panel-2); }
 .pr-row .pt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

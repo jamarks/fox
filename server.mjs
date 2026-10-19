@@ -130,7 +130,7 @@ async function jobScripts(cwd) {
 }
 const repoCatalog = createRepoCatalog({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
 const prStates = createPrStates({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
-// Open pull requests of the workspaces' repos (prs.mjs): the Pull requests page, merged or closed from fox.
+// Pull requests of the workspaces' repos (prs.mjs): open work and merged history.
 const prs = createPrs({
   tokensDir: join(homedir(), '.config', 'fox-git', 'tokens'),
   repos: async () => [...new Set((await listWorkspaces()).flatMap((w) => (w.repos ?? []).map((r) => `${r.owner}/${r.name}`)))],
@@ -672,8 +672,8 @@ async function handlePanelRequest(req, res) {
     }
     // ---------- pull requests ----------
     if (p === '/api/prs' && req.method === 'GET') {
-      try { return send(res, 200, await prs.list({ force: url.searchParams.has('fresh') })); }
-      catch (err) { return send(res, 500, { error: err.message }); }
+      try { return send(res, 200, await prs.list({ force: url.searchParams.has('fresh'), state: url.searchParams.get('state') ?? 'open', limit: url.searchParams.get('limit') ?? 50 })); }
+      catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
     }
     if ((m = p.match(/^\/api\/prs\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)\/(\d+)(?:\/(files|merge|close))$/))) {
       const [, owner, name, num, action] = m;
