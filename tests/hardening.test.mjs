@@ -1,7 +1,7 @@
 // What fox refuses even when it is reachable: foreign names, previews that leave their project, bad terminal input.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import http from 'node:http';
 import { createServer } from 'node:net';
 import { mkdtemp, mkdir, writeFile, rm, symlink, realpath } from 'node:fs/promises';
@@ -40,6 +40,29 @@ test('without a passkey fox still refuses foreign names, keeps previews in their
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, 'session.json'), JSON.stringify({ title: 'Test', workspace_root: project }));
   await writeFile(join(dir, 'events.jsonl'), JSON.stringify({ event: { assistant: { text: 'Made `index.html`' } } }) + '\n');
+  const git = (...args) => execFileSync('git', ['-C', project, ...args], { stdio: 'pipe' });
+  git('init', '-q'); git('add', 'index.html'); git('-c', 'user.name=Test', '-c', 'user.email=test@example.org', 'commit', '-qm', 'start');
+  const worktree = join(home, 'worktree'), worktreeTwo = join(home, 'worktree-two');
+  git('worktree', 'add', '-q', '--detach', worktree); git('worktree', 'add', '-q', '--detach', worktreeTwo);
+  const prefix = join(home, 'proj-extra'); await mkdir(prefix); await writeFile(join(prefix, 'index.html'), 'other');
+  const alias = join(home, 'alias'); await symlink(project, alias);
+  const record = (path) => JSON.stringify({ timestamp_ms: 123, event: { tool_call: { call_id: 'a', tool_name: 'edit_file', arguments_json: JSON.stringify({ path }) } } }) + '\n';
+  await writeFile(join(dir, 'events.jsonl'), record('index.html'));
+  const fixture = async (id, workspace, path, { parent, archived } = {}) => {
+    const folder = join(home, '.fx', 'sessions', id); await mkdir(folder, { recursive: true });
+    await writeFile(join(folder, 'session.json'), JSON.stringify({ workspace_root: workspace }));
+    await writeFile(join(folder, 'events.jsonl'), record(path));
+    if (parent) { await mkdir(join(folder, 'subagent')); await writeFile(join(folder, 'subagent', 'owner.json'), JSON.stringify({ parent_id: parent })); }
+    return archived ? id : null;
+  };
+  await fixture('alias-session', alias, 'index.html');
+  await fixture('child-session', project, 'index.html', { parent: 'hard-session' });
+  await fixture('prefix-session', prefix, 'index.html');
+  await fixture('tree-session', worktree, 'index.html');
+  await fixture('tree-session-two', worktreeTwo, 'index.html');
+  await fixture('archive-session', project, 'index.html', { archived: true });
+  const stateDir = join(home, '.config', 'fox'); await mkdir(stateDir, { recursive: true });
+  await writeFile(join(stateDir, 'state.json'), JSON.stringify({ archived: ['archive-session'] }));
   await mkdir(join(home, '.fx', 'sessions', 'constructor'));
   await writeFile(join(home, '.fx', 'sessions', 'constructor', 'session.json'), JSON.stringify({ title: 'odd' }));
   const port = await freePort();
@@ -56,6 +79,13 @@ test('without a passkey fox still refuses foreign names, keeps previews in their
     const page = await get(port, '/');
     assert.match(page.headers['content-security-policy'], /script-src 'self'/);
     assert.equal(page.headers['x-content-type-options'], 'nosniff');
+    // Canonical symlink aliases collide, but neither a prefixed folder nor a separate Git worktree does.
+    const contention = JSON.parse((await get(port, `/api/sessions/hard-session/contention?path=${encodeURIComponent(join(project, 'index.html'))}`)).body);
+    assert.deepEqual(contention.paths[join(project, 'index.html')].map((v) => v.id), ['alias-session']);
+    const separateTree = JSON.parse((await get(port, `/api/sessions/tree-session/contention?path=${encodeURIComponent(join(worktree, 'index.html'))}`)).body);
+    assert.deepEqual(separateTree.paths, {}, 'independent worktrees do not collide with one another or the main checkout');
+    assert.equal((await get(port, `/api/sessions/hard-session/contention?path=${encodeURIComponent(join(outside, 'secret.txt'))}`)).status, 404);
+    assert.equal((await get(port, '/api/sessions/archive-session/contention?path=x')).status, 404);
     // A preview reaches its project, never through a symlink out of it or onto a hidden file.
     const { url } = JSON.parse((await get(port, `/api/sessions/hard-session/view-url?path=${encodeURIComponent(join(project, 'index.html'))}`)).body);
     const base = url.split('/').slice(0, 3).join('/');

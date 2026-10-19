@@ -328,6 +328,15 @@ button.agent-open { padding: 0; line-height: 1.45; }
 .file-open { flex: none; color: var(--muted); text-decoration: none; padding: 0 2px; }
 .file-open:hover { color: var(--accent); }
 .file.missing .file-path { text-decoration: line-through; color: var(--muted); }
+.contention-check { flex: none; font-size: 10px; color: var(--muted); border: 0; background: none; cursor: pointer; padding: 2px 4px; }
+.contention-check:hover { color: var(--warn); }
+.file-collision { padding: 0 6px 4px 30px; font-size: 10.5px; color: var(--warn); }
+.file-collision a { color: var(--warn); text-decoration: underline; }
+.contention-note { color: var(--muted); font-size: 10.5px; line-height: 1.5; margin: 5px 6px 10px; overflow-wrap: anywhere; }
+.contention-note details { color: var(--warn); margin-top: 5px; }
+.contention-note summary { cursor: pointer; }
+.collision-path { display: block; font-family: var(--mono); }
+.collision-parent { max-width: 160px; }
 .files-more { margin: 4px 6px 0; font-size: 11px; color: var(--accent); text-decoration: none; }
 .agent-note { margin-top: 4px; padding-left: 21px; font-size: 11px; color: var(--muted); font-style: italic; }
 .board .agent.selected { border-color: var(--accent); }

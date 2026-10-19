@@ -548,8 +548,9 @@ function pasteIntoTerminal(text, target = state.activeTab) {
   return true;
 }
 let agentDraft = null;
+let coordinationDraft = null;
 function closePasteSheet() {
-  $('#pastesheet').classList.add('hidden'); $('#paste-text').value = ''; agentDraft = null;
+  $('#pastesheet').classList.add('hidden'); $('#paste-text').value = ''; agentDraft = null; coordinationDraft = null;
   $('#paste-title').textContent = 'Paste'; $('#paste-hint').classList.add('hidden');
   $('#pasteform button[type="submit"]').textContent = 'Insert';
 }
@@ -626,7 +627,23 @@ $('#paste').addEventListener('click', async () => {
   $('#pastesheet').classList.remove('hidden');
   $('#paste-text').focus();
 });
-$('#pasteform').addEventListener('submit', (e) => { e.preventDefault(); if (agentDraft) { if (!$('#pasteform button[type="submit"]').disabled) void insertAgentDraft(); } else if (pasteIntoTerminal($('#paste-text').value)) closePasteSheet(); });
+$('#pasteform').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (agentDraft) { if (!$('#pasteform button[type="submit"]').disabled) void insertAgentDraft(); return; }
+  if (coordinationDraft) {
+    const id = coordinationDraft;
+    try { await refresh(); } catch { $('#paste-hint').textContent = 'Could not refresh. Your draft is kept.'; return; }
+    const s = sessionById(id);
+    if (!s || s.archived || s.parentId) { $('#paste-hint').textContent = 'Parent unavailable. Your draft is kept.'; return; }
+    try { await openSession(id); } catch { $('#paste-hint').textContent = 'Could not open the parent. Your draft is kept.'; return; } // Explicit choice; never send Enter.
+    const terminal = state.terminals.find((t) => t.resume === id);
+    if (!terminal || !pasteIntoTerminal($('#paste-text').value.replace(/[\x00-\x1f\x7f-\x9f]/g, ' '), terminal.name)) {
+      $('#paste-hint').textContent = 'Terminal is not ready. Your draft is kept; try Insert again.'; return;
+    }
+    closePasteSheet(); return;
+  }
+  if (pasteIntoTerminal($('#paste-text').value)) closePasteSheet();
+});
 $('#paste-cancel').addEventListener('click', closePasteSheet);
 $('#pastesheet').addEventListener('click', (e) => { if (e.target.id === 'pastesheet') closePasteSheet(); });
 async function openTerminal({ cwd, resume, provider, model }, stillWanted = () => true) {
@@ -1379,6 +1396,7 @@ function renderArtifactCard(id, files) {
 }
 
 // ---------- files the session touched ----------
+let contentionView = null; // fetched on demand, never during overview polling
 let filesCollapsed = false;
 try { filesCollapsed = localStorage.getItem('fox.filesCollapsed') === '1'; } catch {}
 function fileRow(f) {
@@ -1388,8 +1406,10 @@ function fileRow(f) {
   const name = f.rel.split('/').pop(), dir = f.rel.slice(0, f.rel.length - name.length);
   const kind = hasPreview(f.path) ? '◫' : '{}';
   const target = f.exists ? `data-view-file="${esc(f.path)}" data-view-mode="${defaultMode(f)}" title="Open in the middle"` : '';
+  const others = contentionView?.id === state.selected ? contentionView.paths[f.path] ?? [] : [];
   return `<div class="file ${f.exists ? '' : 'missing'}" ${target}>
-    <div class="file-head"><span class="file-kind" aria-hidden="true">${kind}</span><span class="file-path" title="${esc(f.path)}"><span class="file-name">${esc(name)}</span>${dir ? `<span class="file-dir">${esc(dir.replace(/\/$/, ''))}</span>` : ''}</span>${subs ? `<span class="file-by" title="by subagent ${subs}">${kids[0]}${kids.length > 1 ? ' +' + (kids.length - 1) : ''}</span>` : ''}${f.exists ? `<a href="#" class="file-open" data-open-file="${esc(f.path)}" title="Open with the default app">↗</a>` : '<span class="file-by">deleted</span>'}</div>
+    <div class="file-head"><span class="file-kind" aria-hidden="true">${kind}</span><span class="file-path" title="${esc(f.path)}"><span class="file-name">${esc(name)}</span>${dir ? `<span class="file-dir">${esc(dir.replace(/\/$/, ''))}</span>` : ''}</span>${subs ? `<span class="file-by" title="by subagent ${subs}">${kids[0]}${kids.length > 1 ? ' +' + (kids.length - 1) : ''}</span>` : ''}${['write', 'edit'].includes(f.action) ? `<button type="button" class="contention-check" data-check-contention="${esc(f.path)}" title="Check recorded overlap in this checkout">check</button>` : ''}${f.exists ? `<a href="#" class="file-open" data-open-file="${esc(f.path)}" title="Open with the default app">↗</a>` : '<span class="file-by">deleted</span>'}</div>
+    ${others.length ? `<div class="file-collision">also edited by ${others.map((o) => `<a href="#" data-collision-session="${esc(o.id)}" data-collision-index="${o.eventIndex}">${esc(o.id)}${o.actor !== o.id ? ' · subagent' : ''}</a>`).join(', ')}</div>` : ''}
   </div>`;
 }
 // What the session made or changed, newest change first. Files it only read are left out.
@@ -1397,9 +1417,45 @@ function filesSection(id, files) {
   const shown = (files ?? []).filter((f) => f.action !== 'read').sort((a, b) => b.mtime - a.mtime);
   if (!shown.length) return '';
   const head = `<a href="#" class="section-title fold ${filesCollapsed ? 'closed' : ''}" data-toggle-files>files <span class="fold-n">${shown.length}</span></a>`;
-  return filesCollapsed ? head : `${head}<div class="files">${shown.map(fileRow).join('')}</div>`;
+  const collisions = contentionView?.id === id ? Object.entries(contentionView.paths).filter(([, others]) => others.length) : [];
+  const parentIds = [...new Set(collisions.flatMap(([, others]) => others.map((o) => o.actor)).concat(sessionById(id)?.parentId ?? id))].filter((sid) => { const s = sessionById(sid); return s && !s.archived && !s.parentId; });
+  const note = contentionView?.id === id ? `<div class="contention-note">${esc(contentionView.scope)} · Recorded file-tool writes in the latest turn only; shell edits and unflushed fx events may be missing. Not a lock.${collisions.length ? `<details><summary>Coordinate ${collisions.length} overlapping ${collisions.length === 1 ? 'file' : 'files'}</summary><div>${collisions.map(([p]) => `<span class="collision-path">${esc(p)}</span>`).join('')}</div><select class="collision-parent" aria-label="Parent to coordinate with">${parentIds.map((sid) => `<option value="${esc(sid)}">${esc(displayTitle(sessionById(sid)))}</option>`).join('')}</select> <button type="button" data-coordinate>Draft prompt</button></details>` : ' No recorded overlap.'}</div>` : '';
+  return filesCollapsed ? head : `${head}<div class="files">${shown.map(fileRow).join('')}</div>${note}`;
 }
-$('#transcript').addEventListener('click', (e) => {
+$('#transcript').addEventListener('click', async (e) => {
+  const check = e.target.closest('[data-check-contention]');
+  if (check) {
+    e.preventDefault(); e.stopPropagation();
+    const id = state.selected;
+    const response = await fetch(`/api/sessions/${encodeURIComponent(id)}/contention?path=${encodeURIComponent(check.dataset.checkContention)}`);
+    if (!response.ok) { toast('Could not check this checkout'); return; }
+    contentionView = { id, ...await response.json() };
+    if (state.selected === id) { lastTranscriptKey = ''; await loadTranscript(id); }
+    return;
+  }
+  const collision = e.target.closest('[data-collision-session]');
+  if (collision) {
+    e.preventDefault(); e.stopPropagation();
+    const id = collision.dataset.collisionSession;
+    if (!sessionById(id)) return;
+    globalTool = { id, eventIndex: Number(collision.dataset.collisionIndex) };
+    convoShown.add(id);
+    selectSession(id);
+    return;
+  }
+  if (e.target.closest('[data-coordinate]')) {
+    e.preventDefault(); e.stopPropagation();
+    const id = e.target.closest('.contention-note').querySelector('.collision-parent').value;
+    if (!sessionById(id)) return;
+    coordinationDraft = id; agentDraft = null;
+    $('#paste-title').textContent = 'Coordinate';
+    $('#paste-hint').classList.remove('hidden');
+    $('#paste-hint').textContent = `To ${displayTitle(sessionById(id))}. Edit this draft; Insert never sends it.`;
+    $('#pasteform button[type="submit"]').textContent = 'Insert into parent';
+    $('#paste-text').value = `Please coordinate recorded overlapping edits with ${state.selected} on ${Object.keys(contentionView.paths).filter((p) => contentionView.paths[p].length).join(', ')}. Check current changes before editing; shell edits and unflushed events may be missing.`;
+    $('#pastesheet').classList.remove('hidden'); $('#paste-text').focus();
+    return;
+  }
   const opener = e.target.closest('[data-open-file]');
   if (opener) { e.preventDefault(); return post(`/api/sessions/${state.selected}/open-file`, { path: opener.dataset.openFile }); }
   const full = e.target.closest('[data-full-view]');
@@ -1445,6 +1501,7 @@ const globalQuery = $('#global-search-query');
 const globalResults = $('#global-search-results');
 let globalHits = [], globalActive = 0, globalRequest = 0, globalTimer;
 let globalMessage = null;
+let globalTool = null;
 function openGlobalSearch() {
   globalSearch.classList.remove('hidden');
   globalQuery.value = '';
@@ -1561,7 +1618,7 @@ async function loadTranscript(id, quiet = false) {
   if (mobileLayout.matches) html.push('<div class="section-title">conversation</div>');
   else if (!isChild && showConvo) html.push(`<div class="section-title">conversation · <a href="#" data-hide-convo="${esc(id)}">hide</a></div>`);
   let messageIndex = 0;
-  for (const ev of showConvo ? events : []) {
+  for (const [eventIndex, ev] of (showConvo ? events : []).entries()) {
     if (mobileLayout.matches && ev.kind !== 'user' && ev.kind !== 'assistant') continue;
     if (!isChild && ev.kind === 'tool_call' && ev.name === 'subagent' && parent.children?.length) continue; // already in the board
     const match = globalMessage?.id === id && globalMessage.index === messageIndex;
@@ -1571,7 +1628,7 @@ async function loadTranscript(id, quiet = false) {
     else if (ev.kind === 'tool_call') {
       const st = ev.result?.status ?? 'pending';
       const isSub = ev.name === 'subagent';
-      html.push(`<details class="tool ${st}">
+      html.push(`<details class="tool ${st}${globalTool?.id === id && globalTool.eventIndex === eventIndex ? ' global-match' : ''}" data-event-index="${eventIndex}">
         <summary><span class="dot"></span><span class="name">${isSub ? ICON.threads + ' ' : ''}${esc(ev.name)}</span><span class="brief">${esc(briefArgs(ev.args))}</span></summary>
         <pre class="label">args</pre><pre>${esc(typeof ev.args === 'string' ? ev.args : JSON.stringify(ev.args, null, 2))}</pre>
         ${ev.result ? `<pre class="label">result · ${st} · ${ev.result.bytes} bytes</pre><pre>${esc(ev.result.preview)}</pre>` : ''}
@@ -1602,6 +1659,11 @@ async function loadTranscript(id, quiet = false) {
   if (lastEventCount.id !== id) body.scrollTop = 0;
   else if (grew && wasAtBottom) body.scrollTop = body.scrollHeight;
   lastEventCount = { id, n: events.length };
+  if (globalTool?.id === id) {
+    const target = body.querySelector(`.tool[data-event-index="${globalTool.eventIndex}"]`);
+    if (target) { target.open = true; target.scrollIntoView({ block: 'center' }); }
+    globalTool = null;
+  }
   if (globalMessage?.id === id) {
     const target = body.querySelector(`.msg[data-message="${globalMessage.index}"]`);
     if (target && !globalMessage.scrolled) { target.scrollIntoView({ block: 'center' }); globalMessage.scrolled = true; }
@@ -1978,7 +2040,7 @@ function renderNsWorkspace(wsp) {
   box.classList.toggle('hidden', !wsp);
   if (!wsp) return (box.innerHTML = '');
   const busy = state.sessions.filter((s) => !s.archived && s.terminal && (s.state === 'working' || s.state === 'needs_input') && workspaceFor(s.workspace)?.id === wsp.id);
-  box.innerHTML = `${wsp.repos.length ? `<label class="ns-label">Repos · shared by every session in this workspace</label>${wsp.repos.map(wsRepoLine).join('')}` : ''}${busy.length ? `<div class="ws-busy">${busy.length === 1 ? 'Another session is working here' : `${busy.length} sessions are working here`}: they edit the same files.</div>` : ''}`;
+  box.innerHTML = `${wsp.repos.length ? `<label class="ns-label">Repos · shared by every session in this workspace</label>${wsp.repos.map(wsRepoLine).join('')}` : ''}${busy.length ? `<div class="ws-busy">${busy.length === 1 ? 'Another session is working here' : `${busy.length} sessions are working here`}: workspace may be shared. Check recorded file overlap in Read.</div>` : ''}`;
 }
 function updateNsBadge() {
   const v = $('#ns-model').value;
