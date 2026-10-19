@@ -31,3 +31,9 @@ export function lastAnswerModel(lines) {
   }
   return null;
 }
+
+// Before the first reply is saved, fx's footer is the only source for the selected model.
+export function screenModel(screen) {
+  const footer = screen.split('\n').reverse().find((line) => /\bauto\s*·\s*[^·\n]+\s*·/.test(line));
+  return footer?.match(/\bauto\s*·\s*([^·\n]+?)\s*·/)?.[1]?.trim() ?? null;
+}

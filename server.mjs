@@ -16,7 +16,7 @@ import * as pty from 'node-pty';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createSearchIndex } from './search.mjs';
-import { latestCompletedReply, lastAnswerModel } from './inbox.mjs';
+import { latestCompletedReply, lastAnswerModel, screenModel } from './inbox.mjs';
 import { readMetrics } from './metrics.mjs';
 import { TOOLS, isInstalled, isEnabled, withEnabled, addArgs } from './tools.mjs';
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
@@ -522,6 +522,11 @@ async function handlePanelRequest(req, res) {
         const t = byResume.get(s.id);
         s.terminal = t ? t.name : null;
         s.state = t ? t.activity : (s.live ? 'external' : 'idle');
+        if (t && !s.latestReply) {
+          // The first turn can run for a long time before fx writes any reply to events.jsonl.
+          const screen = await tmux('capture-pane', '-p', '-t', t.name).catch(() => '');
+          s.model = screenModel(screen) ?? s.model;
+        }
       }
       // Los hijos no tienen terminal propia: su estado sale de children.json del padre.
       for (const s of sessions) {
@@ -542,8 +547,12 @@ async function handlePanelRequest(req, res) {
       if (!/^fx-[A-Za-z0-9_-]{1,100}$/.test(name)) return send(res, 404, { error: 'terminal not found' });
       const resume = await tmuxOption(name, '@fx_resume').catch(() => null);
       if (!safeSessionId(resume) || !existsSync(join(SESSIONS_DIR, resume, 'session.json'))) return send(res, 404, { error: 'terminal not found' });
-      const screen = await tmux('capture-pane', '-p', '-S', '-32', '-E', '-1', '-t', name);
-      return send(res, 200, { text: screen.replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))|[\x00-\x08\x0b-\x1f\x7f]/g, '').trimEnd().split('\n').slice(-32).join('\n').slice(-6000) });
+      // No -E: tmux's -1 endpoint is history, not the visible pane where fx is answering.
+      const screen = await tmux('capture-pane', '-p', '-J', '-S', '-32', '-t', name);
+      const lines = screen.replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))|[\x00-\x08\x0b-\x1f\x7f]/g, '').split('\n');
+      while (lines.length && !lines.at(-1).trim()) lines.pop();
+      const text = lines.slice(-32).join('\n').slice(-6000);
+      return send(res, 200, { text, model: screenModel(text) });
     }
     if ((m = p.match(/^\/api\/sessions\/([^/]+)\/events$/))) {
       const id = safeSessionId(m[1]);

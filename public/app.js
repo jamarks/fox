@@ -864,17 +864,22 @@ function renderMosaic() {
   try { localStorage.setItem('fox.mosaic', JSON.stringify(state.mosaicIds)); } catch {}
   $('#mosaic-choices').innerHTML = `<span>Watch · ${state.mosaicIds.length}/4</span>${available.filter((s) => !state.mosaicIds.includes(s.id)).map((s) => `<button type="button" data-add="${esc(s.id)}" ${state.mosaicIds.length === 4 ? 'disabled' : ''} title="Add ${esc(displayTitle(s))}">+ ${esc(displayTitle(s))}</button>`).join('')}`;
   const tiles = $('#mosaic-tiles');
-  const scroll = new Map([...tiles.querySelectorAll('[data-tile]')].map((el) => [el.dataset.tile, el.querySelector('pre')?.scrollTop ?? 0]));
   tiles.innerHTML = state.mosaicIds.length ? state.mosaicIds.map((id) => {
     const s = sessionById(id);
-    return `<article class="mosaic-tile" data-tile="${esc(id)}"><header><span class="st ${esc(s.state)}" title="${esc(STATE_LABEL[s.state] ?? s.state)}"><i></i></span><strong title="${esc(displayTitle(s))}">${esc(displayTitle(s))}</strong><button type="button" data-remove="${esc(id)}" aria-label="Remove ${esc(displayTitle(s))} from mosaic" title="Remove">×</button></header><div class="mosaic-meta" title="${esc(s.workspace)}">${esc(shortPath(s.workspace))} · ${esc(modelShort(s.model) || 'model unknown')}</div><pre class="mosaic-screen" aria-label="Recent terminal output">${s.terminal ? 'Loading…' : 'No live terminal'}</pre><div class="mosaic-reply"><span>Last reply</span><p>${esc(s.latestReply?.text ?? 'No reply yet')}</p></div><button type="button" class="mosaic-open" data-expand="${esc(id)}">Open terminal ↗</button></article>`;
+    return `<article class="mosaic-tile" data-tile="${esc(id)}"><header><span class="st ${esc(s.state)}" title="${esc(STATE_LABEL[s.state] ?? s.state)}"><i></i></span><strong title="${esc(displayTitle(s))}">${esc(displayTitle(s))}</strong><button type="button" data-remove="${esc(id)}" aria-label="Remove ${esc(displayTitle(s))} from mosaic" title="Remove">×</button></header><div class="mosaic-meta" title="${esc(s.workspace)}">${esc(shortPath(s.workspace))} · ${esc(modelShort(s.model) || 'model unknown')}</div><pre class="mosaic-screen" aria-label="Recent terminal output">${s.terminal ? 'Loading…' : 'No live terminal'}</pre><div class="mosaic-reply"><span>${s.latestReply ? 'Last reply' : 'Current turn'}</span><p>${esc(s.latestReply?.text ?? (s.terminal && s.state === 'working' ? 'Working…' : 'No completed reply yet'))}</p></div><button type="button" class="mosaic-open" data-expand="${esc(id)}">Open terminal ↗</button></article>`;
   }).join('') : '<p class="mosaic-empty">Choose up to four live sessions above to watch here.</p>';
   for (const id of state.mosaicIds) {
     const s = sessionById(id);
-    const pre = [...tiles.querySelectorAll('[data-tile]')].find((el) => el.dataset.tile === id)?.querySelector('pre');
+    const tile = [...tiles.querySelectorAll('[data-tile]')].find((el) => el.dataset.tile === id);
+    const pre = tile?.querySelector('pre');
     if (!s?.terminal || !pre) continue;
     fetch(`/api/terminals/${encodeURIComponent(s.terminal)}/snapshot`).then((r) => { if (!r.ok) throw new Error('capture unavailable'); return r.json(); })
-      .then(({ text }) => { if (pre.isConnected) { pre.textContent = text.trim() || 'No terminal output yet'; pre.scrollTop = scroll.get(id) ?? 0; } })
+      .then(({ text, model }) => {
+        if (!pre.isConnected) return;
+        pre.textContent = text.trim() || 'No terminal output yet';
+        pre.scrollTop = pre.scrollHeight;
+        if (!s.latestReply && model) tile.querySelector('.mosaic-meta').textContent = `${shortPath(s.workspace)} · ${modelShort(model)}`;
+      })
       .catch(() => { if (pre.isConnected) pre.textContent = 'Capture unavailable'; });
   }
 }
