@@ -26,7 +26,7 @@ import { createFxSettings } from './fxsettings.mjs';
 import { fastForward, SAFE_GIT } from './gitsync.mjs';
 import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
 import { createJobStore, createRunner, updateJobRepo } from './jobs.mjs';
-import { createPrStates } from './prstate.mjs';
+import { createPrStates, PR_URL } from './prstate.mjs';
 import { createPrs } from './prs.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 import { ensureFoxNotes, foxNotes } from './notes.mjs';
@@ -134,6 +134,22 @@ async function jobScripts(cwd) {
 }
 const repoCatalog = createRepoCatalog({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
 const prStates = createPrStates({ tokensDir: join(homedir(), '.config', 'fox-git', 'tokens') });
+// Which job run opened a pull request (its FOX_LINK), and the screenshots fx saved there, for the Pull requests page.
+let prRunsCache = { at: 0, map: new Map() };
+async function prRuns() {
+  if (Date.now() - prRunsCache.at < 30_000) return prRunsCache.map;
+  const map = new Map();
+  for (const job of await jobStore.list().catch(() => [])) {
+    for (const run of await jobStore.runs(job.id).catch(() => [])) { // newest first: the newest run that linked a PR wins
+      for (const l of run.links ?? []) {
+        if (!PR_URL.test(l.url) || map.has(l.url.replace(/[?#].*$/, ''))) continue;
+        map.set(l.url.replace(/[?#].*$/, ''), { job: job.id, run: run.id, shots: (run.outputs ?? []).map((o) => o.name).filter((n) => /^screenshot[\w.-]*\.(png|jpe?g|webp)$/i.test(n)).sort() });
+      }
+    }
+  }
+  prRunsCache = { at: Date.now(), map };
+  return map;
+}
 // Open pull requests of the workspaces' repos (prs.mjs): the Pull requests page, merged or closed from fox.
 const prs = createPrs({
   tokensDir: join(homedir(), '.config', 'fox-git', 'tokens'),
@@ -646,7 +662,11 @@ async function handlePanelRequest(req, res) {
     }
     // ---------- pull requests ----------
     if (p === '/api/prs' && req.method === 'GET') {
-      try { return send(res, 200, await prs.list({ force: url.searchParams.has('fresh') })); }
+      try {
+        const out = await prs.list({ force: url.searchParams.has('fresh') });
+        const runs = await prRuns();
+        return send(res, 200, { ...out, prs: out.prs.map((pr) => ({ ...pr, run: runs.get(pr.url) ?? null })) });
+      }
       catch (err) { return send(res, 500, { error: err.message }); }
     }
     if ((m = p.match(/^\/api\/prs\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)\/(\d+)(?:\/(files|merge|close))$/))) {

@@ -2305,8 +2305,11 @@ function renderPrList() {
     const filesHtml = files ? `<div class="pr-files">${files.map((x) => `<span class="pf" title="${esc(x.path)}">${esc(x.path)}</span><span class="pr-add">+${x.additions}</span><span class="pr-del">−${x.deletions}</span>`).join('')}</div>` : '<div class="muted">Loading files…</div>';
     const review = p.review ? `<div class="pr-review md ${esc(p.review.verdict)}"><b>fox review</b> ${renderMarkdown(p.review.text.replace(ANSI, ''))}</div>` : '';
     const text = prText(p.body);
-    return row + `<div class="pr-open">${text ? `<div class="pbody md">${renderMarkdown(text)}</div>` : ''}${filesHtml}${review}`
-      + `<div class="pr-links">${p.linear ? `<a class="pr-chip" href="${esc(p.linear)}" target="_blank" rel="noopener">${esc(p.issue ?? 'Linear')} ↗</a>` : ''}<a class="pr-chip" href="${esc(p.url)}" target="_blank" rel="noopener">GitHub ↗</a><a class="pr-chip" href="${esc(p.url)}/files" target="_blank" rel="noopener">diff ↗</a>`
+    // What the job's run kept: the screenshots fx took of the change, and the run itself (log, files).
+    const runUrl = p.run ? `/api/jobs/${encodeURIComponent(p.run.job)}/runs/${encodeURIComponent(p.run.run)}/files/` : '';
+    const shots = p.run?.shots?.length ? `<div class="pr-shots">${p.run.shots.map((n) => `<a href="${runUrl}${encodeURIComponent(n)}" target="_blank" rel="noopener"><img src="${runUrl}${encodeURIComponent(n)}" alt="${esc(n)}" loading="lazy" /></a>`).join('')}</div>` : '';
+    return row + `<div class="pr-open">${text ? `<div class="pbody md">${renderMarkdown(text)}</div>` : ''}${shots}${filesHtml}${review}`
+      + `<div class="pr-links">${p.linear ? `<a class="pr-chip" href="${esc(p.linear)}" target="_blank" rel="noopener">${esc(p.issue ?? 'Linear')} ↗</a>` : ''}<a class="pr-chip" href="${esc(p.url)}" target="_blank" rel="noopener">GitHub ↗</a><a class="pr-chip" href="${esc(p.url)}/files" target="_blank" rel="noopener">diff ↗</a>${p.run ? `<a class="pr-chip" href="/?job=${encodeURIComponent(p.run.job)}&run=${encodeURIComponent(p.run.run)}">job run</a>` : ''}`
       + `<input class="pr-reason" placeholder="Why close it? Optional, it goes on the PR" maxlength="1000" /></div></div>`;
   });
   const errors = (data.errors ?? []).map((e) => `<div>${esc(e.repo)}: ${esc(e.error)}</div>`).join('');
