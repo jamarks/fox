@@ -6,7 +6,7 @@ import { runInNewContext } from 'node:vm';
 const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
 const markdown = await readFile(new URL('../public/markdown.js', import.meta.url), 'utf8');
 const css = await readFile(new URL('../public/style.css', import.meta.url), 'utf8');
-const mosaic = app.slice(app.indexOf('function renderMosaic() {'), app.indexOf('\nfunction setMosaic('));
+const mosaic = app.slice(app.indexOf('let mosaicCapture = 0;'), app.indexOf('\nfunction setMosaic('));
 
 test('mosaic renders count-based tiles and formatted, escaped last replies', () => {
   const choices = { innerHTML: '' };
@@ -36,6 +36,30 @@ test('mosaic renders count-based tiles and formatted, escaped last replies', () 
   assert.match(tiles.innerHTML, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(tiles.innerHTML, /<script>|\*\*Done\*\*/);
   assert.match(choices.innerHTML, /Watch · 4\/4/);
+});
+
+test('waking a watched session resumes it once without opening a tab', async () => {
+  const wake = app.slice(app.indexOf('const mosaicWakes = new Map();'), app.indexOf('function updateMosaicScreen('));
+  const session = { id: 'sleeping', workspace: '/workspace' };
+  const requests = [];
+  let resolvePost;
+  const context = {
+    state: { mosaicIds: [session.id] },
+    post: (path, body) => { requests.push({ path, body }); return new Promise((resolve) => { resolvePost = resolve; }); },
+    refresh: () => { context.refreshed = true; },
+    renderMosaic: () => { context.rendered = true; },
+  };
+  runInNewContext(`${wake}\nthis.wake = wakeMosaicSession`, context);
+  context.wake(session);
+  context.wake(session); // overview polling while the first resume is still running
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].path, '/api/terminals');
+  assert.equal(requests[0].body.resume, session.id);
+  assert.equal(requests[0].body.cwd, session.workspace);
+  resolvePost({ name: 'fx-sleeping' });
+  await new Promise(setImmediate);
+  assert.equal(context.refreshed, true);
+  assert.equal(context.rendered, undefined);
 });
 
 test('mosaic layout fills 1 and 2 slots and spans the third tile without a hole', () => {

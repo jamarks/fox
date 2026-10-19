@@ -17,11 +17,15 @@ test('screen model reads the footer regardless of fx mode', () => {
 test('mosaic marks a first unfinished turn as working, not an absent reply', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const markdown = await readFile(new URL('../public/markdown.js', import.meta.url), 'utf8');
-  const render = `${markdown}\n${source.slice(source.indexOf('function renderMosaic()'), source.indexOf('function setMosaic(on)'))}\nrenderMosaic()`;
-  const pre = { isConnected: true, textContent: '', scrollTop: 0, scrollHeight: 300 };
+  const render = `${markdown}\n${source.slice(source.indexOf('let mosaicCapture = 0;'), source.indexOf('function setMosaic(on)'))}\nrenderMosaic()`;
+  const pre = { isConnected: true, dataset: {}, textContent: 'Loading…', scrollTop: 0, scrollHeight: 300, clientHeight: 300 };
   const meta = { textContent: '' };
-  const tile = { dataset: { tile: 'session-two' }, querySelector: (selector) => selector === 'pre' ? pre : meta };
-  const tiles = { dataset: {}, innerHTML: '', querySelectorAll: () => [tile] };
+  const replyText = { innerHTML: '' };
+  const reply = { querySelector: (selector) => selector === 'span' ? { textContent: '' } : replyText };
+  const elements = { pre, '.st': {}, strong: {}, '[data-remove]': { setAttribute() {} }, '.mosaic-meta': meta, '.mosaic-reply': reply };
+  const tile = { dataset: { tile: 'session-two' }, querySelector: (selector) => elements[selector] };
+  let html = '';
+  const tiles = { dataset: {}, get innerHTML() { return html; }, set innerHTML(value) { html = value; }, querySelectorAll: () => html.includes('data-tile') ? [tile] : [] };
   const choices = { innerHTML: '' };
   const session = { id: 'session-two', title: 'Answering', terminal: 'fx-session-two', state: 'working', workspace: '/demo', model: 'old-default', latestReply: null };
   const context = {
@@ -32,7 +36,8 @@ test('mosaic marks a first unfinished turn as working, not an absent reply', asy
     esc: (s) => String(s), STATE_LABEL: {},
     fetch: async () => ({ ok: true, json: async () => ({ text: 'line at the bottom', model: 'gpt-6-sol' }) }),
   };
-  runInNewContext(render, context);
+  runInNewContext(render.replace(/renderMosaic\(\)$/, 'this.render = renderMosaic'), context);
+  context.render();
   assert.match(tiles.innerHTML, /Current turn<\/span><div class="md mosaic-reply-text"><p>Working…<\/p><\/div>/);
   assert.doesNotMatch(tiles.innerHTML, /No reply yet/);
   await new Promise(setImmediate);
@@ -41,7 +46,7 @@ test('mosaic marks a first unfinished turn as working, not an absent reply', asy
   assert.equal(meta.textContent, '/demo · gpt-6-sol');
   session.latestReply = { text: 'Older answer' };
   meta.textContent = '';
-  runInNewContext(render, context);
+  context.render();
   await new Promise(setImmediate);
   assert.equal(meta.textContent, '/demo · gpt-6-sol'); // the current turn may use a different model
 });
