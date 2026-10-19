@@ -31,6 +31,7 @@ import { createPrs } from './prs.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 import { ensureFoxNotes, foxNotes } from './notes.mjs';
 import { createModels } from './models.mjs';
+import { latestWrites, intersectWrites } from './contention.mjs';
 const execFileP = promisify(execFile);
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -306,6 +307,44 @@ async function sessionFiles(id) {
   return out.sort((a, b) => FILE_RANK[b.action] - FILE_RANK[a.action] || a.rel.localeCompare(b.rel));
 }
 
+// Cache parsed latest-turn provenance by disk stamp; overview polling never scans contention.
+const contentionCache = new Map();
+const inside = (root, path) => { const rel = relative(root, path); return rel === '' || (rel !== '..' && !rel.startsWith('..' + sep) && !rel.startsWith(sep)); };
+const canonicalFile = (cwd, path) => {
+  const abs = resolve(cwd, path.replace(/^~(?=\/)/, homedir()));
+  return realPath(abs) === abs ? join(realPath(dirname(abs)), basename(abs)) : realPath(abs);
+};
+async function contentionWrites(s) {
+  const file = join(SESSIONS_DIR, s.id, 'events.jsonl');
+  const stamp = await stat(file).then((v) => `${v.mtimeMs}:${v.size}`).catch(() => 'missing');
+  const cwd = realPath(s.workspace);
+  const hit = contentionCache.get(s.id);
+  if (hit?.stamp === stamp && hit.cwd === cwd) return hit.writes;
+  const writes = latestWrites(await readEvents(s.id), cwd, canonicalFile);
+  contentionCache.set(s.id, { stamp, cwd, writes });
+  return writes;
+}
+async function sessionContention(id, path) {
+  const sessions = await listSessions();
+  const selected = sessions.find((s) => s.id === id);
+  if (!selected || selected.archived || !path ||
+      (selected.parentId && sessions.find((s) => s.id === selected.parentId)?.archived)) return null;
+  const files = await sessionFiles(id);
+  if (!files.some((f) => f.path === path)) return null;
+  const repo = realPath((await gitInfo(dirname(path)))?.root ?? selected.workspace);
+  if (!inside(repo, realPath(path)) ||
+      !(inside(repo, realPath(selected.workspace)) || inside(realPath(selected.workspace), repo))) return null;
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const actor = (s) => s.parentId ?? s.id;
+  const candidates = sessions.filter((s) => !s.archived && !byId.get(actor(s))?.archived &&
+    (inside(repo, realPath(s.workspace)) || inside(realPath(s.workspace), repo)));
+  const members = await Promise.all(candidates.map(async (s) => ({ id: s.id, parentId: s.parentId,
+    writes: (await contentionWrites(s)).filter((w) => inside(repo, w.path)),
+  })));
+  return { paths: intersectWrites(members, actor(selected)), scope: repo,
+    note: 'Recorded file-tool writes in the latest turn only; shell edits and unflushed fx events may be missing.' };
+}
+
 async function readEvents(id) {
   const dir = join(SESSIONS_DIR, id);
   let raw;
@@ -558,6 +597,12 @@ async function handlePanelRequest(req, res) {
       const id = safeSessionId(m[1]);
       if (!id) return send(res, 400, { error: 'bad id' });
       return send(res, 200, await readEvents(id));
+    }
+    if ((m = p.match(/^\/api\/sessions\/([^/]+)\/contention$/))) {
+      const id = safeSessionId(m[1]);
+      if (!id) return send(res, 400, { error: 'bad id' });
+      const result = await sessionContention(id, url.searchParams.get('path'));
+      return send(res, result ? 200 : 404, result ?? { error: 'file not in active session' });
     }
     // Files the session touched; content, preview and "open" only for paths in that list.
     if ((m = p.match(/^\/api\/sessions\/([^/]+)\/(files|file|open-file|preview|view-url)$/))) {
