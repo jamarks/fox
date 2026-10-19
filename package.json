@@ -1,7 +1,7 @@
 {
   "name": "fox",
   "version": "0.1.0",
-  "description": "Local web panel for the fx coding agent: sessions, tmux-backed terminals, live states and transcripts",
+  "description": "Your fx coding agents on your own server, from any device: sessions, subagents, tmux-backed terminals, jobs",
   "license": "MIT",
   "author": "Javier Wasserman",
   "repository": {

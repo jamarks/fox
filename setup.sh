@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# fox installer: checks Node, tmux and fx, installs fox from GitHub and starts it.
+# fox installer: checks Node, tmux and fx, installs fox from GitHub and starts it. On a server, docs/server.md.
 #   curl -fsSL https://raw.githubusercontent.com/jamarks/fox/release/setup.sh | bash
 # FOX_NO_START=1 installs without starting fox. FOX_REF=<commit, branch or tag> installs that instead of release.
 set -euo pipefail
@@ -24,7 +24,7 @@ has_apt() { command -v apt-get >/dev/null 2>&1; }
 # </dev/null: piped into bash, stdin is the rest of this script, and apt would read it. No questions (tzdata) either.
 apt_install() { $SUDO env DEBIAN_FRONTEND=noninteractive apt-get update -qq </dev/null && $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$@" </dev/null >/dev/null; }
 
-printf '\n%sfox%s %s· a local cockpit for fx%s\n\n' "$bold" "$reset" "$dim" "$reset"
+printf '\n%sfox%s %s· your fx agents, from any device%s\n\n' "$bold" "$reset" "$dim" "$reset"
 
 step "Node.js"
 if ! command -v node >/dev/null 2>&1; then
