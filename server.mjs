@@ -31,6 +31,7 @@ import { createPrs } from './prs.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 import { ensureFoxNotes, foxNotes } from './notes.mjs';
 import { createModels } from './models.mjs';
+import { summarizeEvidence } from './evidence.mjs';
 const execFileP = promisify(execFile);
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -355,6 +356,28 @@ async function readEvents(id) {
   return out;
 }
 
+// Cache per events-file stamp; fx may not flush a turn until later, so the API reports the stamp.
+const evidenceCache = new Map();
+async function sessionEvidence(id) {
+  const file = join(SESSIONS_DIR, id, 'events.jsonl');
+  const st = await stat(file).catch(() => null);
+  const stamp = st ? `${st.mtimeMs}:${st.size}` : 'missing';
+  const hit = evidenceCache.get(id);
+  if (hit?.stamp === stamp) return hit.value;
+  const events = await readEvents(id);
+  for (const ev of events) {
+    if (ev.kind !== 'tool_call' || !ev.result?.artifact || !/^(?:functions\.)?shell$/.test(ev.name ?? '')) continue;
+    // Only complete, bounded JSON can establish an exit. Never guess from a preview of a large artifact.
+    const name = ev.result.artifact;
+    if (!/^[A-Za-z0-9._-]+$/.test(name)) continue;
+    const size = await stat(join(SESSIONS_DIR, id, 'tool-results', name)).catch(() => null);
+    if (size?.isFile() && size.size <= 256 * 1024) ev.result.detail = await readArtifact(id, name);
+  }
+  const value = { ...summarizeEvidence(events), stamp, note: 'Evidence may lag until fx flushes the turn.' };
+  evidenceCache.set(id, { stamp, value });
+  return value;
+}
+
 async function readArtifact(id, name) {
   if (!/^[A-Za-z0-9._-]+$/.test(name)) return null;
   try { return await readFile(join(SESSIONS_DIR, id, 'tool-results', name), 'utf8'); } catch { return null; }
@@ -541,6 +564,11 @@ async function handlePanelRequest(req, res) {
       const id = safeSessionId(m[1]);
       if (!id) return send(res, 400, { error: 'bad id' });
       return send(res, 200, await readEvents(id));
+    }
+    if ((m = p.match(/^\/api\/sessions\/([^/]+)\/evidence$/))) {
+      const id = safeSessionId(m[1]);
+      if (!id) return send(res, 400, { error: 'bad id' });
+      return send(res, 200, await sessionEvidence(id));
     }
     // Files the session touched; content, preview and "open" only for paths in that list.
     if ((m = p.match(/^\/api\/sessions\/([^/]+)\/(files|file|open-file|preview|view-url)$/))) {

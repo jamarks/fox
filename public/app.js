@@ -1073,6 +1073,15 @@ async function refreshResults(parent) {
   }
   cachedResults = { id: parent.id, key: resultsKey(parent), runs, byAgent, assigned };
 }
+const cachedEvidence = new Map();
+async function refreshEvidence(parent) {
+  await Promise.all(parent.children.map(async (c) => {
+    try {
+      const r = await fetch(`/api/sessions/${encodeURIComponent(c.id)}/evidence`);
+      if (r.ok) cachedEvidence.set(c.id, await r.json());
+    } catch {} // an unflushed child has no evidence yet
+  }));
+}
 function answerFor(parent, c) {
   if (cachedResults.id !== parent.id) return null;
   if (c?.name) { const rounds = cachedResults.byAgent.get(c.name) ?? []; return rounds.length ? rounds.at(-1).text : null; }
@@ -1097,6 +1106,13 @@ function answerFlag(c, text, parentBusy) {
   if (/^\s*(lo siento|sorry)/i.test(text) || /\b(no (?:puedo|pude|puede|es posible)|no se puede|i can(?:no|')t|i couldn't|i'm (?:not able|unable)|i am unable|unable to)\b/i.test(text.slice(0, 160))) return ["couldn't", 'err'];
   return null;
 }
+function evidenceView(id, evidence) {
+  if (!evidence) return '<div class="agent-note">Evidence not available yet.</div>';
+  const link = (callId, label) => callId ? `<a href="#" data-evidence-child="${esc(id)}" data-evidence-call="${esc(callId)}">${esc(label)}</a>` : esc(label);
+  const commands = evidence.commands.map((c) => `<div class="evidence-line">${link(c.callIds[0], c.command)}<span>${c.exit === null ? esc(c.state) : `exit ${c.exit}`}${c.elapsedMs ? ` · ${c.elapsedMs < 1000 ? Math.round(c.elapsedMs) + 'ms' : fmtDur(c.elapsedMs)}` : ''}${c.callIds.length > 1 ? ` · ${c.callIds.slice(1).map((callId) => link(callId, 'update')).join(' · ')}` : ''}${c.artifact && /^[A-Za-z0-9._-]+$/.test(c.artifact) ? ` · <a href="/api/sessions/${encodeURIComponent(id)}/artifact/${encodeURIComponent(c.artifact)}" target="_blank" rel="noopener">result</a>` : ''}</span></div>`).join('');
+  const files = evidence.files.map((f) => `<div class="evidence-line">${link(f.callId, f.path)}<span>edited</span></div>`).join('');
+  return `<div class="evidence"><div class="evidence-title">recorded executions</div>${commands || '<div class="agent-note">No shell executions recorded.</div>'}${files}${evidence.cancellations ? `<div class="evidence-line">${evidence.cancellations} cancellation${evidence.cancellations === 1 ? '' : 's'}</div>` : ''}<div class="evidence-hint">${esc(evidence.note ?? 'Evidence may lag until fx flushes the turn.')} Exits do not prove a test passed.</div></div>`;
+}
 function agentsBoard(parent, { selectedId = null } = {}) {
   if (!parent?.children?.length) return '';
   const groups = new Map();
@@ -1116,8 +1132,11 @@ function agentsBoard(parent, { selectedId = null } = {}) {
     const flag = !answer && res ? ['cancelled', 'muted'] : answerFlag(c, res, parentBusy);
     const task = c.task ?? child?.firstPrompt ?? '';
     const elapsed = c.phase === 'running' && c.startedAt ? fmtDur(Date.now() - c.startedAt) : child?.usage.wallMs ? fmtDur(child.usage.wallMs) : '';
+    const evidence = cachedEvidence.get(c.id);
+    const count = evidence?.counts;
+    const tally = count ? `${count.commands} command${count.commands === 1 ? '' : 's'}${count.failed ? ` · ${count.failed} failed` : ''}${count.unknown ? ` · ${count.unknown} exit unknown` : ''}` : '';
     const open = expandedAgents.has(c.id);
-    const head = `<div class="agent-head"><span class="idx">${i + 1}</span>${model ? vendorDot(model) : ''}<span class="agent-name">${model ? esc(modelShort(model)) : 'failed to start'}</span>${c.phase === 'running' ? '<span class="st working"><i></i></span>' : ''}${flag ? `<span class="flag ${flag[1]}">${flag[0]}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>`;
+    const head = `<div class="agent-head"><span class="idx">${i + 1}</span>${model ? vendorDot(model) : ''}<span class="agent-name">${model ? esc(modelShort(model)) : 'failed to start'}</span>${c.phase === 'running' ? '<span class="st working"><i></i></span>' : ''}${flag ? `<span class="flag ${flag[1]}">${flag[0]}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>${tally ? `<div class="agent-evidence-count">${esc(tally)}</div>` : ''}`;
     const failure = c.failure ? (typeof c.failure === 'string' ? c.failure : (c.failure.message ?? c.failure.reason ?? JSON.stringify(c.failure))) : '';
     // Open: the whole answer it returned to the parent (every round for a named agent), or why there is none.
     const rounds = c.name ? (cachedResults.id === parent.id ? cachedResults.byAgent.get(c.name) ?? [] : []) : [];
@@ -1133,7 +1152,8 @@ function agentsBoard(parent, { selectedId = null } = {}) {
           ? rounds.map((r, k) => `<div class="agent-note">round ${k + 1} · ${esc(r.message.slice(0, 160))}</div><div class="agent-answer">${esc(r.text)}</div>`).join('')
           : res ? `<div class="agent-answer">${esc(res)}</div>` : ''}`;
     const selected = c.id === selectedId;
-    return `<div class="agent ${open ? 'open' : ''} ${selected ? 'selected' : ''}" data-agent="${esc(c.id)}" title="${open ? '' : esc(task)}">${head}${body}${open && c.name ? `<button type="button" class="agent-open linkish" data-agent-followup="${esc(c.id)}" data-agent-parent="${esc(parent.id)}" data-agent-name="${esc(c.name)}">Follow up</button>` : ''}${open && !selected ? `<a class="agent-open" href="#" data-child="${esc(c.id)}">its conversation →</a>` : ''}</div>`;
+    const evidenceHtml = open ? evidenceView(c.id, evidence) : '';
+    return `<div class="agent ${open ? 'open' : ''} ${selected ? 'selected' : ''}" data-agent="${esc(c.id)}" title="${open ? '' : esc(task)}">${head}${body}${evidenceHtml}${open && c.name ? `<button type="button" class="agent-open linkish" data-agent-followup="${esc(c.id)}" data-agent-parent="${esc(parent.id)}" data-agent-name="${esc(c.name)}">Follow up</button>` : ''}${open && !selected ? `<a class="agent-open" href="#" data-child="${esc(c.id)}">its conversation →</a>` : ''}</div>`;
   };
   // A header only where it says something: the same task on several models, or a named agent.
   const html = [...groups.values()].map((g) => {
@@ -1376,6 +1396,13 @@ $('#transcript').addEventListener('click', (e) => {
   }
   const followup = e.target.closest('[data-agent-followup]');
   if (followup) { e.preventDefault(); return openAgentDraft(followup); }
+  const evidenceLink = e.target.closest('[data-evidence-call]');
+  if (evidenceLink) {
+    e.preventDefault();
+    evidenceTarget = { id: evidenceLink.dataset.evidenceChild, callId: evidenceLink.dataset.evidenceCall };
+    convoShown.add(evidenceTarget.id);
+    return selectSession(evidenceTarget.id);
+  }
   const link = e.target.closest('a[data-child], a[data-goto]');
   if (link) { e.preventDefault(); return selectSession(link.dataset.child ?? link.dataset.goto); }
   const row = e.target.closest('[data-agent]');
@@ -1471,18 +1498,23 @@ globalQuery.addEventListener('keydown', (e) => {
 });
 
 let lastTranscriptKey = '';
+let evidenceTarget = null;
+let evidenceOpened = null; // preserve the chosen recorded call when the polling transcript rebuilds
 let lastEventCount = { id: null, n: 0 };
 async function loadTranscript(id, quiet = false) {
   const s = sessionById(id);
   if (!s) return;
   const parent = s.parentId ? sessionById(s.parentId) : s;
   const isChild = Boolean(s.parentId);
-  if (parent?.children?.length && (cachedResults.key !== resultsKey(parent) || parent.children.some((c) => c.phase === 'running'))) await refreshResults(parent);
+  if (parent?.children?.length) {
+    if (cachedResults.key !== resultsKey(parent) || parent.children.some((c) => c.phase === 'running')) await refreshResults(parent);
+    await refreshEvidence(parent);
+  }
   const [events, files] = await Promise.all([fetch(`/api/sessions/${id}/events`).then((r) => r.json()), fetch(`/api/sessions/${id}/files`).then((r) => r.json()).catch(() => [])]);
   if (state.selected !== id) return; // selection changed while we were fetching: drop this render
   const termOpenKey = Boolean(s.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
   const key = id + ':' + events.length + ':' + (s.updatedAt ?? 0) + ':' + (parent?.children ?? []).map((c) => c.phase).join(',') + ':' + termOpenKey + ':' + Math.floor(Date.now() / 5000);
-  if (quiet && key === lastTranscriptKey) return;
+  if (quiet && key === lastTranscriptKey && evidenceTarget?.id !== id) return;
   lastTranscriptKey = key;
 
   // No title on a desktop: the session is highlighted on the left. A subagent gets a way back to its parent;
@@ -1517,7 +1549,7 @@ async function loadTranscript(id, quiet = false) {
     else if (ev.kind === 'tool_call') {
       const st = ev.result?.status ?? 'pending';
       const isSub = ev.name === 'subagent';
-      html.push(`<details class="tool ${st}">
+      html.push(`<details class="tool ${st}" data-call-id="${esc(ev.callId ?? '')}"${evidenceOpened?.id === id && evidenceOpened.callId === ev.callId ? ' open' : ''}>
         <summary><span class="dot"></span><span class="name">${isSub ? ICON.threads + ' ' : ''}${esc(ev.name)}</span><span class="brief">${esc(briefArgs(ev.args))}</span></summary>
         <pre class="label">args</pre><pre>${esc(typeof ev.args === 'string' ? ev.args : JSON.stringify(ev.args, null, 2))}</pre>
         ${ev.result ? `<pre class="label">result · ${st} · ${ev.result.bytes} bytes</pre><pre>${esc(ev.result.preview)}</pre>` : ''}
@@ -1548,6 +1580,10 @@ async function loadTranscript(id, quiet = false) {
   if (lastEventCount.id !== id) body.scrollTop = 0;
   else if (grew && wasAtBottom) body.scrollTop = body.scrollHeight;
   lastEventCount = { id, n: events.length };
+  if (evidenceTarget?.id === id) {
+    const target = [...body.querySelectorAll('.tool[data-call-id]')].find((el) => el.dataset.callId === evidenceTarget.callId);
+    if (target) { evidenceOpened = evidenceTarget; target.open = true; target.scrollIntoView({ block: 'center' }); evidenceTarget = null; }
+  }
   if (globalMessage?.id === id) {
     const target = body.querySelector(`.msg[data-message="${globalMessage.index}"]`);
     if (target && !globalMessage.scrolled) { target.scrollIntoView({ block: 'center' }); globalMessage.scrolled = true; }

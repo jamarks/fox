@@ -34,6 +34,7 @@ function fixture({ name = 'reviewer', working = false, phase = 'done' } = {}) {
     getSelection: () => ctx.selection, selection: { rangeCount: 0, toString: () => '' },
     localStorage: { getItem() {} }, norm: String, vendorOf: () => null, modelShort: String, ICON: { threads: '' },
     cachedResults: { id: parent.id, byAgent: new Map([[name, [{ message: 'Initial review', text: 'First answer' }, { message: 'Check again', text: 'Second answer' }]]]), assigned: new Map() },
+    cachedEvidence: new Map(),
     parent, child, button,
   };
   vm.createContext(ctx);

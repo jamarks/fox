@@ -13,7 +13,7 @@ fx is the coding agent from Vercel Labs. fox runs it on a VPS or a computer at h
 
 ## TL;DR
 
-- **Many fx sessions, one screen.** Which one works, which one waits for you, what each subagent answered, what files they wrote.
+- **Many fx sessions, one screen.** Which one works, which one waits for you, what each subagent answered, what files they wrote. Compare agents by recorded commands, exits and edits; open a row to inspect the evidence.
 - **The real fx, nothing else.** fox runs the `fx` binary in tmux and reads what it writes to `~/.fx`. It never talks to a model, so it uses whatever you logged fx into, a ChatGPT subscription included.
 - **Your server, your choice.** Any VPS or a box at home. Agents keep working with every browser closed; you come back from any device, behind a passkey.
 
