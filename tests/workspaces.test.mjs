@@ -140,6 +140,22 @@ test('the AGENTS.md fox writes is fox\'s own: it does not block deleting the fol
   assert.deepEqual(await ws.blockers(a.id), ['AGENTS.md: not one of the workspace repos']);
 });
 
+test('a workspace made before the notes gets them, they follow its repos, and fox stops at your edits', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'fox-ws-'));
+  const stateDir = join(base, 'state'), dir = join(base, 'workspaces', 'old');
+  await mkdir(dir, { recursive: true }); await mkdir(stateDir, { recursive: true });
+  await writeFile(join(stateDir, 'workspaces.json'), JSON.stringify([{ id: 'w1', name: 'old', dir, repos: [{ owner: 'o', name: 'r', dir: 'r' }] }]));
+  const notes = (w) => `# notes\n${w.repos.map((r) => `- ${r.dir}: ${r.owner}/${r.name}`).join('\n')}\n`;
+  const ws = createWorkspaces({ stateDir, rootDir: join(base, 'workspaces'), agentNotes: notes, git: async () => '' });
+  await ws.list();
+  assert.equal(await readFile(join(dir, 'AGENTS.md'), 'utf8'), '# notes\n- r: o/r\n', 'written for a workspace that had none');
+  await ws.update('w1', { add: [{ owner: 'o', name: 's' }] });
+  assert.equal(await readFile(join(dir, 'AGENTS.md'), 'utf8'), '# notes\n- r: o/r\n- s: o/s\n', 'follows the repos while it is fox\'s text');
+  await writeFile(join(dir, 'AGENTS.md'), '# mine\n');
+  await ws.update('w1', { remove: [{ owner: 'o', name: 's' }] });
+  assert.equal(await readFile(join(dir, 'AGENTS.md'), 'utf8'), '# mine\n', 'an edited file is yours');
+});
+
 test('the repo catalog uses the token of each owner and caches', async () => {
   const base = await mkdtemp(join(tmpdir(), 'fox-gh-'));
   const tokens = join(base, 'tokens');

@@ -20,7 +20,7 @@ const sha = (text) => createHash('sha256').update(text).digest('hex');
 
 export function createWorkspaces({
   stateDir, rootDir,
-  agentNotes = () => null, // AGENTS.md for the workspace root: how fx should run and check dev servers here
+  agentNotes = () => null, // (ws) => AGENTS.md for the workspace root: that it is no repo, and which subfolder is which
   remoteUrl = (r) => `https://github.com/${r.owner}/${r.name}.git`,
   git = (args, opts = {}) => execFileP('git', args, { timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, ...opts }).then((x) => x.stdout.trim()),
 }) {
@@ -64,6 +64,24 @@ export function createWorkspaces({
   }
   async function cloneMissing(ws) { for (const r of ws.repos) await cloneOne(ws, r); } // one at a time
 
+  // The AGENTS.md fox keeps at the workspace root, so fx started there knows it is no repo and which subfolder is
+  // which. Written when missing, also for workspaces made before it existed, and rewritten when the repos change,
+  // but only while it is still the text fox wrote (agentsHash): once you edit it, it is yours and fox leaves it.
+  // Returns true when ws changed (its agentsHash), so the caller saves.
+  async function ensureNotes(ws) {
+    const notes = agentNotes(ws);
+    if (!notes || !(await inside(ws.dir))) return false;
+    const path = join(ws.dir, 'AGENTS.md');
+    const current = await readFile(path, 'utf8').catch(() => null);
+    if (current === notes) { if (ws.agentsHash === sha(notes)) return false; ws.agentsHash = sha(notes); return true; }
+    if (current !== null && sha(current) !== ws.agentsHash) return false; // someone else's file, or edited by hand
+    if (!(await stat(ws.dir).catch(() => null))?.isDirectory()) return false;
+    await writeFile(path, notes);
+    ws.agentsHash = sha(notes);
+    return true;
+  }
+  const noted = new Set(); // workspace ids whose notes were checked since fox started
+
   async function repoState(ws, r) {
     const dir = join(ws.dir, r.dir), k = `${ws.id}|${key(r)}`;
     const base = { owner: r.owner, name: r.name, dir: r.dir };
@@ -81,7 +99,14 @@ export function createWorkspaces({
   return {
     rootDir,
     async list() {
-      const all = await load();
+      let all = await load();
+      // Once per workspace per run of fox: workspaces from before the notes get theirs.
+      const unchecked = all.filter((w) => !noted.has(w.id));
+      if (unchecked.length) {
+        let changed = false;
+        for (const w of unchecked) { noted.add(w.id); changed = (await ensureNotes(w).catch(() => false)) || changed; }
+        if (changed) await save(all);
+      }
       return Promise.all(all.map(async (ws) => ({ ...ws, repos: await Promise.all(ws.repos.map((r) => repoState(ws, r))) })));
     },
     async get(id) { return (await load()).find((w) => w.id === id) ?? null; },
@@ -98,13 +123,12 @@ export function createWorkspaces({
       await mkdir(dir, { recursive: true });
       if (!(await inside(dir))) throw Object.assign(new Error('Workspace folder is outside ~/workspaces.'), { status: 400 });
       const ws = { id: randomUUID(), name, dir, repos: [], createdAt: Date.now() };
-      const notes = agentNotes();
-      if (notes) { await writeFile(join(dir, 'AGENTS.md'), notes, { flag: 'wx' }).catch(() => {}); ws.agentsHash = sha(notes); }
       for (const r of repos) {
         if (ws.repos.some((x) => key(x) === key(r))) continue;
         const repo = { owner: String(r.owner), name: String(r.name) };
         ws.repos.push({ ...repo, dir: folderFor(ws, { ...repo, dir: '' }) });
       }
+      await ensureNotes(ws).catch(() => {}); noted.add(ws.id);
       all.push(ws); await save(all);
       cloneMissing(ws);
       return ws;
@@ -122,6 +146,7 @@ export function createWorkspaces({
         const repo = { owner: String(r.owner), name: String(r.name) };
         ws.repos.push({ ...repo, dir: folderFor(ws, { ...repo, dir: '' }) });
       }
+      await ensureNotes(ws).catch(() => {});
       await save(all);
       cloneMissing(ws);
       return ws;

@@ -91,10 +91,13 @@ const PREVIEW = (() => {
 })();
 // AGENTS.md at the root of every new workspace: how the folder is laid out. How to run dev servers and jobs
 // lives in fx's personal instructions (see notes.mjs), so every session knows it, in any folder.
-function workspaceAgentNotes() {
+function workspaceAgentNotes(ws) {
+  const repos = (ws?.repos ?? []).map((r) => `- \`${r.dir}/\`: ${r.owner}/${r.name}`).join('\n');
   return `# Workspace notes (written by fox)
 
-This folder is a fox workspace. Each subfolder with a \`.git\` is its own GitHub repo: run git (status, commit, push, pull requests) inside that subfolder. Other files here are notes, scratch work and job scripts.
+This folder is a fox workspace, not a git repo. Each repo is its own subfolder: run git (status, commit, push, pull requests) and search inside it, and read its AGENTS.md before changing it.
+${repos ? `\n${repos}\n` : ''}
+Other files here are notes, scratch work and job scripts.
 `;
 }
 const workspaces = createWorkspaces({ stateDir: STATE_DIR, rootDir: join(homedir(), 'workspaces'), agentNotes: workspaceAgentNotes });
