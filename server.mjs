@@ -30,7 +30,7 @@ import { createPrStates } from './prstate.mjs';
 import { createPrs } from './prs.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 import { ensureFoxNotes, foxNotes } from './notes.mjs';
-import { createModels } from './models.mjs';
+import { createModels, launchArgs } from './models.mjs';
 import { parseTimeline, turnTimeline } from './timeline.mjs';
 const execFileP = promisify(execFile);
 
@@ -806,10 +806,11 @@ async function handlePanelRequest(req, res) {
       const cwd = resolve(String(body.cwd ?? homedir()).replace(/^~/, homedir()));
       const resume = body.resume ? safeSessionId(String(body.resume)) : null;
       if (body.resume && !resume) return send(res, 400, { error: 'bad id' });
-      const provider = /^[a-z0-9_-]{1,32}$/i.test(String(body.provider ?? '')) ? String(body.provider) : null;
-      const model = /^[a-z0-9._\/-]{1,80}$/i.test(String(body.model ?? '')) ? String(body.model) : null;
-      try { return send(res, 200, await createTerminal({ cwd, resume, provider, model })); }
-      catch (err) { return send(res, 500, { error: String(err.stderr || err.message) }); }
+      try {
+        if (resume && [body.provider, body.model, body.effort, body.speed].some((v) => v != null && v !== '')) return send(res, 400, { error: 'Resume cannot change model options' });
+        const flags = resume ? [] : launchArgs(await models.get(), body);
+        return send(res, 200, await createTerminal({ cwd, resume, flags }));
+      } catch (err) { return send(res, err.message?.match(/Unknown provider|Unsupported|Resume cannot/) ? 400 : 500, { error: String(err.stderr || err.message) }); }
     }
     if (req.method === 'DELETE' && (m = p.match(/^\/api\/terminals\/([^/]+)$/))) {
       return send(res, 200, { ok: await killTerminal(decodeURIComponent(m[1])) });
@@ -1028,15 +1029,15 @@ async function updateWorkspaceRepos(cwd) {
   await Promise.race([all, new Promise((r) => setTimeout(r, 8000))]);
 }
 
-async function createTerminal({ cwd, resume, provider = null, model = null }) {
+async function createTerminal({ cwd, resume, flags = [] }) {
   const name = resume ? `${TMUX_PREFIX}${resume}` : `${TMUX_PREFIX}new-${Date.now().toString(36)}`;
   const existing = (await listTerminals()).find((t) => t.name === name);
   if (existing) return existing;
   await updateWorkspaceRepos(cwd);
   // New sessions can start on a chosen provider/model; resumed ones keep what the session already has.
-  const flags = resume ? '' : `${provider ? ` --provider ${provider}` : ''}${model ? ` --model ${model}` : ''}`;
-  const fx = `'${FX_BIN.replaceAll("'", "'\\''")}'`; // tmux runs this through a shell: a path with spaces stays one word
-  const cmd = resume ? `${fx} session resume ${resume}` : `${fx}${flags}`;
+  // tmux runs its command through a shell; every catalog value is a separate, quoted argument.
+  const quote = (s) => `'${String(s).replaceAll("'", "'\\''")}'`;
+  const cmd = [FX_BIN, ...(resume ? ['session', 'resume', resume] : flags)].map(quote).join(' ');
   await tmux('new-session', '-d', '-s', name, '-x', '140', '-y', '40', '-c', cwd, cmd);
   await passHyperlinks();
   await tmux('set-option', '-t', name, 'status', 'off');
