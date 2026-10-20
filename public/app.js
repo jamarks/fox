@@ -1183,6 +1183,24 @@ function answerFor(parent, c) {
 // Board: subagents grouped by task, so the same task on several models reads as a comparison.
 // Click a row to read its whole answer in place; bad answers are flagged.
 const expandedAgents = new Set();
+let timelineOpen = false;
+function timelineView(t, selectedId) {
+  if (!t?.lanes?.length) return '<div class="timeline-empty">No timed intervals available for this turn.</div>';
+  const width = Math.max(1, t.elapsed);
+  const bars = (lane) => lane.intervals.map((span) => {
+    const left = Math.max(0, (span.start - t.start) / width * 100);
+    const size = Math.max(.5, (span.end - span.start) / width * 100);
+    const label = `${span.kind === 'handoff' ? 'handoff' : span.kind === 'tool' ? span.label : 'agent'} · ${fmtDur(span.end - span.start)}${span.provisional ? ' · provisional' : ''}`;
+    return `<span class="timeline-bar ${span.kind} ${span.provisional ? 'provisional' : ''}" style="left:${left}%;width:${Math.min(size, 100 - left)}%" title="${esc(label)}"></span>`;
+  }).join('');
+  return `<div class="timeline-summary">${t.pending ? 'Live · partial timing' : t.coarse ? 'Observed window · ≥' + fmtDur(t.elapsed) : 'Elapsed · ' + fmtDur(t.elapsed)}${t.chain.length ? ` <span title="Longest observed dependency path, not summed agent time">· path ${esc(t.chain.map((x) => x.label).join(' → ').slice(0, 100))} · ${fmtDur(t.chain.reduce((n, x) => n + x.ms, 0))}</span>` : ''}${t.coarse ? '<div class="timeline-empty">Event times are saved at turn end; parent/tool timing unavailable.</div>' : ''}</div>
+    <div class="timeline-scale"><span>0</span><span>${fmtDur(t.elapsed)}${t.provisional ? ' · provisional' : ''}</span></div>
+    ${t.lanes.map((lane) => `<div class="timeline-lane"><span class="timeline-name">${lane.id ? `<a href="#" data-child="${esc(lane.id)}" ${lane.id === selectedId ? 'aria-current="true"' : ''}>${esc(lane.label)} ↗</a>` : 'parent'}</span><span class="timeline-track">${bars(lane)}</span></div>`).join('')}
+    ${t.omitted ? `<div class="timeline-empty">+${t.omitted} more agents not shown</div>` : ''}<div class="timeline-legend">agent <i class="timeline-swatch agent"></i> · tool <i class="timeline-swatch tool"></i> · handoff <i class="timeline-swatch handoff"></i></div>`;
+}
+function timelineSection(t, selectedId) {
+  return `<a href="#" class="section-title fold ${timelineOpen ? '' : 'closed'}" data-toggle-timeline>turn timeline</a>${timelineOpen ? `<div class="timeline">${timelineView(t, selectedId)}</div>` : ''}`;
+}
 let agentsCollapsed = false;
 try { agentsCollapsed = localStorage.getItem('fox.agentsCollapsed') === '1'; } catch {}
 let lastChildShown = null;
@@ -1463,6 +1481,10 @@ $('#transcript').addEventListener('click', (e) => {
     try { localStorage.setItem('fox.agentsCollapsed', agentsCollapsed ? '1' : '0'); } catch {}
     lastTranscriptKey = ''; return loadTranscript(state.selected, true);
   }
+  if (e.target.closest('[data-toggle-timeline]')) {
+    e.preventDefault(); timelineOpen = !timelineOpen;
+    lastTranscriptKey = ''; return loadTranscript(state.selected, true);
+  }
   if (e.target.closest('[data-toggle-files]')) {
     e.preventDefault(); filesCollapsed = !filesCollapsed;
     try { localStorage.setItem('fox.filesCollapsed', filesCollapsed ? '1' : '0'); } catch {}
@@ -1579,7 +1601,7 @@ async function loadTranscript(id, quiet = false) {
   const parent = s.parentId ? sessionById(s.parentId) : s;
   const isChild = Boolean(s.parentId);
   if (parent?.children?.length && (cachedResults.key !== resultsKey(parent) || parent.children.some((c) => c.phase === 'running'))) await refreshResults(parent);
-  const [events, files] = await Promise.all([fetch(`/api/sessions/${id}/events`).then((r) => r.json()), fetch(`/api/sessions/${id}/files`).then((r) => r.json()).catch(() => [])]);
+  const [events, files, timing] = await Promise.all([fetch(`/api/sessions/${id}/events`).then((r) => r.json()), fetch(`/api/sessions/${id}/files`).then((r) => r.json()).catch(() => []), parent?.children?.length ? fetch(`/api/sessions/${id}/timeline`).then((r) => r.ok ? r.json() : null).catch(() => null) : null]);
   if (state.selected !== id) return; // selection changed while we were fetching: drop this render
   const termOpenKey = Boolean(s.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
   const key = id + ':' + events.length + ':' + (s.updatedAt ?? 0) + ':' + (parent?.children ?? []).map((c) => c.phase).join(',') + ':' + termOpenKey + ':' + Math.floor(Date.now() / 5000);
@@ -1601,7 +1623,8 @@ async function loadTranscript(id, quiet = false) {
   if (isChild) {
     if (lastChildShown !== id) { expandedAgents.add(id); lastChildShown = id; } // arrive with its answer open
     if (!mobileLayout.matches) html.push(agentsBoard(parent, { selectedId: id }), '<div class="section-title">its conversation</div>');
-  } else if (parent.children?.length && !mobileLayout.matches) html.push(agentsBoard(parent));
+  } else if (parent.children?.length && !mobileLayout.matches) html.push(agentsBoard(parent), timelineSection(timing, id));
+  if (isChild && !mobileLayout.matches) html.push(timelineSection(timing, id));
   // The conversation lives in the terminal. This column shows it only for a subagent (it has no terminal)
   // or when global search or the replies inbox pointed at one message.
   const showConvo = isChild || convoShown.has(id) || mobileLayout.matches;
@@ -1628,7 +1651,7 @@ async function loadTranscript(id, quiet = false) {
     else if (ev.kind === 'raw') html.push(`<div class="msg"><div class="who">event</div><div class="text muted">${esc(ev.text)}</div></div>`);
   }
   if (mobileLayout.matches) {
-    if (parent.children?.length) html.push(agentsBoard(parent, isChild ? { selectedId: id } : {}));
+    if (parent.children?.length) html.push(agentsBoard(parent, isChild ? { selectedId: id } : {}), timelineSection(timing, id));
     html.push(filesSection(id, files));
   }
   renderArtifactCard(id, files);
