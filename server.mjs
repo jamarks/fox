@@ -31,6 +31,7 @@ import { createPrs } from './prs.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 import { ensureFoxNotes, foxNotes } from './notes.mjs';
 import { createModels } from './models.mjs';
+import { parseTimeline, turnTimeline } from './timeline.mjs';
 const execFileP = promisify(execFile);
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -306,6 +307,22 @@ async function sessionFiles(id) {
   return out.sort((a, b) => FILE_RANK[b.action] - FILE_RANK[a.action] || a.rel.localeCompare(b.rel));
 }
 
+// Cache parsed completed snapshots by file signature; running turns are inferred from live
+// overview state and children.json, never from an assumed tail of events.jsonl.
+const timelineCache = new Map();
+async function timingEvents(id) {
+  const file = join(SESSIONS_DIR, id, 'events.jsonl');
+  const info = await stat(file).catch(() => null);
+  if (!info) return [];
+  const key = `${info.mtimeMs}:${info.size}`;
+  const hit = timelineCache.get(id);
+  if (hit?.key === key) return hit.events;
+  const events = parseTimeline(await readFile(file, 'utf8'));
+  if (timelineCache.size > 100) timelineCache.delete(timelineCache.keys().next().value);
+  timelineCache.set(id, { key, events });
+  return events;
+}
+
 async function readEvents(id) {
   const dir = join(SESSIONS_DIR, id);
   let raw;
@@ -553,6 +570,22 @@ async function handlePanelRequest(req, res) {
       while (lines.length && !lines.at(-1).trim()) lines.pop();
       const text = lines.slice(-32).join('\n').slice(-6000);
       return send(res, 200, { text, model: screenModel(text) });
+    }
+    if ((m = p.match(/^\/api\/sessions\/([^/]+)\/timeline$/))) {
+      const id = safeSessionId(m[1]);
+      if (!id) return send(res, 400, { error: 'bad id' });
+      const sessions = await listSessions();
+      const selected = sessions.find((s) => s.id === id);
+      if (!selected) return send(res, 404, { error: 'session not found' });
+      const parent = selected.parentId ? sessions.find((s) => s.id === selected.parentId) : selected;
+      if (!parent) return send(res, 404, { error: 'parent not found' });
+      const children = await Promise.all(parent.children.map(async (c) => ({ ...c,
+        events: await timingEvents(c.id), label: sessions.find((s) => s.id === c.id)?.title === '(untitled)' ? null : sessions.find((s) => s.id === c.id)?.title,
+        createdAt: sessions.find((s) => s.id === c.id)?.createdAt,
+      })));
+      const terminal = (await listTerminals()).find((t) => t.resume === parent.id);
+      const working = terminal?.activity === 'working' || children.some((c) => c.phase === 'running');
+      return send(res, 200, turnTimeline(await timingEvents(parent.id), children, Date.now(), working));
     }
     if ((m = p.match(/^\/api\/sessions\/([^/]+)\/events$/))) {
       const id = safeSessionId(m[1]);
