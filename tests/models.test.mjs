@@ -70,7 +70,7 @@ test('older text status and ids-only models expose only the saved provider, with
   };
   const catalog = await createModels({ fx, file: join(dir, 'cache'), readSettings: async () => ({ provider: 'codex' }) }).get();
   assert.deepEqual(catalog.providers.map((p) => p.id), ['codex']);
-  assert.deepEqual(catalog.providers[0].details[0], { id: 'old-model', name: null, efforts: [], fast: false, ultrafast: false, ultrafastKnown: false });
+  assert.deepEqual(catalog.providers[0].details[0], { id: 'old-model', name: null, efforts: [], fast: false, ultrafast: false });
   assert.equal(calls.some((c) => c.args[0] === 'status' && !c.args.includes('--json')), false, 'never parse text status');
   assert.deepEqual(launchArgs(catalog, { provider: 'codex', model: 'old-model' }), ['--provider', 'codex', '--model', 'old-model']);
   assert.equal(calls.find((c) => c.args[0] === 'models').env.FX_PROVIDER, undefined);
@@ -82,11 +82,12 @@ test('explicit launch flags reject unsupported effort and speed; never combine s
   const choice = { provider: 'codex', model: 'gpt' };
   assert.deepEqual(launchArgs(cat, { ...choice, effort: 'high', speed: 'ultrafast' }), ['--provider','codex','--model','gpt','--effort','high','--no-fast','--ultrafast']);
   assert.deepEqual(launchArgs(cat, { ...choice, speed: 'fast' }).slice(-2), ['--fast', '--no-ultrafast']);
-  assert.deepEqual(launchArgs(cat, choice).slice(-1), ['--no-ultrafast']);
+  assert.deepEqual(launchArgs(cat, choice), ['--provider', 'codex', '--model', 'gpt']);
+  assert.deepEqual(launchArgs(cat, { ...choice, speed: 'default' }), ['--provider', 'codex', '--model', 'gpt']);
   assert.throws(() => launchArgs(cat, { ...choice, effort: 'xhigh' }), /Unsupported effort/);
   assert.throws(() => launchArgs(cat, { provider: 'my-local', model: 'qwen:7b', speed: 'ultrafast' }), /Unsupported speed/);
   assert.throws(() => launchArgs(cat, { provider: "local';touch /tmp/x;#", model: 'gpt' }), /Unknown provider/);
   assert.deepEqual(launchArgs(cat, {}), []);
-  const future = { providers: [{ id: 'my-local', details: [{ id: 'qwen:7b', efforts: ['very_high'], fast: false, ultrafast: false, ultrafastKnown: false }] }] };
+  const future = { providers: [{ id: 'my-local', details: [{ id: 'qwen:7b', efforts: ['very_high'], fast: false, ultrafast: false }] }] };
   assert.deepEqual(launchArgs(future, { provider: 'my-local', model: 'qwen:7b', effort: 'very_high' }).slice(-2), ['--effort', 'very_high']);
 });

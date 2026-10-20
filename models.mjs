@@ -28,8 +28,7 @@ function cleanModels(raw) {
     const m = byId.get(id) ?? {};
     return { id, name: typeof m.name === 'string' ? m.name.slice(0, 160) : null,
       efforts: Array.isArray(m.efforts) ? [...new Set(m.efforts.filter(safeEffort))] : [],
-      fast: m.fast === true, ultrafast: m.ultrafast === true,
-      ultrafastKnown: typeof m.ultrafast === 'boolean' };
+      fast: m.fast === true, ultrafast: m.ultrafast === true };
   });
 }
 
@@ -45,7 +44,7 @@ export function launchArgs(catalog, { provider, model, effort, speed } = {}) {
   if (effort) args.push('--effort', effort);
   if (speed === 'fast') args.push('--fast', '--no-ultrafast');
   else if (speed === 'ultrafast') args.push('--no-fast', '--ultrafast');
-  else if (m.ultrafastKnown) args.push('--no-ultrafast'); // modern CLI: explicit model never inherits a costly request
+  // No speed selection leaves fx's saved speed untouched, even with an explicit model.
   return args;
 }
 

@@ -2065,13 +2065,14 @@ function updateNsBadge() {
   effort.innerHTML = '<option value="">fx default</option>' + (m?.efforts ?? []).map((e) => `<option value="${esc(e)}">${esc(e)}</option>`).join('');
   speed.innerHTML = '<option value="default">fx default</option>' + (m?.fast ? '<option value="fast">Fast</option>' : '') + (m?.ultrafast ? '<option value="ultrafast">Ultrafast</option>' : '');
   $('#ns-options').classList.toggle('hidden', !m || (!m.efforts?.length && !m.fast && !m.ultrafast));
-  $('#ns-speed-note').classList.toggle('hidden', !m?.ultrafast);
+  $('#ns-speed-note').classList.add('hidden');
   effort.classList.toggle('hidden', !m?.efforts?.length);
   effort.previousElementSibling.classList.toggle('hidden', !m?.efforts?.length);
   speed.classList.toggle('hidden', !m?.fast && !m?.ultrafast);
   speed.previousElementSibling.classList.toggle('hidden', !m?.fast && !m?.ultrafast);
 }
 $('#ns-model').addEventListener('change', updateNsBadge);
+$('#ns-speed').addEventListener('change', () => $('#ns-speed-note').classList.toggle('hidden', $('#ns-speed').value !== 'ultrafast'));
 $('#ns-cancel').addEventListener('click', () => $('#newsheet').classList.add('hidden'));
 $('#newsheet').addEventListener('click', (e) => { if (e.target.id === 'newsheet') $('#newsheet').classList.add('hidden'); });
 $('#newform').addEventListener('submit', async (e) => {
