@@ -629,8 +629,8 @@ $('#paste').addEventListener('click', async () => {
 $('#pasteform').addEventListener('submit', (e) => { e.preventDefault(); if (agentDraft) { if (!$('#pasteform button[type="submit"]').disabled) void insertAgentDraft(); } else if (pasteIntoTerminal($('#paste-text').value)) closePasteSheet(); });
 $('#paste-cancel').addEventListener('click', closePasteSheet);
 $('#pastesheet').addEventListener('click', (e) => { if (e.target.id === 'pastesheet') closePasteSheet(); });
-async function openTerminal({ cwd, resume, provider, model }, stillWanted = () => true) {
-  const t = await post('/api/terminals', { cwd, resume, provider, model });
+async function openTerminal({ cwd, resume, provider, model, effort, speed }, stillWanted = () => true) {
+  const t = await post('/api/terminals', { cwd, resume, provider, model, effort, speed });
   if (!stillWanted()) return refresh();
   if (t.error) { state.waking = null; updateTermLoading(); alert(t.error); return; }
   await refresh();
@@ -2020,7 +2020,7 @@ async function loadModels(force = false) {
     }
     for (const [vendor, ids] of [...byVendor.entries()].sort((a, b) => cmp(a[0], b[0]))) {
       const g = document.createElement('optgroup'); g.label = p.id === 'gateway' ? `${p.label} · ${vendor}` : p.label;
-      for (const id of ids.sort(cmp)) { const o = document.createElement('option'); o.value = `${p.id}|${id}`; o.textContent = p.id === 'gateway' ? modelShort(id) : id; g.appendChild(o); }
+      for (const id of ids.sort(cmp)) { const o = document.createElement('option'); o.value = `${p.id}|${id}`; o.textContent = p.details?.find((m) => m.id === id)?.name || (p.id === 'gateway' ? modelShort(id) : id); g.appendChild(o); }
       sel.appendChild(g);
     }
   }
@@ -2050,14 +2050,29 @@ function renderNsWorkspace(wsp) {
   const busy = state.sessions.filter((s) => !s.archived && s.terminal && (s.state === 'working' || s.state === 'needs_input') && workspaceFor(s.workspace)?.id === wsp.id);
   box.innerHTML = `${wsp.repos.length ? `<label class="ns-label">Repos · shared by every session in this workspace</label>${wsp.repos.map(wsRepoLine).join('')}` : ''}${busy.length ? `<div class="ws-busy">${busy.length === 1 ? 'Another session is working here' : `${busy.length} sessions are working here`}: they edit the same files.</div>` : ''}`;
 }
+function nsSelection() {
+  const v = $('#ns-model').value, at = v.indexOf('|');
+  return at < 0 ? [null, null] : [v.slice(0, at), v.slice(at + 1)];
+}
 function updateNsBadge() {
-  const v = $('#ns-model').value;
-  const [provider, model] = v ? v.split('|') : [modelsCatalog?.default?.provider, modelsCatalog?.default?.model];
+  const [chosenProvider, chosenModel] = nsSelection();
+  const provider = chosenProvider ?? modelsCatalog?.default?.provider, model = chosenModel ?? modelsCatalog?.default?.model;
   $('#ns-badge').innerHTML = modelBadge(model);
   $('#ns-prov').innerHTML = providerTag(provider); // who pays: subscription or Gateway
   $('#ns-prov').title = providerLabel(provider);
+  const m = modelsCatalog?.providers?.find((p) => p.id === chosenProvider)?.details?.find((x) => x.id === chosenModel);
+  const effort = $('#ns-effort'), speed = $('#ns-speed');
+  effort.innerHTML = '<option value="">fx default</option>' + (m?.efforts ?? []).map((e) => `<option value="${esc(e)}">${esc(e)}</option>`).join('');
+  speed.innerHTML = '<option value="default">fx default</option>' + (m?.fast ? '<option value="fast">Fast</option>' : '') + (m?.ultrafast ? '<option value="ultrafast">Ultrafast</option>' : '');
+  $('#ns-options').classList.toggle('hidden', !m || (!m.efforts?.length && !m.fast && !m.ultrafast));
+  $('#ns-speed-note').classList.add('hidden');
+  effort.classList.toggle('hidden', !m?.efforts?.length);
+  effort.previousElementSibling.classList.toggle('hidden', !m?.efforts?.length);
+  speed.classList.toggle('hidden', !m?.fast && !m?.ultrafast);
+  speed.previousElementSibling.classList.toggle('hidden', !m?.fast && !m?.ultrafast);
 }
 $('#ns-model').addEventListener('change', updateNsBadge);
+$('#ns-speed').addEventListener('change', () => $('#ns-speed-note').classList.toggle('hidden', $('#ns-speed').value !== 'ultrafast'));
 $('#ns-cancel').addEventListener('click', () => $('#newsheet').classList.add('hidden'));
 $('#newsheet').addEventListener('click', (e) => { if (e.target.id === 'newsheet') $('#newsheet').classList.add('hidden'); });
 $('#newform').addEventListener('submit', async (e) => {
@@ -2065,9 +2080,11 @@ $('#newform').addEventListener('submit', async (e) => {
   const cwd = $('#newsheet').dataset.cwd;
   const v = $('#ns-model').value;
   try { localStorage.setItem('fox.lastModel', v); } catch {}
-  const [provider, model] = v ? v.split('|') : [null, null];
+  const [provider, model] = nsSelection();
+  const effort = provider ? $('#ns-effort').value || null : null;
+  const speed = provider ? $('#ns-speed').value : null;
   $('#newsheet').classList.add('hidden');
-  await openTerminal({ cwd, provider, model });
+  await openTerminal({ cwd, provider, model, effort, speed });
 });
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#newsheet').classList.contains('hidden')) $('#newsheet').classList.add('hidden'); });
 

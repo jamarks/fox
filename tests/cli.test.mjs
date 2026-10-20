@@ -1,11 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runFox } from '../bin/fox.mjs';
+import { launchArgs } from '../models.mjs';
 import { execFile } from 'node:child_process';
 import { mkdtemp, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+test('CLI launch arguments keep arbitrary catalog IDs as separate words and exclude contradictory speed flags', () => {
+  const model = "qwen:7b's test";
+  const catalog = { providers: [{ id: 'my-local', details: [{ id: model, efforts: ['low'], fast: true, ultrafast: false }] }] };
+  const args = launchArgs(catalog, { provider: 'my-local', model, effort: 'low', speed: 'fast' });
+  assert.deepEqual(args, ['--provider', 'my-local', '--model', model, '--effort', 'low', '--fast', '--no-ultrafast']);
+  assert.ok(!args.includes('--ultrafast'));
+});
 
 const stream = () => ({ text: '', write(chunk) { this.text += chunk; } });
 const foxPage = { ok: true, text: async () => '<title>fox</title>' };

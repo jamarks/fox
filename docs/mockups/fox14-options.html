@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><link rel="icon" href="data:,"><title>FOX-14 · alternative launch controls</title>
+<style>
+:root{color-scheme:dark;font:13px/1.5 system-ui,sans-serif;color:#d8dce6;background:#090b10}*{box-sizing:border-box}
+.sidebar{position:absolute;inset:0 auto 0 0;width:300px;background:#0e1119;border-right:1px solid #262b36;padding:18px;color:#8793ad}.sidebar strong{color:#d8dce6}.sidebar div{padding:13px 8px;border-bottom:1px solid #242a34}
+.sheet{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:520px;padding:20px;border:1px solid #303642;border-radius:12px;background:#151820;box-shadow:0 14px 48px #0009}h2{font-size:14px;margin:0 0 18px}.folder{color:#83a8fa;font-family:monospace}label,.muted{font-size:11px;color:#9299aa}label{display:block;margin:12px 0 5px}select,button{color:inherit;font:inherit;background:#0e1119;border:1px solid #303642;border-radius:6px;padding:6px 9px}select{width:100%}.row{display:flex;gap:8px;align-items:center}.row>*{flex:1}.choice{display:flex;gap:5px;margin-top:7px}.choice button{flex:1}.choice .picked{border-color:#8facfa;color:#8facfa}aside{color:#e2ab52;font-size:11px;line-height:1.4;margin-top:12px}.actions{text-align:right;margin-top:24px}.actions button:last-child{background:#83a8fa;color:#10131b;font-weight:bold}.advanced{margin-top:14px;background:#10141e;border:1px solid #303642;padding:10px;border-radius:6px}.advanced label{margin-top:8px}.caption{color:#8894a9;font-size:11px}
+</style>
+<div class="sidebar"><strong>fox</strong><div>Prueba · 5 sessions</div><div>Finance · 1 session</div><div>Fox · 6 sessions</div><div>Jobs</div><div>Pull requests</div></div>
+<div class="sheet"><h2>New session in <span class="folder">workspaces</span></h2><label>Model</label><select><option>GPT 5.2 · gateway</option></select>
+<div id="a"><label>Effort</label><div class="choice"><button>fx default</button><button>low</button><button class="picked">high</button><button>xhigh</button></div><label>Speed</label><div class="choice"><button>fx default</button><button>Fast</button><button class="picked">Ultrafast</button></div><aside>Ultrafast costs more. Eligible child agents inherit the request; requested speed is not a confirmed served tier.</aside></div>
+<div id="b" hidden><div class="advanced"><div>▾ &nbsp;Advanced launch options <span class="caption">· optional</span></div><label>Effort</label><select><option>high</option></select><label>Speed</label><select><option>Ultrafast · higher price</option></select><aside>Costs more; eligible child agents may inherit it. This is a request, not confirmation of the served tier.</aside></div></div>
+<div class="actions"><button>Cancel</button> <button>Open</button></div></div>
+<script>const b=location.search.includes('option=b');document.querySelector('#a').hidden=b;document.querySelector('#b').hidden=!b;</script>
+</html>

@@ -42,10 +42,13 @@ test('without a passkey fox still refuses foreign names, keeps previews in their
   await writeFile(join(dir, 'events.jsonl'), JSON.stringify({ event: { assistant: { text: 'Made `index.html`' } } }) + '\n');
   await mkdir(join(home, '.fx', 'sessions', 'constructor'));
   await writeFile(join(home, '.fx', 'sessions', 'constructor', 'session.json'), JSON.stringify({ title: 'odd' }));
+  await writeFile(join(home, '.fx', 'settings.json'), JSON.stringify({ provider: 'local', providers: { local: { base_url: 'http://127.0.0.1:1234', auth: { env: 'SECRET' } } }, models: { local: 'qwen:7b' } }));
+  const fx = join(home, 'fx');
+  await writeFile(fx, '#!/bin/sh\nif [ "$1" = status ]; then echo \'{"connected_providers":[]}\'; else echo \'{"ids":["qwen:7b"],"models":[{"id":"qwen:7b"}]}\'; fi\n', { mode: 0o755 });
   const port = await freePort();
   const child = spawn(process.execPath, ['server.mjs'], {
     cwd: new URL('..', import.meta.url),
-    env: { ...process.env, HOME: home, PORT: String(port), TMUX_BIN: '/bin/cat', FOX_AUTH_DISABLED: '1' }, stdio: 'pipe',
+    env: { ...process.env, HOME: home, PORT: String(port), FX_BIN: fx, TMUX_BIN: '/bin/cat', FOX_AUTH_DISABLED: '1' }, stdio: 'pipe',
   });
   try {
     assert.equal((await connected(`http://127.0.0.1:${port}/api/sessions`)).status, 200);
@@ -67,6 +70,14 @@ test('without a passkey fox still refuses foreign names, keeps previews in their
     assert.deepEqual(JSON.parse((await get(port, '/api/deploy')).body), { available: false, branch: 'release' });
     // Search with a session folder named like an Object method.
     assert.equal((await get(port, '/api/search?q=odd')).status, 200);
+    // Only exact catalog choices can reach tmux; a custom endpoint's credentials never reach the browser.
+    const catalog = await (await fetch(`http://127.0.0.1:${port}/api/models`)).json();
+    assert.equal(catalog.providers[0].id, 'local');
+    assert.doesNotMatch(JSON.stringify(catalog), /base_url|SECRET|127\.0\.0\.1:1234/);
+    for (const choice of [{ provider: 'local', model: 'qwen:7b', effort: 'high' }, { provider: "local';touch /tmp/bad;#", model: 'qwen:7b' }, { provider: 'local', model: 'qwen:7b', speed: 'ultrafast' }]) {
+      const response = await fetch(`http://127.0.0.1:${port}/api/terminals`, { method: 'POST', headers: { 'content-type': 'application/json', origin: `http://127.0.0.1:${port}` }, body: JSON.stringify({ cwd: project, ...choice }) });
+      assert.equal(response.status, 400);
+    }
     // A terminal message that is not text is ignored, not a crash.
     const ws = new WebSocket(`ws://127.0.0.1:${port}/pty?name=fx-x`, { origin: `http://127.0.0.1:${port}` });
     await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
