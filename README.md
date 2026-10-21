@@ -36,7 +36,7 @@ All of it: [CHANGELOG.md](CHANGELOG.md).
 - **Subagents** grouped by task, so the same question on three models is a side-by-side comparison; weak answers are flagged.
 - **Files** fx wrote, opened the way they read best: pages and images rendered, Markdown formatted, CSV as a table, code highlighted. The newest page shows as a live card, sandboxed.
 - **One terminal** per session in tmux; pin the ones you keep. Drop files on it, dictate into it (the text lands in fx's input; you send it). Toggle the read-only mosaic in the tab bar to watch up to four live sessions, then open a tile to type.
-- **Workspaces**: a folder of GitHub repos, cloned once, with each repo's branch and changes at a glance.
+- **Workspaces**: a folder of GitHub repos, cloned once, with each repo's branch and changes at a glance. Start a session in one repo and explicitly grant fx file access to selected sibling repos for that launch only.
 - **Jobs**: scripts on a schedule, each with its model, log, summary and links. A job can have fx make a change and open a pull request it checked itself. [docs/jobs.md](docs/jobs.md)
 - **Pull requests** of your workspaces' repos in one list: what each does, its files, the review job's verdict; merge or close it from fox.
 - **Tools for fx** from Settings: a browser, Chrome DevTools, library docs, Vercel, Linear.

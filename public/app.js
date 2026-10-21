@@ -640,8 +640,8 @@ $('#paste').addEventListener('click', async () => {
 $('#pasteform').addEventListener('submit', (e) => { e.preventDefault(); if (agentDraft) { if (!$('#pasteform button[type="submit"]').disabled) void insertAgentDraft(); } else if (pasteIntoTerminal($('#paste-text').value)) closePasteSheet(); });
 $('#paste-cancel').addEventListener('click', closePasteSheet);
 $('#pastesheet').addEventListener('click', (e) => { if (e.target.id === 'pastesheet') closePasteSheet(); });
-async function openTerminal({ cwd, resume, provider, model, effort, speed }, stillWanted = () => true) {
-  const t = await post('/api/terminals', { cwd, resume, provider, model, effort, speed });
+async function openTerminal({ cwd, resume, provider, model, effort, speed, addDirs }, stillWanted = () => true) {
+  const t = await post('/api/terminals', { cwd, resume, provider, model, effort, speed, ...(resume ? {} : { addDirs }) });
   if (!stillWanted()) return refresh();
   if (t.error) { state.waking = null; updateTermLoading(); alert(t.error); return; }
   await refresh();
@@ -1630,6 +1630,7 @@ async function loadTranscript(id, quiet = false) {
   $('#transcript-meta').innerHTML = `<span title="${esc([tokens, s.workspace].filter(Boolean).join('\n'))}">${s.model ? vendorDot(s.model) + esc(modelShort(s.model)) : ''}${s.provider ? ` · <span title="${esc(providerLabel(s.provider))}">${s.provider === 'gateway' ? '▲ gateway' : esc(s.provider)}</span>` : ''}${u.wallMs ? ' · ' + fmtDur(u.wallMs) : ''}${isChild ? ' · billed to parent' : u.cost ? ' · $' + u.cost.toFixed(2) : ''}</span>`;
 
   const html = [];
+  if (!isChild && s.addDirs?.length) html.push(`<div class="session-access"><div class="section-title">fx file access · chosen at launch</div><div class="session-access-path">${esc(s.workspace)}</div>${s.addDirs.map((dir) => `<div class="session-access-path">+ ${esc(dir)}</div>`).join('')}</div>`);
   // Desktop keeps its detail-first column; phones lead with the readable conversation.
   if (!mobileLayout.matches) html.push(filesSection(id, files));
   if (isChild) {
@@ -2082,18 +2083,38 @@ async function loadModels(force = false) {
   renderNsUsage();
   return modelsCatalog;
 }
+function setNsCwd(cwd) {
+  $('#newsheet').dataset.cwd = cwd;
+  $('#ns-root-path').textContent = cwd;
+  $('#ns-companions').classList.add('hidden');
+  $('#ns-companion-list').replaceChildren();
+  const wsp = workspaceFor(cwd);
+  if (wsp && cwd === wsp.dir) { $('#ns-root-path').textContent = `${cwd} · includes every repo`; return; }
+  // The server filters missing clones and symlinks; never infer access roots from sidebar data.
+  if (wsp) fetch(`/api/companion-repos?cwd=${encodeURIComponent(cwd)}`).then((r) => r.json()).then((repos) => {
+    if ($('#newsheet').classList.contains('hidden') || $('#newsheet').dataset.cwd !== cwd || !Array.isArray(repos)) return;
+    $('#ns-companions').classList.toggle('hidden', !repos.length);
+    $('#ns-companion-list').innerHTML = repos.map((r) => `<label class="ns-companion"><input type="checkbox" value="${esc(r.dir)}"><span><strong>${esc(r.owner)}/${esc(r.name)}</strong><small>${esc(r.dir)}</small></span></label>`).join('');
+  }).catch(() => {});
+}
+$('#ns-base').addEventListener('change', (e) => setNsCwd(e.target.value));
 function newSessionSheet(cwd) {
   const wsp = workspaceFor(cwd);
   $('#ns-folder').textContent = wsp && cwd === wsp.dir ? wsp.name : shortPath(cwd);
   renderNsWorkspace(wsp);
+  const base = $('#ns-base');
+  base.classList.toggle('hidden', !wsp?.repos?.length);
+  base.innerHTML = wsp ? `<option value="${esc(wsp.dir)}">Workspace root · all repos</option>${wsp.repos.filter((r) => r.status === 'ready').map((r) => `<option value="${esc(wsp.dir + '/' + r.dir)}">${esc(r.owner)}/${esc(r.name)}</option>`).join('')}` : '';
+  if (wsp && ![...base.options].some((o) => o.value === cwd)) base.insertAdjacentHTML('afterbegin', `<option value="${esc(cwd)}">Current folder</option>`);
+  if (wsp) base.value = cwd;
+  $('#ns-usage').open = false;
+  $('#newsheet').classList.remove('hidden');
+  setNsCwd(cwd);
   // Fresh remote state for the repos, without merging anything: fetch, then show it.
   if (wsp) post(`/api/workspaces/${wsp.id}/fetch`).then(() => fetch('/api/workspaces')).then((r) => r.json()).then((list) => {
     state.workspaces = list;
-    if (!$('#newsheet').classList.contains('hidden') && $('#newsheet').dataset.cwd === cwd) renderNsWorkspace(workspaceFor(cwd));
+    if (!$('#newsheet').classList.contains('hidden') && workspaceFor($('#newsheet').dataset.cwd)?.id === wsp.id) renderNsWorkspace(workspaceFor($('#newsheet').dataset.cwd));
   }).catch(() => {});
-  $('#newsheet').dataset.cwd = cwd;
-  $('#ns-usage').open = false;
-  $('#newsheet').classList.remove('hidden');
   loadModels().then(() => $('#ns-model').focus());
 }
 // Workspace repos in the new-session sheet, and a warning when another session is working there.
@@ -2102,7 +2123,7 @@ function renderNsWorkspace(wsp) {
   box.classList.toggle('hidden', !wsp);
   if (!wsp) return (box.innerHTML = '');
   const busy = state.sessions.filter((s) => !s.archived && s.terminal && (s.state === 'working' || s.state === 'needs_input') && workspaceFor(s.workspace)?.id === wsp.id);
-  box.innerHTML = `${wsp.repos.length ? `<label class="ns-label">Repos · shared by every session in this workspace</label>${wsp.repos.map(wsRepoLine).join('')}` : ''}${busy.length ? `<div class="ws-busy">${busy.length === 1 ? 'Another session is working here' : `${busy.length} sessions are working here`}: they edit the same files.</div>` : ''}`;
+  box.innerHTML = `${busy.length ? `<div class="ws-busy">${busy.length === 1 ? 'Another session is working in this workspace' : `${busy.length} sessions are working in this workspace`}: they may edit the same files.</div>` : ''}`;
 }
 function nsSelection() {
   const v = $('#ns-model').value, at = v.indexOf('|');
@@ -2138,8 +2159,9 @@ $('#newform').addEventListener('submit', async (e) => {
   const [provider, model] = nsSelection();
   const effort = provider ? $('#ns-effort').value || null : null;
   const speed = provider ? $('#ns-speed').value : null;
+  const addDirs = [...$('#ns-companion-list').querySelectorAll('input:checked')].map((input) => input.value);
   $('#newsheet').classList.add('hidden');
-  await openTerminal({ cwd, provider, model, effort, speed });
+  await openTerminal({ cwd, provider, model, effort, speed, addDirs });
 });
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#newsheet').classList.contains('hidden')) $('#newsheet').classList.add('hidden'); });
 
