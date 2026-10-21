@@ -176,22 +176,30 @@ function renderSummary() {
 // ---------- workspaces: folders made of GitHub repos ----------
 const workspaceFor = (path) => (state.workspaces ?? []).find((w) => path === w.dir || String(path ?? '').startsWith(w.dir + '/'));
 // One repo of a workspace: its folder, branch and what needs attention (uncommitted, behind, ahead, clone state).
-function wsRepoLine(r) {
+function wsRepoLine(r, wsId = null) {
   const stateHtml = r.status === 'cloning' ? '<span class="ws-state">cloning…</span>'
     : r.status === 'missing' ? '<span class="ws-state">waiting to clone</span>'
     : r.status === 'error' ? `<span class="ws-state err" title="${esc(r.error ?? '')}">clone failed</span>`
     : `<span class="ws-state ${r.changed ? 'warn' : ''}">${[r.changed ? `±${r.changed}` : '', r.behind ? `↓${r.behind}` : '', r.ahead ? `↑${r.ahead}` : ''].filter(Boolean).join(' ')}</span>`;
-  return `<div class="ws-line" title="${esc(r.owner)}/${esc(r.name)}"><span>${esc(r.dir)}</span>${r.branch ? `<span class="ws-branch">${esc(r.branch)}</span>` : ''}${stateHtml}</div>`;
+  // The branch is the workspace copy's, shared by its sessions: a button to change it (branches.mjs) when fox knows the workspace.
+  const off = r.branch && r.default && r.branch !== r.default;
+  const branch = !r.branch ? '' : wsId && r.status === 'ready'
+    ? `<button type="button" class="ws-branch${off ? ' off' : ''}" data-branch-ws="${esc(wsId)}" data-branch-dir="${esc(r.dir)}" title="Change the branch of this workspace's ${esc(r.dir)} (all its sessions use it)">${esc(r.branch)}</button>`
+    : `<span class="ws-branch">${esc(r.branch)}</span>`;
+  return `<div class="ws-line" title="${esc(r.owner)}/${esc(r.name)}"><span>${esc(r.dir)}</span>${branch}${stateHtml}</div>`;
 }
 
 // In the sidebar only the repos that need you show up (uncommitted, behind or ahead, cloning, failed);
 // when all are clean, one quiet line says how many there are. The edit dialog lists them all.
+const wsShowAll = new Set(); // workspaces whose repo lines are all shown, this page only
 function wsRepoSummary(wsp) {
-  const attention = wsp.repos.filter((r) => r.status !== 'ready' || r.changed || r.behind || r.ahead);
+  // Repos that need a look show their line; the rest fold into one line that opens them all (to change a branch there too).
+  const open = wsShowAll.has(wsp.id);
+  const attention = wsp.repos.filter((r) => open || r.status !== 'ready' || r.changed || r.behind || r.ahead || (r.branch && r.default && r.branch !== r.default));
   const n = wsp.repos.length;
   if (!n) return '';
   const clean = n - attention.length;
-  return `<div class="ws-repos-line">${attention.map(wsRepoLine).join('')}${clean ? `<div class="ws-line" title="${esc(wsp.repos.filter((r) => !attention.includes(r)).map((r) => r.dir).join(', '))}"><span>${attention.length ? `${clean} more` : `${GITHUB_MARK}${n}`}</span></div>` : ''}</div>`;
+  return `<div class="ws-repos-line">${attention.map((r) => wsRepoLine(r, wsp.id)).join('')}${clean ? `<div class="ws-line"><button type="button" class="ws-more" data-ws-all="${esc(wsp.id)}" title="Show ${esc(wsp.repos.filter((r) => !attention.includes(r)).map((r) => r.dir).join(', '))} and their branches">${attention.length ? `${clean} more` : `${GITHUB_MARK}${n}`}</button></div>` : open ? `<div class="ws-line"><button type="button" class="ws-more" data-ws-all="${esc(wsp.id)}">fewer</button></div>` : ''}</div>`;
 }
 
 function renderSessions() {
@@ -320,6 +328,8 @@ $('#session-groups').addEventListener('click', async (e) => {
   const d = btn?.dataset ?? {};
   if (d.new) return newSessionSheet(d.new);
   if (d.editWs) return openWorkspaceDialog(d.editWs);
+  if (d.branchWs) return openBranchMenu(btn, d.branchWs, d.branchDir);
+  if (d.wsAll) { wsShowAll.has(d.wsAll) ? wsShowAll.delete(d.wsAll) : wsShowAll.add(d.wsAll); return renderSessions(); }
   if (d.pin) return setPinned(d.pin, !state.pinned.has(d.pin));
   if (d.rename) return renameInline(d.rename);
   if (d.archive) {
@@ -2985,6 +2995,60 @@ $('#pair-stop').addEventListener('click', async () => {
     await showPairingState();
   } catch (error) { $('#pair-status').textContent = error.message; }
 });
+
+// ---------- a workspace repo's branch (branches.mjs): back to main, another branch, update, a new one ----------
+// The copy is shared by every session in the workspace, so the server refuses while one works, and uncommitted work is
+// only ever moved into a wip/ branch (after asking), never dropped.
+let branchMenu = null;
+function closeBranchMenu() { branchMenu?.remove(); branchMenu = null; }
+async function openBranchMenu(anchor, wsId, dir) {
+  closeBranchMenu();
+  const menu = branchMenu = document.createElement('div');
+  menu.className = 'branch-menu'; menu.setAttribute('role', 'menu');
+  const r = anchor.getBoundingClientRect();
+  menu.style.left = `${Math.min(r.left, innerWidth - 300)}px`; menu.style.top = `${r.bottom + 4}px`;
+  menu.innerHTML = '<div class="bm-note">Loading branches…</div>';
+  document.body.appendChild(menu);
+  const base = `/api/workspaces/${encodeURIComponent(wsId)}/repos/${encodeURIComponent(dir)}`;
+  const info = await (await fetch(`${base}/branches`)).json().catch(() => ({ error: 'Could not read the branches.' }));
+  if (branchMenu !== menu) return;
+  if (info.error) { menu.innerHTML = `<div class="bm-note err">${esc(info.error)}</div>`; return; }
+  const others = info.branches.filter((b) => b.name !== info.current && b.name !== info.default).slice(0, 12);
+  menu.innerHTML = `<div class="bm-head"><b>${esc(dir)}</b> on <span class="mono">${esc(info.current)}</span>${info.merged ? ' <span class="bm-tag">merged</span>' : ''}${info.dirty ? ` <span class="bm-tag warn">±${info.dirty}</span>` : ''}</div>`
+    + `<div class="bm-note">Every session in this workspace uses this copy.</div>`
+    + (info.current !== info.default ? `<button type="button" class="bm-main" data-to="${esc(info.default)}">Back to ${esc(info.default)}</button>` : `<button type="button" data-update>Update ${esc(info.default)}</button>`)
+    + (others.length ? `<div class="bm-sub">Other branches</div>${others.map((b) => `<button type="button" data-to="${esc(b.name)}"><span class="mono">${esc(b.name)}</span><small>${esc(fmtAgo(b.at))}${b.local ? '' : ' · remote'}</small></button>`).join('')}` : '')
+    + `<button type="button" data-new-branch>New branch…</button><div class="bm-msg" role="status"></div>`;
+  const say = (html, cls = '') => { const m = menu.querySelector('.bm-msg'); m.className = `bm-msg ${cls}`; m.innerHTML = html; };
+  const act = async (path, body, label) => {
+    say(`${esc(label)}…`);
+    const res = await fetch(`${base}/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const out = await res.json().catch(() => ({}));
+    if (branchMenu !== menu) return;
+    if (res.status === 409 && out.dirty && path === 'switch') {
+      say(`${esc(out.error)}<div class="bm-row"><button type="button" class="bm-main" data-keep="${esc(body.branch)}">Keep them in a wip/ branch and switch</button><button type="button" data-cancel>Cancel</button></div>`, 'warn');
+      return;
+    }
+    if (!res.ok) return say(esc(out.error || 'Could not do it.'), 'err');
+    closeBranchMenu();
+    toast([out.branch ? `On ${out.branch}` : 'Updated', out.update && out.update !== 'no upstream' ? out.update : '', out.kept ? `work kept in ${out.kept.name}${out.kept.pushed ? '' : ' (not pushed)'}` : ''].filter(Boolean).join(' · '));
+    refresh();
+  };
+  menu.addEventListener('click', async (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.to) return act('switch', { branch: b.dataset.to }, `Switching to ${b.dataset.to}`);
+    if (b.dataset.keep) return act('switch', { branch: b.dataset.keep, keep: true }, 'Keeping your work and switching');
+    if (b.dataset.cancel !== undefined) return say('');
+    if (b.dataset.update !== undefined) return act('update', {}, 'Updating');
+    if (b.dataset.newBranch !== undefined) {
+      say('<input class="bm-input" placeholder="new-branch-name" spellcheck="false" autocapitalize="none" />', '');
+      const input = menu.querySelector('.bm-input'); input.focus();
+      input.addEventListener('keydown', (k) => { if (k.key === 'Enter' && input.value.trim()) act('branch', { name: input.value.trim() }, `Creating ${input.value.trim()}`); if (k.key === 'Escape') closeBranchMenu(); });
+    }
+  });
+}
+document.addEventListener('pointerdown', (e) => { if (branchMenu && !branchMenu.contains(e.target) && !e.target.closest('[data-branch-ws]')) closeBranchMenu(); });
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && branchMenu) closeBranchMenu(); });
 
 // ---------- boot ----------
 // Deep links: ?session=<id> selects a session and shows its transcript; ?open=<id> also opens its terminal tab.

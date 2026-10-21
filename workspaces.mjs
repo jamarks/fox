@@ -88,12 +88,12 @@ export function createWorkspaces({
     if (cloning.has(k)) return { ...base, status: 'cloning' };
     if (!existsSync(join(dir, '.git'))) return { ...base, status: errors.has(k) ? 'error' : 'missing', error: errors.get(k) ?? null };
     const run = (args) => git(['-C', dir, ...SAFE_GIT, ...args], { timeout: 5000 }).catch(() => '');
-    const [branch, porcelain, counts] = await Promise.all([
+    const [branch, porcelain, counts, def] = await Promise.all([
       run(['rev-parse', '--abbrev-ref', 'HEAD']), run(['status', '--porcelain']),
-      run(['rev-list', '--left-right', '--count', '@{u}...HEAD']),
+      run(['rev-list', '--left-right', '--count', '@{u}...HEAD']), run(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']),
     ]);
     const [behind, ahead] = counts ? counts.split(/\s+/).map(Number) : [0, 0];
-    return { ...base, status: 'ready', branch, changed: porcelain ? porcelain.split('\n').filter(Boolean).length : 0, ahead: ahead || 0, behind: behind || 0 };
+    return { ...base, status: 'ready', branch, default: def.replace(/^origin\//, '') || null, changed: porcelain ? porcelain.split('\n').filter(Boolean).length : 0, ahead: ahead || 0, behind: behind || 0 };
   }
 
   return {

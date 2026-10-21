@@ -28,6 +28,7 @@ import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
 import { createJobStore, createRunner, updateJobRepo } from './jobs.mjs';
 import { createPrStates } from './prstate.mjs';
 import { createPrs } from './prs.mjs';
+import { createBranches } from './branches.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 import { ensureFoxNotes, foxNotes } from './notes.mjs';
 import { createModels, launchArgs } from './models.mjs';
@@ -112,6 +113,11 @@ Other files here are notes, scratch work and job scripts.
 `;
 }
 const workspaces = createWorkspaces({ stateDir: STATE_DIR, rootDir: join(homedir(), 'workspaces'), agentNotes: workspaceAgentNotes });
+// A workspace repo's branch, changed from the sidebar (branches.mjs); refused while a session there is working.
+const branches = createBranches({
+  workspaces,
+  busy: async (dir) => (await listTerminals()).filter((t) => t.activity === 'working' && t.cwd && (t.cwd === dir || t.cwd.startsWith(dir + '/'))).map((t) => t.name),
+});
 // Jobs (see jobs.mjs). On a server the runner is its own service (FOX_JOBS_RUNNER=external), so deploying fox
 // never kills a job mid-run; on a laptop it runs inside fox.
 const jobStore = createJobStore({ stateDir: STATE_DIR });
@@ -797,6 +803,18 @@ async function handlePanelRequest(req, res) {
     if (p === '/api/workspaces' && req.method === 'POST') {
       try { const ws = await workspaces.create(JSON.parse(await readBody(req) || '{}')); return send(res, 200, ws); }
       catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
+    }
+    if ((m = p.match(/^\/api\/workspaces\/([0-9a-f-]{36})\/repos\/([A-Za-z0-9._-]+)\/(branches|switch|update|branch)$/))) {
+      const [, id, dir, action] = m;
+      try {
+        if (action === 'branches' && req.method === 'GET') return send(res, 200, await branches.list(id, dir));
+        if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
+        const body = JSON.parse(await readBody(req) || '{}');
+        const out = action === 'switch' ? await branches.switch(id, dir, body.branch, { keep: body.keep === true })
+          : action === 'update' ? await branches.update(id, dir) : await branches.create(id, dir, body.name);
+        await listWorkspaces(true);
+        return send(res, 200, out);
+      } catch (err) { return send(res, err.status ?? 500, { error: String(err.stderr || err.message).trim().split('\n')[0], dirty: err.dirty, busy: err.busy }); }
     }
     if ((m = p.match(/^\/api\/workspaces\/([0-9a-f-]{36})(?:\/(fetch|retry))?$/))) {
       const [, id, action] = m;

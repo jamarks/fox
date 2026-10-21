@@ -582,6 +582,24 @@ a.section-title.fold:hover { color: var(--text); }
 .ws-line .ws-state { margin-left: auto; color: var(--muted); }
 .ws-line .ws-state.ok { color: var(--ok); } .ws-line .ws-state.err { color: var(--err); } .ws-line .ws-state.warn { color: var(--warn); }
 .ws-line .ws-branch { color: var(--muted); }
+button.ws-more { font: inherit; color: var(--muted); padding: 0 4px; margin: 0 -4px; display: inline-flex; align-items: center; gap: 4px; } button.ws-more:hover { color: var(--text); }
+button.ws-branch { font: inherit; padding: 0 4px; margin: 0 -4px; border-radius: 4px; }
+button.ws-branch:hover { color: var(--text); background: var(--panel-2); }
+button.ws-branch.off { color: var(--warn); } /* not on the repo's default branch: worth a look */
+.branch-menu { position: fixed; z-index: 30; width: 290px; max-height: 70vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px; box-shadow: 0 12px 30px #0008; display: grid; gap: 2px; }
+.branch-menu button { display: flex; justify-content: space-between; gap: 8px; width: 100%; text-align: left; padding: 6px 8px; color: var(--text); border-radius: 5px; }
+.branch-menu button:hover { background: var(--panel-2); }
+.branch-menu button small { color: var(--muted); }
+.branch-menu .bm-main { color: var(--accent); font-weight: 600; }
+.branch-menu .bm-head { padding: 6px 8px 0; } .branch-menu .mono { font-family: var(--mono); font-size: 12px; }
+.branch-menu .bm-note, .branch-menu .bm-sub { padding: 2px 8px 6px; color: var(--muted); font-size: 11px; }
+.branch-menu .bm-sub { padding-top: 6px; text-transform: uppercase; letter-spacing: .04em; }
+.branch-menu .bm-tag { font-size: 11px; border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; color: var(--ok); }
+.branch-menu .bm-tag.warn { color: var(--warn); }
+.branch-menu .bm-msg { padding: 4px 8px; font-size: 12px; color: var(--muted); } .branch-menu .bm-msg:empty { display: none; }
+.branch-menu .bm-msg.warn { color: var(--warn); } .branch-menu .bm-msg.err { color: var(--err); }
+.branch-menu .bm-row { display: grid; gap: 2px; margin-top: 6px; }
+.branch-menu .bm-input { width: 100%; font-family: var(--mono); }
 .ws-busy { color: var(--warn); font-family: inherit; font-size: 11px; margin-top: 4px; }
 #ws-delete { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 12px; }
 #ws-delete p { margin: 0 0 8px; }
