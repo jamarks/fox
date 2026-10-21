@@ -459,7 +459,7 @@ function startSignIn(tool) {
       clearTimeout(timer);
       entry.status = code === 0 ? 'done' : 'failed';
       entry.error = code === 0 ? '' : code === null ? 'The sign-in was cancelled or took longer than 5 minutes.' : out.trim().split('\n').pop() || 'The sign-in did not finish.';
-      if (code === 0) { const st = await loadState(); st.toolsSignedIn[tool.id] = true; await saveState(st); }
+      if (code === 0) await updateLaunchState((st) => { st.toolsSignedIn[tool.id] = true; });
       resolveUrl(entry);
     });
   });
@@ -659,15 +659,12 @@ async function handlePanelRequest(req, res) {
     if (req.method === 'POST' && (m = p.match(/^\/api\/sessions\/([^/]+)\/(archive|unarchive|rename)$/))) {
       const id = safeSessionId(m[1]);
       if (!id) return send(res, 400, { error: 'bad id' });
-      const st = await loadState();
-      if (m[2] === 'archive' && !st.archived.includes(id)) st.archived.push(id);
-      if (m[2] === 'unarchive') st.archived = st.archived.filter((x) => x !== id);
-      if (m[2] === 'rename') {
-        const body = JSON.parse(await readBody(req) || '{}');
-        const name = String(body.name ?? '').trim().slice(0, 120);
-        if (name) st.names[id] = name; else delete st.names[id];
-      }
-      await saveState(st);
+      const name = m[2] === 'rename' ? String(JSON.parse(await readBody(req) || '{}').name ?? '').trim().slice(0, 120) : null;
+      await updateLaunchState((st) => {
+        if (m[2] === 'archive' && !st.archived.includes(id)) st.archived.push(id);
+        if (m[2] === 'unarchive') st.archived = st.archived.filter((x) => x !== id);
+        if (m[2] === 'rename') { if (name) st.names[id] = name; else delete st.names[id]; }
+      });
       return send(res, 200, { ok: true });
     }
     // A file dropped on a terminal: saved under ~/.config/fox/drops so fx can read or attach it by path.
@@ -827,7 +824,7 @@ async function handlePanelRequest(req, res) {
       try {
         if (resume && (body.addDirs !== undefined || [body.provider, body.model, body.effort, body.speed].some((v) => v != null && v !== ''))) return send(res, 400, { error: 'Resume cannot change launch options' });
         const addDirs = resume ? [] : await workspaces.validateCompanions(cwd, body.addDirs ?? []);
-        const flags = resume ? [] : [...launchArgs(await models.get(), body), ...addDirs.flatMap((dir) => ['--add-dir', dir])];
+        const flags = resume ? [] : [...launchArgs(await models.get(), body), ...(await workspaces.forPath(cwd) ? ['--no-additional-dirs'] : []), ...addDirs.flatMap((dir) => ['--add-dir', dir])];
         return send(res, 200, await createTerminal({ cwd, resume, flags, addDirs }));
       } catch (err) { return send(res, err.status ?? (err.message?.match(/Unknown provider|Unsupported|Resume cannot/) ? 400 : 500), { error: String(err.stderr || err.message) }); }
     }
@@ -966,17 +963,19 @@ async function listTerminals() {
   const pending = (await loadState()).pendingDirs;
   const matched = [];
   const out = [];
-  for (const line of raw.split('\n')) {
-    const [name, created, attached] = line.split('|');
-    if (!name?.startsWith(TMUX_PREFIX)) continue;
-    let resume = await tmuxOption(name, '@fx_resume');
+  const entries = raw.split('\n').map((line) => line.split('|')).filter(([name]) => name?.startsWith(TMUX_PREFIX));
+  const known = new Map(await Promise.all(entries.map(async ([name]) => [name, await tmuxOption(name, '@fx_resume')])));
+  const assigned = new Set([...known.values()].filter(Boolean));
+  for (const [name, created, attached] of entries) {
+    let resume = known.get(name);
     const cwd = await tmuxOption(name, '@fx_cwd');
     // Una terminal nueva todavía no sabe qué sesión de fx creó: la buscamos por workspace y fecha.
     if (!resume && cwd) {
       const createdMs = Number(created) * 1000;
-      const candidates = (await listSessions()).filter((s) => s.workspace === cwd && s.createdAt >= createdMs - 5000);
+      const candidates = (await listSessions()).filter((s) => s.workspace === cwd && s.createdAt >= createdMs - 5000 && !assigned.has(s.id));
       if (candidates.length) {
         resume = candidates[candidates.length - 1].id;
+        assigned.add(resume);
         await tmux('set-option', '-t', name, '@fx_resume', resume);
       }
     }

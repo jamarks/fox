@@ -2100,7 +2100,8 @@ function newSessionSheet(cwd) {
   const base = $('#ns-base');
   base.classList.toggle('hidden', !wsp?.repos?.length);
   base.innerHTML = wsp ? `<option value="${esc(wsp.dir)}">Workspace root · all repos</option>${wsp.repos.filter((r) => r.status === 'ready').map((r) => `<option value="${esc(wsp.dir + '/' + r.dir)}">${esc(r.owner)}/${esc(r.name)}</option>`).join('')}` : '';
-  if (wsp && [...base.options].some((o) => o.value === cwd)) base.value = cwd;
+  if (wsp && ![...base.options].some((o) => o.value === cwd)) base.insertAdjacentHTML('afterbegin', `<option value="${esc(cwd)}">Current folder</option>`);
+  if (wsp) base.value = cwd;
   $('#ns-usage').open = false;
   $('#newsheet').classList.remove('hidden');
   setNsCwd(cwd);
