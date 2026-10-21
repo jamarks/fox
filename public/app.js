@@ -1168,13 +1168,13 @@ async function refreshResults(parent) {
   if (!parent?.children?.length) return;
   const events = await (await fetch(`/api/sessions/${parent.id}/events`)).json();
   const runs = []; const byAgent = new Map();
-  for (const ev of events) {
+  for (const [index, ev] of events.entries()) {
     if (ev.kind !== 'tool_call' || ev.name !== 'subagent' || !ev.result) continue;
     const req = ev.args?.request ?? {};
     let text = ev.result.preview;
     try { const j = JSON.parse(text); text = j.result ?? text; } catch {}
-    if (req.agent) { if (!byAgent.has(req.agent)) byAgent.set(req.agent, []); byAgent.get(req.agent).push({ message: req.message ?? '', text }); }
-    else if (req.task) runs.push({ task: norm(req.task), text, used: false });
+    if (req.agent) { if (!byAgent.has(req.agent)) byAgent.set(req.agent, []); byAgent.get(req.agent).push({ message: req.message ?? '', text, index }); }
+    else if (req.task) runs.push({ task: norm(req.task), text, index, used: false });
   }
   // Walk the one-off children in order and give each the first unused result with the same task.
   const assigned = new Map();
@@ -1182,14 +1182,14 @@ async function refreshResults(parent) {
     if (c.name) continue;
     const task = norm(c.task ?? sessionById(c.id)?.firstPrompt ?? '');
     const r = runs.find((x) => !x.used && x.task === task);
-    if (r) { r.used = true; assigned.set(c.id, r.text); }
+    if (r) { r.used = true; assigned.set(c.id, r); }
   }
   cachedResults = { id: parent.id, key: resultsKey(parent), runs, byAgent, assigned };
 }
 function answerFor(parent, c) {
   if (cachedResults.id !== parent.id) return null;
   if (c?.name) { const rounds = cachedResults.byAgent.get(c.name) ?? []; return rounds.length ? rounds.at(-1).text : null; }
-  return cachedResults.assigned.get(c.id) ?? null;
+  return cachedResults.assigned.get(c.id)?.text ?? null;
 }
 
 // Board: subagents grouped by task, so the same task on several models reads as a comparison.
@@ -1264,7 +1264,9 @@ function agentsBoard(parent, { selectedId = null } = {}) {
           ? rounds.map((r, k) => `<div class="agent-note">round ${k + 1} · ${esc(r.message.slice(0, 160))}</div><div class="agent-answer">${esc(r.text)}</div>`).join('')
           : res ? `<div class="agent-answer">${esc(res)}</div>` : ''}`;
     const selected = c.id === selectedId;
-    return `<div class="agent ${open ? 'open' : ''} ${selected ? 'selected' : ''}" data-agent="${esc(c.id)}" title="${open ? '' : esc(task)}">${head}${body}${open && c.name ? `<button type="button" class="agent-open linkish" data-agent-followup="${esc(c.id)}" data-agent-parent="${esc(parent.id)}" data-agent-name="${esc(c.name)}">Follow up</button>` : ''}${open && !selected ? `<a class="agent-open" href="#" data-child="${esc(c.id)}">its conversation →</a>` : ''}</div>`;
+    const resultIndex = c.name ? rounds.at(-1)?.index : cachedResults.assigned.get(c.id)?.index;
+    const handoffAction = open && answer && resultIndex !== undefined ? `<button type="button" class="agent-open linkish handoff-action" data-handoff-session="${esc(parent.id)}" data-handoff-kind="agent" data-handoff-index="${resultIndex}" data-handoff-model="${esc(model ?? '')}">Hand off</button>` : '';
+    return `<div class="agent ${open ? 'open' : ''} ${selected ? 'selected' : ''}" data-agent="${esc(c.id)}" title="${open ? '' : esc(task)}">${head}${body}${handoffAction}${open && c.name ? `<button type="button" class="agent-open linkish" data-agent-followup="${esc(c.id)}" data-agent-parent="${esc(parent.id)}" data-agent-name="${esc(c.name)}">Follow up</button>` : ''}${open && !selected ? `<a class="agent-open" href="#" data-child="${esc(c.id)}">its conversation →</a>` : ''}</div>`;
   };
   // A header only where it says something: the same task on several models, or a named agent.
   const html = [...groups.values()].map((g) => {
@@ -1476,6 +1478,144 @@ function filesSection(id, files) {
   const head = `<a href="#" class="section-title fold ${filesCollapsed ? 'closed' : ''}" data-toggle-files>files <span class="fold-n">${shown.length}</span></a>`;
   return filesCollapsed ? head : `${head}<div class="files">${shown.map(fileRow).join('')}</div>`;
 }
+// ---------- local handoff packet ----------
+// Only recorded events and explicitly selected file references enter the draft; never fetch a whole chat.
+let handoff = null;
+let handoffRequest = 0;
+const handoffLimit = 12000;
+const handoffUrl = (id, kind) => `/api/sessions/${encodeURIComponent(id)}/${kind}`;
+const handoffResult = (ev) => {
+  let text = ev?.result?.preview ?? '';
+  try { text = JSON.parse(text).result ?? text; } catch {}
+  return String(text);
+};
+function handoffTurn(events, index, agent = false) {
+  for (let i = index + 1; i < events.length; i++) {
+    if (events[i].kind === 'turn_completed') return `${i}:${events[i].ts ?? '?'}`;
+    if (events[i].kind === 'user' || events[i].kind === 'interrupted' || (!agent && events[i].kind === 'assistant' && events[i].text?.trim())) break;
+  }
+  return null;
+}
+function handoffEvidence(events, source) {
+  const ev = events[source.index];
+  if (!ev || !handoffTurn(events, source.index, source.kind === 'agent')) return null;
+  if (source.kind === 'answer') {
+    if (ev.kind !== 'assistant' || !ev.text?.trim()) return null;
+    let task = '';
+    for (let i = source.index - 1; i >= 0; i--) if (events[i].kind === 'user') { task = events[i].text; break; }
+    return { task, answer: ev.text, model: ev.model, marker: handoffTurn(events, source.index), stamp: ev.ts };
+  }
+  if (ev.kind !== 'tool_call' || ev.name !== 'subagent' || !ev.result) return null;
+  return { task: ev.args?.request?.task ?? ev.args?.request?.message ?? '', answer: handoffResult(ev), model: source.model, marker: handoffTurn(events, source.index, true), stamp: ev.ts };
+}
+async function handoffFile(id, path) {
+  try {
+    const r = await fetch(`${handoffUrl(id, 'file')}?path=${encodeURIComponent(path)}`);
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (typeof j.text !== 'string') return null;
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(j.text));
+    return 'sha256:' + [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  } catch { return null; }
+}
+function handoffRoot(id) {
+  const s = sessionById(id);
+  return s && !s.parentId && !s.archived && s.state !== 'external' ? s : null;
+}
+function handoffBoundary() {
+  const dest = handoffRoot($('#handoff-target').value);
+  const root = state.repos?.[dest?.workspace]?.root ?? dest?.workspace;
+  const paths = dest && handoff ? handoff.files.filter((f) => handoff.chosen.has(f.path) && !(f.path === root || f.path.startsWith(root + '/'))) : [];
+  $('#handoff-boundary').textContent = paths.length ? `${paths.length} selected path(s) outside this session's configured root. The recipient may not read them. Remove these references or separately review an fx --add-dir launch; this action never grants access.` : '';
+}
+function handoffPacket() {
+  if (!handoff) return;
+  const { source, evidence, files, commands, chosen } = handoff;
+  const origin = sessionById(source.id);
+  const repo = state.repos?.[origin?.workspace];
+  const parts = [
+    'Hand off · recorded evidence (not a current workspace snapshot)',
+    `Source session: ${source.id} · model: ${evidence.model || 'unavailable'}`,
+    `Turn marker: ${evidence.marker} · event: ${source.index} · timestamp: ${evidence.stamp ?? 'unavailable'}`,
+    `Repo: ${repo?.repo || 'unavailable'} · root: ${repo?.root || origin?.workspace || 'unavailable'} · branch observed: ${repo?.branch || 'unavailable'}`,
+  ];
+  if (chosen.has('task')) parts.push(`Task excerpt (verbatim):\n${evidence.task || '[unavailable]'}`);
+  if (chosen.has('answer')) parts.push(`Answer excerpt (verbatim):\n${evidence.answer}`);
+  const selected = files.filter((f) => chosen.has(f.path));
+  if (selected.length) parts.push(`Selected file paths (digests at assembly; content not attached):\n${selected.map((f) => `${f.path} · ${f.digest}`).join('\n')}`);
+  const refs = commands.filter((c) => chosen.has(`command:${c.index}`));
+  if (refs.length) parts.push(`Recorded command/result references (not rerun):\n${refs.map((c) => `event ${c.index} · ${c.command} · ${c.status} · ${c.result}`).join('\n')}`);
+  const text = parts.join('\n\n');
+  $('#handoff-text').value = text.length > handoffLimit ? text.slice(0, handoffLimit - 30) + '\n[packet truncated at 12,000 chars]' : text;
+  handoffBoundary();
+}
+async function openHandoff(button) {
+  const id = button.dataset.handoffSession;
+  const source = { id, kind: button.dataset.handoffKind, index: Number(button.dataset.handoffIndex), model: button.dataset.handoffModel || null };
+  const request = ++handoffRequest;
+  $('#handoff-status').textContent = 'Reading recorded evidence…';
+  try {
+    const [events, files] = await Promise.all([fetch(handoffUrl(id, 'events')).then((r) => r.json()), fetch(handoffUrl(id, 'files')).then((r) => r.json())]);
+    const evidence = handoffEvidence(events, source);
+    if (!evidence) throw new Error('Source turn is no longer complete or available');
+    const listed = files.filter((f) => f.action !== 'read').slice(0, 20);
+    const digests = (await Promise.all(listed.map(async (f) => ({ path: f.path, digest: await handoffFile(id, f.path) })))).filter((f) => f.digest);
+    if (request !== handoffRequest) return;
+    const commands = events.map((ev, index) => ({ ev, index })).filter(({ ev }) => ev.kind === 'tool_call' && /^(shell|exec|bash|run_command)$/.test(ev.name) && ev.result).slice(-12).map(({ ev, index }) => ({ index, command: String(briefArgs(ev.args)).slice(0, 180), status: ev.result.status ?? 'unknown', result: String(ev.result.preview ?? '').slice(0, 180) }));
+    handoff = { source, evidence, files: digests, commands, chosen: new Set(['task', 'answer']) };
+    const targets = state.sessions.filter((s) => handoffRoot(s.id) && s.id !== id);
+    $('#handoff-target').innerHTML = '<option value="">Choose a session…</option>' + targets.map((s) => `<option value="${esc(s.id)}">${esc(displayTitle(s))} · ${esc(shortPath(s.workspace))}</option>`).join('');
+    $('#handoff-choices').innerHTML = '<label><input type="checkbox" data-handoff-choice="task" checked>task</label><label><input type="checkbox" data-handoff-choice="answer" checked>answer</label>'
+      + digests.map((f, i) => `<label><input type="checkbox" data-handoff-choice="file:${i}">${esc(f.path)}</label>`).join('')
+      + commands.map((c) => `<label><input type="checkbox" data-handoff-choice="command:${c.index}">command #${c.index}</label>`).join('');
+    $('#handoff-status').textContent = 'Select only what the recipient needs. Nothing is sent; insertion requires an open terminal.';
+    handoffPacket();
+    $('#handoffsheet').classList.remove('hidden');
+  } catch { if (request === handoffRequest) $('#handoff-status').textContent = 'Recorded evidence unavailable. Try again.'; }
+}
+function closeHandoff() { handoffRequest++; $('#handoffsheet').classList.add('hidden'); handoff = null; }
+$('#handoff-choices').addEventListener('change', (e) => {
+  const key = e.target.dataset.handoffChoice;
+  if (!handoff || !key) return;
+  const value = key.startsWith('file:') ? handoff.files[Number(key.slice(5))]?.path : key;
+  if (e.target.checked) handoff.chosen.add(value); else handoff.chosen.delete(value);
+  handoffPacket();
+});
+$('#handoff-target').addEventListener('change', handoffBoundary); // switching destinations never inserts or opens either terminal
+$('#handoff-cancel').addEventListener('click', closeHandoff);
+$('#handoffsheet').addEventListener('click', (e) => { if (e.target.id === 'handoffsheet') closeHandoff(); });
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#handoffsheet').classList.contains('hidden')) closeHandoff(); });
+$('#handoff-refresh').addEventListener('click', () => { if (handoff) void openHandoff({ dataset: { handoffSession: handoff.source.id, handoffKind: handoff.source.kind, handoffIndex: handoff.source.index, handoffModel: handoff.source.model } }); });
+$('#handoffform').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const draft = handoff, destId = $('#handoff-target').value, submit = $('#handoffform button[type="submit"]');
+  if (!draft || !destId || submit.disabled) return;
+  submit.disabled = true;
+  try {
+    const dest = handoffRoot(destId);
+    const terminal = dest && state.terminals.find((t) => t.resume === dest.id && (!dest.terminal || t.name === dest.terminal));
+    const tab = terminal && state.tabs.get(terminal.name);
+    if (!tab || tab.closed || tab.ws?.readyState !== WebSocket.OPEN) throw new Error('Open the destination root terminal first. Your packet is still here.');
+    const events = await fetch(handoffUrl(draft.source.id, 'events')).then((r) => r.json());
+    const current = handoffEvidence(events, draft.source);
+    if (!current || current.marker !== draft.evidence.marker || current.task !== draft.evidence.task || current.answer !== draft.evidence.answer || current.model !== draft.evidence.model || current.stamp !== draft.evidence.stamp) throw new Error('Source changed or became unavailable. Refresh evidence and review the packet again.');
+    for (const c of draft.commands.filter((x) => draft.chosen.has(`command:${x.index}`))) {
+      const ev = events[c.index];
+      if (!ev || String(briefArgs(ev.args)).slice(0, 180) !== c.command || ev.result?.status !== c.status || String(ev.result?.preview ?? '').slice(0, 180) !== c.result) throw new Error(`Command result changed or became unavailable: #${c.index}. Refresh evidence and review again.`);
+    }
+    for (const f of draft.files.filter((x) => draft.chosen.has(x.path))) {
+      if (await handoffFile(draft.source.id, f.path) !== f.digest) throw new Error(`File changed or became unavailable: ${f.path}. Refresh evidence and review again.`);
+    }
+    if (handoff !== draft || $('#handoff-target').value !== destId || handoffRoot(destId)?.terminal !== terminal.name || tab.ws?.readyState !== WebSocket.OPEN) throw new Error('Destination changed or disconnected. Your packet is still here.');
+    const text = $('#handoff-text').value.replace(/\r\n?/g, '\n').replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/g, ' ');
+    if (!text.trim() || text.length > handoffLimit) throw new Error('Packet must be 1–12,000 characters.');
+    // Explicit bracketed paste: no untrusted escape/control bytes and no Enter after the paste.
+    tab.ws.send(JSON.stringify({ type: 'input', data: `\x1b[200~${text}\x1b[201~` }));
+    closeHandoff(); activateTab(terminal.name); tab.term.focus();
+  } catch (err) { $('#handoff-status').textContent = err.message || 'Could not insert. Your packet is still here.'; }
+  finally { submit.disabled = false; }
+});
+
 $('#transcript').addEventListener('click', (e) => {
   const opener = e.target.closest('[data-open-file]');
   if (opener) { e.preventDefault(); return post(`/api/sessions/${state.selected}/open-file`, { path: opener.dataset.openFile }); }
@@ -1509,6 +1649,8 @@ $('#transcript').addEventListener('click', (e) => {
     convoShown.delete(id);
     lastTranscriptKey = ''; return loadTranscript(id);
   }
+  const handoffButton = e.target.closest('[data-handoff-session]');
+  if (handoffButton) { e.preventDefault(); return void openHandoff(handoffButton); }
   const followup = e.target.closest('[data-agent-followup]');
   if (followup) { e.preventDefault(); return openAgentDraft(followup); }
   const link = e.target.closest('a[data-child], a[data-goto]');
@@ -1644,13 +1786,13 @@ async function loadTranscript(id, quiet = false) {
   if (mobileLayout.matches) html.push('<div class="section-title">conversation</div>');
   else if (!isChild && showConvo) html.push(`<div class="section-title">conversation · <a href="#" data-hide-convo="${esc(id)}">hide</a></div>`);
   let messageIndex = 0;
-  for (const ev of showConvo ? events : []) {
+  for (const [eventIndex, ev] of (showConvo ? events : []).entries()) {
     if (mobileLayout.matches && ev.kind !== 'user' && ev.kind !== 'assistant') continue;
     if (!isChild && ev.kind === 'tool_call' && ev.name === 'subagent' && parent.children?.length) continue; // already in the board
     const match = globalMessage?.id === id && globalMessage.index === messageIndex;
     if (ev.kind === 'user') html.push(`<div class="msg user${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? 'task from parent' : 'you'}</div><div class="text">${esc(ev.text)}</div></div>`);
     else if (ev.kind === 'assistant' && !ev.text?.trim()) continue; // a turn step with only tool calls
-    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? (s.subagent?.name ? ICON.threads + ' ' + esc(s.subagent.name) : 'subagent') : 'fx'}</div><div class="text md">${renderMarkdown(ev.text)}</div></div>`);
+    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? (s.subagent?.name ? ICON.threads + ' ' + esc(s.subagent.name) : 'subagent') : 'fx'}</div><div class="text md">${renderMarkdown(ev.text)}</div>${handoffTurn(events, eventIndex) ? `<button type="button" class="agent-open linkish handoff-action" data-handoff-session="${esc(id)}" data-handoff-kind="answer" data-handoff-index="${eventIndex}">Hand off</button>` : ''}</div>`);
     else if (ev.kind === 'tool_call') {
       const st = ev.result?.status ?? 'pending';
       const isSub = ev.name === 'subagent';
