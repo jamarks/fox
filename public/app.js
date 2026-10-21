@@ -386,6 +386,8 @@ function updateTermLoading() {
   const waking = state.waking;
   const connecting = !waking && tab && !tab.ready && !tab.closed && Date.now() - (tab.openedAt ?? 0) > 500;
   box.classList.toggle('hidden', !waking && !connecting);
+  // The terminal behind steps out while a session wakes: with the sky theme the notice's background is see-through.
+  $('#terminals').classList.toggle('waking', Boolean(waking));
   if (!waking && !connecting) return;
   const secs = (Date.now() - (waking?.since ?? tab.openedAt)) / 1000;
   $('#term-loading-title').textContent = waking ? `Waking up ${waking.title}` : (tab.attempts ? 'Reconnecting…' : 'Connecting…');
