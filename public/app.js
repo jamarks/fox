@@ -2511,7 +2511,7 @@ function renderPrsEntry() {
 const PR_REVIEW = { good: ['✓ reviewed', 'good'], fixed: ['✓ fixed by review', 'good'], 'needs-you': ['needs you', 'wait'], outdated: ['changed since review', 'wait'], reviewed: ['reviewed', ''] };
 function prChip(p) {
   if (p.checks === 'failing') return '<span class="pr-chip bad">checks fail</span>';
-  if (p.draft) return '<span class="pr-chip">draft</span>';
+  if (p.draft) return '<span class="pr-chip">paused</span>';
   if (!p.job) return '<span class="pr-chip">yours</span>';
   const [text, cls] = p.review ? PR_REVIEW[p.review.verdict] ?? PR_REVIEW.reviewed : ['not reviewed yet', 'wait'];
   return `<span class="pr-chip ${cls}">${text}</span>`;
@@ -2536,7 +2536,9 @@ function renderPrList() {
     const row = `<div class="pr-row${open ? ' open' : ''}${done ? ' done' : ''}${prFilter === 'all' ? ' all' : ''}" data-pr="${esc(key)}" role="listitem"><span class="jdot ${done ? status === 'merged' ? 'ok' : 'none' : p.ready ? 'ok' : p.checks === 'failing' ? 'failed' : 'paused'}"></span>`
       + `<span class="pt"><b>#${p.number}</b> ${esc(p.title.replace(/^[A-Z]+-\d+:\s*/, ''))} <span class="pm">· ${meta}</span></span>${statusChip}`
       + `<span class="plines"><span class="pr-add">+${p.additions}</span> <span class="pr-del">−${p.deletions}</span></span>`
-      + (done ? '<span></span>' : `<span class="pr-acts"><button type="button" class="merge" data-act="merge">Merge</button><button type="button" class="shut" data-act="close">Close</button></span>`) + '</div>';
+      + (done ? '<span></span>' : p.draft
+        ? `<span class="pr-acts"><button type="button" data-act="resume" title="Back to the queue: the review job looks at it again">Resume</button><button type="button" class="shut" data-act="close">Close</button></span>`
+        : `<span class="pr-acts"><button type="button" class="merge" data-act="merge">Merge</button><button type="button" data-act="pause" title="Keep it for later: a draft, out of the agent's queue and the review job's">Later</button><button type="button" class="shut" data-act="close">Close</button></span>`) + '</div>';
     if (!open) return row;
     const files = prFiles.get(key);
     const filesHtml = files ? `<div class="pr-files">${files.map((x) => `<span class="pf" title="${esc(x.path)}">${esc(x.path)}</span><span class="pr-add">+${x.additions}</span><span class="pr-del">−${x.deletions}</span>`).join('')}</div>` : '<div class="muted">Loading files…</div>';
@@ -2606,6 +2608,8 @@ $('#pr-list').addEventListener('click', async (e) => {
   const p = (prFilter === 'open' ? state.prs?.prs : state[`${prFilter}Prs`]?.prs)?.find((x) => prKey(x) === key);
   if (!p || p.state !== 'OPEN') return;
   const act = btn.dataset.act;
+  // Later and Resume only switch the PR between ready and paused (a draft): undoable, so one click.
+  if ((act === 'pause' || act === 'resume') && !btn.classList.contains('armed')) btn.classList.add('armed');
   if (!btn.classList.contains('armed')) {
     const unreviewed = act === 'merge' && p.job && (!p.review || p.review.verdict === 'outdated');
     btn.classList.add('armed'); btn.textContent = act === 'merge' ? (unreviewed ? 'Not reviewed yet. Merge?' : 'Merge?') : 'Close?';
@@ -2613,13 +2617,13 @@ $('#pr-list').addEventListener('click', async (e) => {
     setTimeout(() => { if (btn.isConnected) { btn.classList.remove('armed'); btn.textContent = act === 'merge' ? 'Merge' : 'Close'; } }, 4000);
     return;
   }
-  btn.disabled = true; btn.textContent = act === 'merge' ? 'Merging…' : 'Closing…';
+  btn.disabled = true; btn.textContent = { merge: 'Merging…', close: 'Closing…', pause: 'Pausing…', resume: 'Resuming…' }[act];
   const reason = act === 'close' ? ($('#pr-list .pr-open .pr-reason')?.value ?? '') : '';
   const [repo, n] = key.split('#');
   const r = await fetch(`/api/prs/${repo}/${n}/${act}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason }) });
   const out = await r.json().catch(() => ({}));
-  if (!r.ok) { toast(out.error || `Could not ${act} #${p.number}`); btn.disabled = false; btn.classList.remove('armed'); btn.textContent = act === 'merge' ? 'Merge' : 'Close'; return; }
-  toast(act === 'merge' ? `Merged #${p.number}` : `Closed #${p.number}`);
+  if (!r.ok) { toast(out.error || `Could not ${act} #${p.number}`); btn.disabled = false; btn.classList.remove('armed'); btn.textContent = { merge: 'Merge', close: 'Close', pause: 'Later', resume: 'Resume' }[act]; return; }
+  toast({ merge: `Merged #${p.number}`, close: `Closed #${p.number}`, pause: `#${p.number} paused for later`, resume: `#${p.number} back in the queue` }[act]);
   if (state.prOpen === key) state.prOpen = null;
   prFiles.delete(key);
   await loadPrs(true, prFilter);

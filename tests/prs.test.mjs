@@ -83,6 +83,11 @@ test('merge and close act only on known repos and real numbers, and drop the cac
   assert.deepEqual(calls.at(-1).args, ['pr', 'merge', '12', '--merge', '--repo', 'o/r']);
   await prs.close('O/R', 13, 'not needed');
   assert.deepEqual(calls.at(-1).args, ['pr', 'close', '13', '--comment', 'not needed', '--repo', 'o/r']);
+  await prs.pause('o/r', 14);
+  assert.deepEqual(calls.at(-1).args, ['pr', 'ready', '14', '--undo', '--repo', 'o/r'], 'paused = draft');
+  await prs.resume('o/r', 14);
+  assert.deepEqual(calls.at(-1).args, ['pr', 'ready', '14', '--repo', 'o/r']);
+  await assert.rejects(prs.pause('evil/x', 1), /unknown pull request/);
   await assert.rejects(prs.merge('evil/repo', '1'), /unknown pull request/);
   await assert.rejects(prs.merge('o/r', '1; rm -rf /'), /unknown pull request/);
   await assert.rejects(prs.close('o/r/../x', '1'), /unknown pull request/);

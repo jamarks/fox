@@ -100,6 +100,16 @@ export function createPrs({ repos, tokensDir = null, gh = 'gh', run = null, ttlM
       cache.clear();
       return { ok: true };
     },
+    // Paused = a draft on GitHub: kept as it is, out of the agent's queue and the review job's, until resumed.
+    async pause(repo, n) { return this.setDraft(repo, n, true); },
+    async resume(repo, n) { return this.setDraft(repo, n, false); },
+    async setDraft(repo, n, draft) {
+      const r = await known(repo), num = number(n);
+      if (!r || !num) throw Object.assign(new Error('unknown pull request'), { status: 404 });
+      await gh_(r, ['pr', 'ready', num, ...(draft ? ['--undo'] : [])]);
+      cache.clear();
+      return { ok: true };
+    },
     async close(repo, n, reason = '') {
       const r = await known(repo), num = number(n);
       if (!r || !num) throw Object.assign(new Error('unknown pull request'), { status: 404 });
