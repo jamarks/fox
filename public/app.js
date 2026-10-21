@@ -2003,6 +2003,44 @@ function setFontSize(px) {
 
 // ---------- new session sheet (folder + optional model) ----------
 let modelsCatalog = null;
+const usageReports = new Map();
+const money = (v) => '$' + Number(v).toFixed(2);
+function renderNsUsage() {
+  const [chosen] = nsSelection();
+  const provider = chosen ?? modelsCatalog?.default?.provider;
+  const report = usageReports.get(provider);
+  const aged = report?.status === 'ready' && Date.now() - (report.fetchedAt ?? report.observedAt) >= 60_000;
+  const state = $('#ns-usage-state'), box = $('#ns-usage-report');
+  const supported = ['gateway', 'codex', 'grok'].includes(provider) && modelsCatalog?.providers?.some((p) => p.id === provider);
+  $('#ns-usage-refresh').disabled = !supported || report?.status === 'loading';
+  state.textContent = !provider ? '· choose a model' : !supported ? '· not available' : report?.status === 'loading' ? '· checking' : report?.status === 'stale' || aged ? '· stale' : report?.status === 'unavailable' ? '· unavailable' : report?.status === 'ready' ? '· observed' : '· not checked';
+  state.classList.toggle('warn', report?.status === 'stale' || report?.status === 'unavailable' || aged);
+  if (!supported) { box.textContent = provider ? 'No provider usage report for this connection.' : 'Choose a model provider to check usage.'; return; }
+  if (!report?.data) { box.textContent = report?.status === 'loading' ? 'Checking…' : report?.status === 'unavailable' ? 'Usage unavailable. Try again later.' : 'Not checked'; return; }
+  const d = report.data, lines = [];
+  if (d.plan) lines.push(d.plan);
+  if (d.budget) lines.push(`Budget ${money(d.budget.spent)} of ${money(d.budget.limit)}${d.budget.period ? ' · ' + d.budget.period : ''}`);
+  if (d.spend != null) lines.push(`Today’s spend ${money(d.spend)}`);
+  for (const w of d.limits ?? []) lines.push(`${w.name} · ${Math.max(0, 100 - w.usedPercent).toFixed(1)}% remaining (${Math.round(w.windowSeconds / 3600)}h)${w.resetsAt ? ' · resets ' + fmtTime(w.resetsAt) : ''}`);
+  if (d.allowance) lines.push(`${(100 - d.allowance.usedPercent).toFixed(1)}% ${d.allowance.period ?? ''} allowance remaining${d.allowance.resetsAt ? ' · resets ' + fmtTime(d.allowance.resetsAt) : ''}`);
+  if (d.credits != null) lines.push(`Credits ${d.credits}`);
+  if (d.prepaidCents != null) lines.push(`Credits ${money(d.prepaidCents / 100)}`);
+  if (d.onDemandCents != null) lines.push(`Pay as you go ${money(d.onDemandCents / 100)}${d.onDemandCapCents != null ? ' of ' + money(d.onDemandCapCents / 100) : ''}`);
+  if (d.spendLimitReached) lines.push('Spend limit reached');
+  lines.push(`Observed ${fmtTime(report.fetchedAt ?? report.observedAt)}${report.status === 'stale' ? ' · refresh failed; last-known report' : ''}`);
+  box.replaceChildren(...lines.map((line) => { const item = document.createElement('span'); item.textContent = line; return item; }));
+}
+$('#ns-usage-refresh').addEventListener('click', async () => {
+  const [chosen] = nsSelection(), provider = chosen ?? modelsCatalog?.default?.provider;
+  if (!provider) return;
+  const old = usageReports.get(provider);
+  usageReports.set(provider, { ...old, status: 'loading' }); renderNsUsage();
+  try {
+    const r = await fetch('/api/usage/refresh', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider }) });
+    usageReports.set(provider, r.ok ? await r.json() : old?.data ? { ...old, status: 'stale' } : { status: 'unavailable' });
+  } catch { usageReports.set(provider, old?.data ? { ...old, status: 'stale' } : { status: 'unavailable' }); }
+  renderNsUsage();
+});
 // Asked each time a sheet opens: the server answers from its cache and only lists again after an fx login.
 async function loadModels(force = false) {
   modelsCatalog = await (await fetch(force ? '/api/models/refresh' : '/api/models', { method: force ? 'POST' : 'GET' })).json();
@@ -2027,6 +2065,7 @@ async function loadModels(force = false) {
   $('#ns-auth').classList.toggle('hidden', (modelsCatalog.providers ?? []).length > 0);
   try { const last = localStorage.getItem('fox.lastModel'); if (last && [...sel.options].some((o) => o.value === last)) sel.value = last; } catch {}
   updateNsBadge();
+  renderNsUsage();
   return modelsCatalog;
 }
 function newSessionSheet(cwd) {
@@ -2039,6 +2078,7 @@ function newSessionSheet(cwd) {
     if (!$('#newsheet').classList.contains('hidden') && $('#newsheet').dataset.cwd === cwd) renderNsWorkspace(workspaceFor(cwd));
   }).catch(() => {});
   $('#newsheet').dataset.cwd = cwd;
+  $('#ns-usage').open = false;
   $('#newsheet').classList.remove('hidden');
   loadModels().then(() => $('#ns-model').focus());
 }
@@ -2060,6 +2100,7 @@ function updateNsBadge() {
   $('#ns-badge').innerHTML = modelBadge(model);
   $('#ns-prov').innerHTML = providerTag(provider); // who pays: subscription or Gateway
   $('#ns-prov').title = providerLabel(provider);
+  renderNsUsage();
   const m = modelsCatalog?.providers?.find((p) => p.id === chosenProvider)?.details?.find((x) => x.id === chosenModel);
   const effort = $('#ns-effort'), speed = $('#ns-speed');
   effort.innerHTML = '<option value="">fx default</option>' + (m?.efforts ?? []).map((e) => `<option value="${esc(e)}">${esc(e)}</option>`).join('');
