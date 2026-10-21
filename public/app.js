@@ -2021,7 +2021,7 @@ function renderNsUsage() {
   if (d.plan) lines.push(d.plan);
   if (d.budget) lines.push(`Budget ${money(d.budget.spent)} of ${money(d.budget.limit)}${d.budget.period ? ' · ' + d.budget.period : ''}`);
   if (d.spend != null) lines.push(`Today’s spend ${money(d.spend)}`);
-  for (const w of d.limits ?? []) lines.push(`${w.name} · ${Math.max(0, 100 - w.usedPercent).toFixed(1)}% remaining (${Math.round(w.windowSeconds / 3600)}h)${w.resetsAt ? ' · resets ' + fmtTime(w.resetsAt) : ''}`);
+  for (const w of d.limits ?? []) lines.push(`${w.name} · ${w.windowSeconds >= 86400 ? Math.round(w.windowSeconds / 86400) + 'd' : Math.round(w.windowSeconds / 3600) + 'h'} window · ${(100 - w.usedPercent).toFixed(1)}% remaining${w.resetsAt ? ' · resets ' + fmtTime(w.resetsAt) : ''}`);
   if (d.allowance) lines.push(`${(100 - d.allowance.usedPercent).toFixed(1)}% ${d.allowance.period ?? ''} allowance remaining${d.allowance.resetsAt ? ' · resets ' + fmtTime(d.allowance.resetsAt) : ''}`);
   if (d.credits != null) lines.push(`Credits ${d.credits}`);
   if (d.prepaidCents != null) lines.push(`Credits ${money(d.prepaidCents / 100)}`);
@@ -2030,6 +2030,8 @@ function renderNsUsage() {
   lines.push(`Observed ${fmtTime(report.fetchedAt ?? report.observedAt)}${report.status === 'stale' ? ' · refresh failed; last-known report' : ''}`);
   box.replaceChildren(...lines.map((line) => { const item = document.createElement('span'); item.textContent = line; return item; }));
 }
+// The sheet can stay open past a report's TTL without any model change.
+setInterval(() => { if (!$('#newsheet').classList.contains('hidden')) renderNsUsage(); }, 30_000);
 $('#ns-usage-refresh').addEventListener('click', async () => {
   const [chosen] = nsSelection(), provider = chosen ?? modelsCatalog?.default?.provider;
   if (!provider) return;

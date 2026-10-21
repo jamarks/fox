@@ -11,6 +11,10 @@ test('provider-specific reports expose only reported headroom, with missing rese
   const codex = normalizeUsage(base('chatgpt', { codex: { plan: 'pro', limits: [{ name: 'codex', primary: { used_percent: 42, window_seconds: 18000, resets_at_ms: null }, secondary: { used_percent: 18, window_seconds: 604800, resets_at_ms: 456789 } }], credits: { has_credits: true, unlimited: false, balance: '12.40' } } }), 'codex');
   assert.deepEqual(codex.data.limits, [{ name: 'codex', usedPercent: 42, windowSeconds: 18000, resetsAt: null }, { name: 'codex', usedPercent: 18, windowSeconds: 604800, resetsAt: 456789 }]);
   assert.equal(codex.data.credits, '12.40');
+  assert.deepEqual(normalizeUsage(base('chatgpt', { codex: { limits: [
+    { name: 'bad', primary: { used_percent: 101, window_seconds: 18000 }, secondary: { used_percent: -2, window_seconds: 18000 } },
+    { name: 'zero window', primary: { used_percent: 40, window_seconds: 0 } },
+  ] } }), 'codex').data.limits, []);
   assert.deepEqual(normalizeUsage(base('grok', { grok: { used_percent: 63, period: 'weekly', resets_at_ms: null, prepaid_cents: 1250, on_demand_used_cents: 300, on_demand_cap_cents: 10000 } }), 'grok').data,
     { allowance: { usedPercent: 63, period: 'weekly', resetsAt: null }, prepaidCents: 1250, onDemandCents: 300, onDemandCapCents: 10000 });
   assert.throws(() => normalizeUsage(base('grok'), 'codex'), /Invalid usage/);

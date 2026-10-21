@@ -1,6 +1,7 @@
 // Provider headroom is an explicitly refreshed, process-local view of fx usage reports.
 // Keep only display-safe fields; never retain raw CLI output or provider diagnostics.
 const number = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
+const percent = (v) => number(v) !== null && v <= 100 ? v : null;
 const text = (v) => typeof v === 'string' && /^[\w .-]{1,40}$/.test(v) ? v : null;
 const time = (v) => typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : null;
 const sources = { gateway: 'ai_gateway', codex: 'chatgpt', grok: 'grok' };
@@ -19,7 +20,7 @@ export function normalizeUsage(raw, provider) {
       if (!name) return [];
       return ['primary', 'secondary'].flatMap((key) => {
         const w = limit[key];
-        if (number(w?.used_percent) === null || number(w?.window_seconds) === null) return [];
+        if (percent(w?.used_percent) === null || number(w?.window_seconds) === null || w.window_seconds === 0) return [];
         return [{ name, usedPercent: w.used_percent, windowSeconds: w.window_seconds, resetsAt: time(w.resets_at_ms) }];
       });
     });
@@ -28,7 +29,7 @@ export function normalizeUsage(raw, provider) {
   } else if (provider === 'grok') {
     const g = raw.grok;
     if (text(g?.settings?.plan)) data.plan = text(g.settings.plan);
-    if (number(g?.used_percent) !== null && g.used_percent <= 100) data.allowance = { usedPercent: g.used_percent, period: text(g.period), resetsAt: time(g.resets_at_ms) };
+    if (percent(g?.used_percent) !== null) data.allowance = { usedPercent: g.used_percent, period: text(g.period), resetsAt: time(g.resets_at_ms) };
     if (number(g?.prepaid_cents) !== null) data.prepaidCents = g.prepaid_cents;
     if (number(g?.on_demand_used_cents) !== null) data.onDemandCents = g.on_demand_used_cents;
     if (number(g?.on_demand_cap_cents) !== null) data.onDemandCapCents = g.on_demand_cap_cents;
