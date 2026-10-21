@@ -6,6 +6,12 @@ Restricción tan importante como el objetivo: **fox sigue liviano.** Sin depende
 
 Primer caso concreto: Claude Code, para usar Opus y Sonnet con la suscripción de Claude a costo fijo.
 
+## Estado (2026-10-22)
+
+Hecho: el contrato en `harnesses/` con fx como primer adaptador (la API de fx da lo mismo que antes, comparado contra `main` sobre 65 sesiones reales), y Claude Code en niveles 1–3: elegirlo en el `+`, terminal, estado por pantalla, retomar, Read, archivos y previews, búsqueda, new replies, subagentes (con `meta.json` y su hand-back) y respuesta desde el teléfono. Contrato corto en `docs/harnesses.md`.
+
+Falta: métricas de Claude Code, MCP/Settings por agente (fase 4 del inventario), el estado genérico por actividad de tmux, cargar adaptadores desde `~/.config/fox/harnesses/`, e instalar Claude Code en el servidor (`setup.sh` y login).
+
 ## La idea central
 
 Hoy fox **lee el disco de fx** en todos lados: `server.mjs` (`listSessions`, `readEvents`, `sessionFiles`, `terminalActivity`, `createTerminal`), `search.mjs`, `inbox.mjs`, `metrics.mjs`, `models.mjs`, `fxsettings.mjs`, `tools.mjs`, `notes.mjs` y unos 30 textos de `public/app.js` que dicen "fx".

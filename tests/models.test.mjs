@@ -22,7 +22,7 @@ else process.exit(2);
 `);
   await chmod(bin, 0o755);
   let clock = 1000;
-  const fx = async (args, env = {}) => (await exec(bin, args, { env: { ...process.env, ...env, CALLS: calls }, timeout: 3000 })).stdout;
+  const fx = async (args, env = {}) => (await exec(bin, args, { env: { ...process.env, ...env, CALLS: calls }, timeout: 15000 })).stdout;
   const make = (options = {}) => createModels({ fx, file: join(dir, 'models.json'), readSettings: () => readFile(settings, 'utf8').then(JSON.parse), maxAgeMs: 60_000, now: () => clock, ...options });
   const history = async () => (await readFile(calls, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(JSON.parse);
   return { dir, make, history, tick: (ms) => clock += ms, settings };

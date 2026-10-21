@@ -17,7 +17,17 @@ fx keeps everything on disk and fox only reads it:
 - `subagent/children.json` in the parent and `subagent/owner.json` in each child: the family tree, with each child's phase, task, start time and outcome. This file does update while subagents run.
 - `usage-v2.json`: tokens, cost, wall time. Subagents bill to their parent.
 
-Terminals are tmux sessions named `fx-<session id>`, created with `fx session resume <id>` in the session's workspace. The browser attaches over a WebSocket through node-pty and detaches when the tab closes. tmux is told to size the window to the most recent active client, so a second browser or a real terminal can attach without fighting.
+### Claude Code sessions
+
+When Claude Code is installed (`claude` in `~/.local/bin` or `CLAUDE_BIN`), the `+` sheet offers **fx | Claude Code**, and each session runs the one you picked; both live side by side in the same workspace. fox starts it as `claude --session-id <id>` (so it knows the id from the start), keeps the sessions it launched in `~/.config/fox/claude-sessions.json`, and reads only those:
+
+- `~/.claude/projects/<folder with every non-alphanumeric as ->/<id>.jsonl`: messages, tool calls and results, written as they happen. The title is the one you set with `/rename`, else the first message.
+- `<id>/subagents/agent-<id>.jsonl` and `.meta.json`: each subagent's own conversation, and whether it finished.
+- `~/.claude/sessions/<pid>.json`: open sessions, to mark one running in another terminal.
+
+Live state also comes from the screen: "esc to interrupt" means working, a choice list ("Enter to confirm", "Do you want to…") means needs input. How fox talks to each agent is in `harnesses/` (see `docs/harnesses.md`).
+
+Terminals are tmux sessions named `fx-<session id>` for every agent, created with `fx session resume <id>` or `claude --resume <id>` in the session's workspace. The browser attaches over a WebSocket through node-pty and detaches when the tab closes. tmux is told to size the window to the most recent active client, so a second browser or a real terminal can attach without fighting.
 
 A browser can't hand over a dropped file's path, so fox uploads it to its own server, which writes it to `~/.config/fox/drops/` (25 MB max, same-origin only) and pastes that path into the terminal. fx recognizes a pasted image path and attaches the image, the same as dragging a file into a real terminal.
 

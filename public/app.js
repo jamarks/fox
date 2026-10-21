@@ -60,12 +60,14 @@ const ICON = {
 };
 // Vendor badge for a model id: two letters on the vendor's color. Works for "vendor/model" ids and bare names.
 const VENDORS = [
-  [/^openai\/|^gpt-|^o[1-9]/, 'OA', '#10a37f', 'OpenAI'], [/^google\/|gemini|gemma/, 'G', '#4285f4', 'Google'], [/^anthropic\/|claude/, 'A', '#d97757', 'Anthropic'],
+  [/^openai\/|^gpt-|^o[1-9]/, 'OA', '#10a37f', 'OpenAI'], [/^google\/|gemini|gemma/, 'G', '#4285f4', 'Google'], [/^anthropic\/|claude|^(opus|sonnet|haiku|fable)\b/, 'A', '#d97757', 'Anthropic'],
   [/^deepseek/, 'DS', '#a78bfa', 'DeepSeek'], [/^meta\/|llama/, 'M', '#22b8cf', 'Meta'], [/^(x|space)ai\/|grok/, 'X', '#444a57', 'xAI'],
   [/^mistral/, 'Mi', '#ff7000', 'Mistral'], [/^amazon\/|nova/, 'Am', '#ff9900', 'Amazon'], [/^alibaba\/|qwen/, 'Q', '#6b4cff', 'Alibaba'],
   [/^moonshot|kimi/, 'K', '#3b3b3b', 'Moonshot'], [/^xiaomi\/|mimo/, 'Xm', '#ff6900', 'Xiaomi'], [/^perplexity/, 'P', '#20808d', 'Perplexity'],
   [/^cohere/, 'Co', '#39594d', 'Cohere'], [/^zai\/|^z-ai|glm/, 'Z', '#2d5bff', 'Z.ai'], [/^minimax/, 'Mm', '#e0372f', 'MiniMax'],
 ];
+// The agent that runs a session (fx, Claude Code…), for the words that name it.
+const agentName = (s) => s?.harnessLabel ?? 'fx';
 function vendorOf(model) { const m = String(model ?? '').toLowerCase(); return VENDORS.find(([re]) => re.test(m)); }
 function modelBadge(model) {
   if (!model) return '';
@@ -75,7 +77,7 @@ function modelBadge(model) {
 }
 // "openai/gpt-5.2" → "gpt-5.2" once the vendor pill says who makes it.
 // Who pays: a subscription (codex, grok) or the pay-per-use Vercel AI Gateway. Shown next to the model.
-const providerLabel = (p) => ({ gateway: 'Vercel AI Gateway (pay per use)', codex: 'ChatGPT subscription', grok: 'Grok subscription' })[p] ?? (p || 'unknown provider');
+const providerLabel = (p) => ({ gateway: 'Vercel AI Gateway (pay per use)', codex: 'ChatGPT subscription', grok: 'Grok subscription', claude: 'Claude Code (your Claude sign-in)' })[p] ?? (p || 'unknown provider');
 const providerTag = (p) => !p ? '' : p === 'gateway' ? '<span class="prov gw">▲ gateway</span>' : `<span class="prov">${esc(p)}</span>`;
 const modelShort = (model) => String(model ?? '').replace(/^[a-z0-9-]+\//i, '');
 const STATE_LABEL = { working: 'working', ready: 'waiting', needs_input: 'needs input', external: 'other terminal', done: 'done', idle: '' };
@@ -256,7 +258,7 @@ function sessionCard(s, index = null) {
   // Only needs-input (and another terminal) still say it in words; no process, nothing.
   const quiet = s.state === 'ready' || s.state === 'working';
   const asleep = foxConfig.remote && s.state === 'idle' && !s.archived;
-  const stateHtml = asleep ? '<span class="st asleep" title="Asleep: its tools are off to save memory. Opening it wakes it up in a few seconds." aria-label="asleep"><i></i></span>' : s.state !== 'idle' ? `<span class="st ${s.state}" title="${s.state === 'external' ? 'open in another terminal; fx allows one process per session' : STATE_LABEL[s.state]}"><i></i>${quiet ? '' : STATE_LABEL[s.state]}</span>` : '';
+  const stateHtml = asleep ? '<span class="st asleep" title="Asleep: its tools are off to save memory. Opening it wakes it up in a few seconds." aria-label="asleep"><i></i></span>' : s.state !== 'idle' ? `<span class="st ${s.state}" title="${s.state === 'external' ? `open in another terminal; ${esc(agentName(s))} allows one process per session` : STATE_LABEL[s.state]}"><i></i>${quiet ? '' : STATE_LABEL[s.state]}</span>` : '';
   el.innerHTML = `
     ${index ? `<span class="idx">${index}</span>` : ''}
     <div class="row">
@@ -264,7 +266,7 @@ function sessionCard(s, index = null) {
       <div class="actions">
         ${s.terminal ? `<button class="icon ${state.pinned.has(s.terminal) ? 'on' : ''}" data-pin="${esc(s.terminal)}" title="${state.pinned.has(s.terminal) ? 'Unpin tab' : 'Pin as tab'}">${ICON.pin}</button>` : ''}
         <button class="icon" data-rename="${esc(s.id)}" title="Rename">${ICON.rename}</button>
-        <button class="icon" data-${s.archived ? 'unarchive' : 'archive'}="${esc(s.id)}" title="${s.archived ? 'Restore' : (s.terminal ? 'Archive (stops the fx process)' : 'Archive')}">${s.archived ? ICON.restore : ICON.archive}</button>
+        <button class="icon" data-${s.archived ? 'unarchive' : 'archive'}="${esc(s.id)}" title="${s.archived ? 'Restore' : (s.terminal ? `Archive (stops ${esc(agentName(s))})` : 'Archive')}">${s.archived ? ICON.restore : ICON.archive}</button>
       </div>
     </div>
     <div class="sub">
@@ -327,7 +329,7 @@ $('#session-groups').addEventListener('click', async (e) => {
     if (s?.terminal) {
       // An idle fx loses nothing when stopped (the session is on disk); only ask when it is mid-task.
       const busy = s.state === 'working' || s.state === 'needs_input';
-      if (busy && !confirm(s.state === 'working' ? 'fx is working in this session. Stop it and archive?' : 'fx is waiting for your answer in this session. Stop it and archive?')) return;
+      if (busy && !confirm(s.state === 'working' ? `${agentName(s)} is working in this session. Stop it and archive?` : `${agentName(s)} is waiting for your answer in this session. Stop it and archive?`)) return;
       await post(`/api/terminals/${encodeURIComponent(s.terminal)}`, null, 'DELETE');
       closeTab(s.terminal);
     }
@@ -392,8 +394,8 @@ function updateTermLoading() {
   const secs = (Date.now() - (waking?.since ?? tab.openedAt)) / 1000;
   $('#term-loading-title').textContent = waking ? `Waking up ${waking.title}` : (tab.attempts ? 'Reconnecting…' : 'Connecting…');
   $('#term-loading-hint').textContent = waking
-    ? (secs < 20 ? 'This session was asleep to save memory. fx is resuming the conversation; it takes a few seconds.'
-      : secs < 60 ? 'Taking longer than usual: fx is starting its tools.'
+    ? (secs < 20 ? `This session was asleep to save memory. ${agentName(sessionById(waking.id))} is resuming the conversation; it takes a few seconds.`
+      : secs < 60 ? `Taking longer than usual: ${agentName(sessionById(waking.id))} is starting its tools.`
       : 'Still waking up. If nothing happens, open the session again.')
     : (tab.attempts ? `The connection dropped; trying again (${tab.attempts}).` : '');
 }
@@ -640,8 +642,8 @@ $('#paste').addEventListener('click', async () => {
 $('#pasteform').addEventListener('submit', (e) => { e.preventDefault(); if (agentDraft) { if (!$('#pasteform button[type="submit"]').disabled) void insertAgentDraft(); } else if (pasteIntoTerminal($('#paste-text').value)) closePasteSheet(); });
 $('#paste-cancel').addEventListener('click', closePasteSheet);
 $('#pastesheet').addEventListener('click', (e) => { if (e.target.id === 'pastesheet') closePasteSheet(); });
-async function openTerminal({ cwd, resume, provider, model, effort, speed, addDirs }, stillWanted = () => true) {
-  const t = await post('/api/terminals', { cwd, resume, provider, model, effort, speed, ...(resume ? {} : { addDirs }) });
+async function openTerminal({ cwd, resume, harness, provider, model, effort, speed, addDirs }, stillWanted = () => true) {
+  const t = await post('/api/terminals', { cwd, resume, provider, model, effort, speed, ...(resume ? {} : { addDirs, harness }) });
   if (!stillWanted()) return refresh();
   if (t.error) { state.waking = null; updateTermLoading(); alert(t.error); return; }
   await refresh();
@@ -977,7 +979,7 @@ function renderTabs() {
     // The dot only shows when there is something to know: working, needs input, or dead. Waiting is the default.
     const dot = st === 'working' || st === 'needs_input' || st === 'closed' ? `<span class="st ${st}" title="${STATE_LABEL[st] || st}"><i></i></span>` : '';
     el.innerHTML = `${dot}<span class="tab-label">${esc(tabLabel(name))}</span>${pinned
-      ? `<span class="close" data-close="${esc(name)}" title="Unpin and close (fx keeps running)">×</span>`
+      ? `<span class="close" data-close="${esc(name)}" title="Unpin and close (it keeps running)">×</span>`
       : `<span class="pin" data-pin="${esc(name)}" title="Pin as tab">${ICON.pin}</span>`}`;
     el.addEventListener('click', (e) => {
       if (e.target.dataset.close) { state.pinned.delete(name); savePinned(); closeTab(name); renderSessions(); }
@@ -1187,6 +1189,7 @@ async function refreshResults(parent) {
   cachedResults = { id: parent.id, key: resultsKey(parent), runs, byAgent, assigned };
 }
 function answerFor(parent, c) {
+  if (c?.answer) return c.answer; // a harness that keeps each subagent's answer on its row (Claude Code)
   if (cachedResults.id !== parent.id) return null;
   if (c?.name) { const rounds = cachedResults.byAgent.get(c.name) ?? []; return rounds.length ? rounds.at(-1).text : null; }
   return cachedResults.assigned.get(c.id) ?? null;
@@ -1550,7 +1553,7 @@ function renderGlobalHits() {
   globalResults.innerHTML = globalHits.map((hit, i) => {
     const s = sessionById(hit.id);
     if (!s) return '';
-    const label = hit.kind === 'name' ? 'session' : hit.kind === 'user' ? 'you' : 'fx';
+    const label = hit.kind === 'name' ? 'session' : hit.kind === 'user' ? 'you' : agentName(s);
     return `<button type="button" role="option" aria-selected="${i === globalActive}" class="global-search-result${i === globalActive ? ' active' : ''}" data-result="${i}">
       <div class="gs-context"><strong>${esc(displayTitle(s))}</strong><span>· ${esc(shortPath(s.workspace))}${s.archived ? ' · archived' : ''}${s.parentId ? ' · subagent' : ''}</span></div>
       <div class="gs-text">${esc(label)} · ${markedMatch(hit.text, q)}</div>
@@ -1650,7 +1653,7 @@ async function loadTranscript(id, quiet = false) {
     const match = globalMessage?.id === id && globalMessage.index === messageIndex;
     if (ev.kind === 'user') html.push(`<div class="msg user${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? 'task from parent' : 'you'}</div><div class="text">${esc(ev.text)}</div></div>`);
     else if (ev.kind === 'assistant' && !ev.text?.trim()) continue; // a turn step with only tool calls
-    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? (s.subagent?.name ? ICON.threads + ' ' + esc(s.subagent.name) : 'subagent') : 'fx'}</div><div class="text md">${renderMarkdown(ev.text)}</div></div>`);
+    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? (s.subagent?.name ? ICON.threads + ' ' + esc(s.subagent.name) : 'subagent') : esc(agentName(s))}</div><div class="text md">${renderMarkdown(ev.text)}</div></div>`);
     else if (ev.kind === 'tool_call') {
       const st = ev.result?.status ?? 'pending';
       const isSub = ev.name === 'subagent';
@@ -2056,6 +2059,31 @@ $('#ns-usage-refresh').addEventListener('click', async () => {
   } catch { usageReports.set(provider, old?.data ? { ...old, status: 'stale' } : { status: 'unavailable' }); }
   renderNsUsage();
 });
+// Agents fox can start (fx, Claude Code…): only installed ones; the switch shows when there is a choice.
+let harnessesCatalog = [{ id: 'fx', label: 'fx' }];
+const nsHarness = () => $('#ns-agent').dataset.value || 'fx';
+async function loadHarnesses() {
+  try { harnessesCatalog = await (await fetch('/api/harnesses')).json(); } catch {}
+  let chosen = 'fx';
+  try { chosen = localStorage.getItem('fox.lastHarness') || 'fx'; } catch {}
+  if (!harnessesCatalog.some((h) => h.id === chosen)) chosen = harnessesCatalog[0]?.id ?? 'fx';
+  $('#ns-agent-row').classList.toggle('hidden', harnessesCatalog.length < 2);
+  $('#ns-agent').innerHTML = harnessesCatalog.map((h) => `<button type="button" role="radio" data-harness="${esc(h.id)}">${esc(h.label)}</button>`).join('');
+  return setNsHarness(chosen);
+}
+async function setNsHarness(id) {
+  $('#ns-agent').dataset.value = id;
+  for (const b of $('#ns-agent').querySelectorAll('button')) { b.classList.toggle('on', b.dataset.harness === id); b.setAttribute('aria-checked', String(b.dataset.harness === id)); }
+  if (id === 'fx') return loadModels();
+  // Another harness: its own short model list, none of fx's provider, usage or speed options.
+  const h = harnessesCatalog.find((x) => x.id === id);
+  const sel = $('#ns-model');
+  sel.innerHTML = `<option value="">${esc(h?.label ?? id)} default</option>` + (h?.models ?? []).map((m) => `<option value="${esc(id)}|${esc(m.id)}">${esc(m.name)}</option>`).join('');
+  try { const last = localStorage.getItem(`fox.lastModel.${id}`); if (last && [...sel.options].some((o) => o.value === last)) sel.value = last; } catch {}
+  for (const el of ['#ns-usage', '#ns-options', '#ns-auth']) $(el).classList.add('hidden');
+  updateNsBadge();
+}
+$('#ns-agent').addEventListener('click', (e) => { const b = e.target.closest('[data-harness]'); if (b) setNsHarness(b.dataset.harness).then(() => $('#ns-model').focus()); });
 // Asked each time a sheet opens: the server answers from its cache and only lists again after an fx login.
 async function loadModels(force = false) {
   modelsCatalog = await (await fetch(force ? '/api/models/refresh' : '/api/models', { method: force ? 'POST' : 'GET' })).json();
@@ -2078,6 +2106,7 @@ async function loadModels(force = false) {
     }
   }
   $('#ns-auth').classList.toggle('hidden', (modelsCatalog.providers ?? []).length > 0);
+  $('#ns-usage').classList.remove('hidden');
   try { const last = localStorage.getItem('fox.lastModel'); if (last && [...sel.options].some((o) => o.value === last)) sel.value = last; } catch {}
   updateNsBadge();
   renderNsUsage();
@@ -2115,7 +2144,7 @@ function newSessionSheet(cwd) {
     state.workspaces = list;
     if (!$('#newsheet').classList.contains('hidden') && workspaceFor($('#newsheet').dataset.cwd)?.id === wsp.id) renderNsWorkspace(workspaceFor($('#newsheet').dataset.cwd));
   }).catch(() => {});
-  loadModels().then(() => $('#ns-model').focus());
+  loadHarnesses().then(() => $('#ns-model').focus());
 }
 // Workspace repos in the new-session sheet, and a warning when another session is working there.
 function renderNsWorkspace(wsp) {
@@ -2130,6 +2159,11 @@ function nsSelection() {
   return at < 0 ? [null, null] : [v.slice(0, at), v.slice(at + 1)];
 }
 function updateNsBadge() {
+  if (nsHarness() !== 'fx') {
+    $('#ns-badge').innerHTML = modelBadge(nsSelection()[1] ?? 'claude');
+    $('#ns-prov').innerHTML = ''; $('#ns-prov').title = '';
+    return;
+  }
   const [chosenProvider, chosenModel] = nsSelection();
   const provider = chosenProvider ?? modelsCatalog?.default?.provider, model = chosenModel ?? modelsCatalog?.default?.model;
   $('#ns-badge').innerHTML = modelBadge(model);
@@ -2154,8 +2188,13 @@ $('#newsheet').addEventListener('click', (e) => { if (e.target.id === 'newsheet'
 $('#newform').addEventListener('submit', async (e) => {
   e.preventDefault();
   const cwd = $('#newsheet').dataset.cwd;
-  const v = $('#ns-model').value;
-  try { localStorage.setItem('fox.lastModel', v); } catch {}
+  const v = $('#ns-model').value, harness = nsHarness();
+  try { localStorage.setItem(harness === 'fx' ? 'fox.lastModel' : `fox.lastModel.${harness}`, v); localStorage.setItem('fox.lastHarness', harness); } catch {}
+  if (harness !== 'fx') {
+    const addDirs = [...$('#ns-companion-list').querySelectorAll('input:checked')].map((input) => input.value);
+    $('#newsheet').classList.add('hidden');
+    return openTerminal({ cwd, harness, model: nsSelection()[1], addDirs });
+  }
   const [provider, model] = nsSelection();
   const effort = provider ? $('#ns-effort').value || null : null;
   const speed = provider ? $('#ns-speed').value : null;

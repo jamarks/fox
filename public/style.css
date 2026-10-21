@@ -282,6 +282,7 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 .ns-head { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
 .ns-folder { font-family: var(--mono); font-size: 13px; font-weight: 400; color: var(--accent); }
 .ns-label { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.seg.ns-agent { display: inline-flex; margin: 2px 0 6px; }
 .ns-model-row { gap: 8px; } .ns-model-row #ns-model { flex: 1; min-width: 0; } #ns-prov { flex: none; }
 #ns-model, #ns-base, .ns-options-row select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; }
 #ns-base { width: 100%; margin: 4px 0; }
