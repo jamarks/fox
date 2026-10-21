@@ -200,6 +200,36 @@ export function createWorkspaces({
       await save(all.filter((w) => w.id !== id));
       return true;
     },
+    // Only configured, cloned siblings inside this workspace can become extra fx file-access roots.
+    async companions(cwd) {
+      if (typeof cwd !== 'string') return [];
+      const ws = await this.forPath(cwd);
+      if (!ws || !(await inside(ws.dir))) return [];
+      const root = await realpath(ws.dir).catch(() => null);
+      const current = await realpath(cwd).catch(() => null);
+      if (!root || !current || current === root || current !== resolve(cwd) || !current.startsWith(root + sep)) return [];
+      if (!ws.repos.some((r) => REPO_PART.test(r.dir) && (current === join(ws.dir, r.dir) || current.startsWith(join(ws.dir, r.dir) + sep)))) return [];
+      const repos = [];
+      for (const r of ws.repos) {
+        if (!REPO_PART.test(r.dir) || r.dir === '..') continue;
+        const dir = join(ws.dir, r.dir);
+        // Do not expose links, missing clones or folders without git, even if listed in workspaces.json.
+        if (await realpath(dir).catch(() => null) !== dir || !(await stat(dir).catch(() => null))?.isDirectory() ||
+            !(await stat(join(dir, '.git')).catch(() => null))) continue;
+        if (current === dir || current.startsWith(dir + sep)) continue;
+        repos.push({ owner: r.owner, name: r.name, dir });
+      }
+      return repos;
+    },
+    async validateCompanions(cwd, dirs) {
+      if (!Array.isArray(dirs) || dirs.length > 32 || dirs.some((d) => typeof d !== 'string' || !d.startsWith('/') || d.length > 4096))
+        throw Object.assign(new Error('Invalid companion directories.'), { status: 400 });
+      if (!dirs.length) return [];
+      const allowed = new Set((await this.companions(cwd)).map((r) => r.dir));
+      if (new Set(dirs).size !== dirs.length || dirs.some((d) => !allowed.has(d)))
+        throw Object.assign(new Error('Choose cloned sibling repos in this workspace.'), { status: 400 });
+      return dirs;
+    },
     // The workspace a folder belongs to (the folder itself or anything inside it).
     async forPath(path) {
       const p = resolve(path);

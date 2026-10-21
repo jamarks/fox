@@ -282,13 +282,25 @@ body.night .tab.active { background: rgba(7,9,18,0.35); }
 .ns-folder { font-family: var(--mono); font-size: 13px; font-weight: 400; color: var(--accent); }
 .ns-label { font-size: 11px; color: var(--muted); margin-top: 4px; }
 .ns-model-row { gap: 8px; } .ns-model-row #ns-model { flex: 1; min-width: 0; } #ns-prov { flex: none; }
-#ns-model, .ns-options-row select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; }
+#ns-model, #ns-base, .ns-options-row select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; }
+#ns-base { width: 100%; margin: 4px 0; }
 .ns-options-row { gap: 8px; flex-wrap: wrap; margin-top: 4px; font-size: 11px; color: var(--muted); }
 .ns-options-row select { max-width: 140px; font-size: 12px; }
 #ns-speed-note { color: var(--warn); font-size: 11px; line-height: 1.4; margin-top: 4px; }
 .ns-actions { justify-content: flex-end; margin-top: 14px; gap: 8px; } .ns-actions button { border: 1px solid var(--border); padding: 5px 10px; color: var(--text); }
 .ns-actions button.primary { background: var(--accent); color: #0b0d12; border-color: var(--accent); font-weight: 600; }
 .ns-hint { font-size: 11px; margin-right: auto; }
+.ns-access { border-top: 1px solid var(--border); margin-top: 7px; padding-top: 7px; }
+.ns-access-path, .ns-companion small, .session-access-path { font: 11px/1.5 var(--mono); overflow-wrap: anywhere; color: var(--muted); }
+#ns-companions { margin-top: 8px; }
+#ns-companion-list { max-height: 170px; overflow-y: auto; margin-top: 4px; }
+.ns-companion { display: flex; align-items: flex-start; gap: 9px; padding: 5px 6px; border-radius: 5px; cursor: pointer; }
+.ns-companion:hover { background: var(--panel-2); }
+.ns-companion input { margin: 2px 0 0; width: auto; accent-color: var(--accent); }
+.ns-companion span { display: flex; flex-direction: column; min-width: 0; }
+.ns-companion strong { font-size: 12px; font-weight: 500; }
+.session-access { margin-bottom: 14px; }
+.session-access .section-title { margin-top: 0; }
 .vendor { display: inline-flex; align-items: center; border-radius: 4px; color: #fff; font: 600 9px/1 -apple-system, sans-serif; padding: 3px 5px; margin-right: 5px; vertical-align: -2px; flex: none; letter-spacing: .01em; }
 .sub .model { display: inline-flex; align-items: center; }
 .children-count { margin: 6px 0 0 0; font-size: 11px; color: var(--muted); cursor: pointer; display: flex; gap: 6px; align-items: center; }

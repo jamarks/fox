@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, mkdir, readFile, readdir } from 'node:fs/promises';
+import { mkdtemp, writeFile, mkdir, readFile, readdir, symlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -59,6 +59,29 @@ test('a workspace clones every repo into its folder and is saved', async () => {
   assert.equal(await ws.forPath(join(base, 'elsewhere')), null);
   await assert.rejects(ws.create({ name: 'orchestra', repos: [{ owner: 'jamarks', name: 'notes' }] }), /already exists/);
   await assert.rejects(ws.create({ name: '../escape', repos: [{ owner: 'jamarks', name: 'notes' }] }), /lowercase/);
+});
+
+test('companion access accepts only distinct cloned sibling repos, never symlinks or outside paths', async () => {
+  const { base, ws } = await setup([['a', 'api'], ['b', 'web'], ['c', 'docs']]);
+  const created = await ws.create({ name: 'team', repos: [{ owner: 'a', name: 'api' }, { owner: 'b', name: 'web' }, { owner: 'c', name: 'docs' }] });
+  await settle(ws, created.id);
+  const root = created.dir, api = join(root, 'api'), web = join(root, 'web'), docs = join(root, 'docs');
+  assert.deepEqual((await ws.companions(api)).map((r) => r.dir), [web, docs]);
+  assert.deepEqual(await ws.companions(root), [], 'the workspace root already includes every repo');
+  await assert.rejects(ws.validateCompanions(root, [web]), (e) => e.status === 400);
+  assert.deepEqual(await ws.validateCompanions(api, [web, docs]), [web, docs]);
+  assert.deepEqual(await ws.validateCompanions(api, []), []);
+  for (const dirs of [web, [web, web], [api], [join(root, '..', 'other')], [web + '/..'], [42], Array(33).fill(web)])
+    await assert.rejects(ws.validateCompanions(api, dirs), (e) => e.status === 400);
+  await assert.rejects(ws.validateCompanions(join(base, 'outside'), [web]), (e) => e.status === 400);
+  await symlink(web, join(root, 'shortcut'));
+  await assert.rejects(ws.validateCompanions(join(root, 'shortcut'), [web]), (e) => e.status === 400);
+  // A configured repo turned into a link must disappear, even if it points back inside the workspace.
+  await ws.update(created.id, { remove: [{ owner: 'b', name: 'web' }] });
+  await ws.update(created.id, { add: [{ owner: 'b', name: 'linked' }] });
+  await symlink(web, join(root, 'linked'));
+  assert.deepEqual((await ws.companions(api)).map((r) => r.dir), [docs]);
+  await assert.rejects(ws.validateCompanions(api, [join(root, 'linked')]), (e) => e.status === 400);
 });
 
 test('same repo name from two owners gets separate folders', async () => {
