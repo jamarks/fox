@@ -34,7 +34,7 @@ test('first load baselines history, polling adds unread, selection clears only t
   const state = { sessions: [{ id: 'abcd', archived: false, parentId: null, workspace: '/repo', title: 'Session' }], selected: null };
   const ctx = { state, $: (selector) => elements[selector.slice(1)], localStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
     sessionById: (id) => state.sessions.find((s) => s.id === id), displayTitle: (s) => s.title, shortPath: (s) => s, fmtTime: String, esc: String,
-    globalMessage: null, convoShown: new Set(), setTranscript() {}, renderSessions() {}, loadTranscript() {}, syncUrl() {}, updatePageTitle() {}, syncNothingOpen() {},
+    globalMessage: null, convoShown: new Set(), setTranscript() {}, renderSessions() {}, loadTranscript() {}, syncUrl() {}, updatePageTitle() {}, syncNothingOpen() {}, gestures: [], foxGesture(name) { ctx.gestures.push(name); },
     mobileLayout: { matches: false }, opened: [], openSession(id) { ctx.opened.push(id); },
   };
   vm.runInNewContext(source.slice(start, end) + selection, ctx);
@@ -43,8 +43,12 @@ test('first load baselines history, polling adds unread, selection clears only t
   state.sessions[0].latestReply = { turn: 1, text: 'First', at: 1, messageIndex: 1 };
   vm.runInNewContext('renderReplyInbox()', ctx);
   assert.equal(elements['reply-inbox'].classList.contains('hidden'), true);
+  assert.deepEqual(ctx.gestures, [], 'loading fox is no new reply: no wink');
   state.sessions[0].latestReply = { turn: 2, text: 'Second', at: 2, messageIndex: 3 };
   vm.runInNewContext('renderReplyInbox()', ctx);
+  assert.deepEqual(ctx.gestures, ['wink'], 'a new reply: the fox winks');
+  vm.runInNewContext('renderReplyInbox()', ctx);
+  assert.deepEqual(ctx.gestures, ['wink'], 'the same reply again: no second wink');
   assert.equal(elements['reply-inbox-count'].textContent, 1);
   assert.match(elements['reply-inbox-list'].innerHTML, /Second/);
   handlers['reply-inbox-list:click']({ target: { closest: () => ({ dataset: { reply: 'abcd' } }) } });
@@ -64,4 +68,20 @@ test('the model of a session is the one that answered last, not fx\'s default in
   assert.equal(lastAnswerModel([JSON.stringify({ event: { user: { text: 'q' } } })]), null);
   assert.equal(lastAnswerModel([reply('gpt-6.1-sol'), JSON.stringify({ event: { user: { text: 'q' } } }), reply('gpt-6-luna'), '{"event":{"tool":{}}}']), 'gpt-6-luna');
   assert.equal(lastAnswerModel([reply('gpt-6-luna'), '{not json "provider_replay"']), 'gpt-6-luna');
+});
+
+test('the fox yawns after 10 quiet minutes, then every 20, and any activity starts it over', () => {
+  const source = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const FOX_YAWN_IDLE'), source.indexOf('const foxMotion'))
+    + source.slice(source.indexOf('function foxShouldYawn'), source.indexOf('for (const type of'));
+  const ctx = {};
+  vm.runInNewContext(code + '; this.yawn = foxShouldYawn;', ctx);
+  const min = 60_000, quietFrom = 1_000 * min;
+  assert.equal(ctx.yawn({ now: quietFrom + 9 * min, idleSince: quietFrom, yawned: 0 }), false, 'not before 10 minutes');
+  assert.equal(ctx.yawn({ now: quietFrom + 10 * min, idleSince: quietFrom, yawned: 0 }), true);
+  assert.equal(ctx.yawn({ now: quietFrom + 25 * min, idleSince: quietFrom, yawned: quietFrom + 10 * min }), false, 'not again before 20 minutes');
+  assert.equal(ctx.yawn({ now: quietFrom + 30 * min, idleSince: quietFrom, yawned: quietFrom + 10 * min }), true);
+  const back = quietFrom + 40 * min;
+  assert.equal(ctx.yawn({ now: back + 5 * min, idleSince: back, yawned: quietFrom + 30 * min }), false, 'activity starts the 10 minutes over');
+  assert.equal(ctx.yawn({ now: back + 10 * min, idleSince: back, yawned: quietFrom + 30 * min }), true, 'a new quiet spell yawns at its own 10 minutes');
 });

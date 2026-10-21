@@ -108,7 +108,30 @@ function detectTransitions() {
 }
 
 // ---------- unread replies ----------
+// ---------- the fox's gestures: a wink at a new reply, a yawn when nothing has happened for a while ----------
+const FOX_YAWN_IDLE = 10 * 60_000, FOX_YAWN_AGAIN = 20 * 60_000;
+const foxMotion = { last: {}, activity: Date.now(), busy: 0, yawned: 0 };
+function foxGesture(name) {
+  const fox = document.querySelector('.brand .fox');
+  if (!fox || document.hidden || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (Date.now() - (foxMotion.last[name] ?? 0) < 4000) return; // several replies at once: one wink
+  foxMotion.last[name] = Date.now();
+  fox.classList.remove('wink', 'yawn'); void fox.getBBox?.(); fox.classList.add(name);
+  setTimeout(() => fox.classList.remove(name), name === 'yawn' ? 2700 : 800);
+}
+// Quiet means no session working and no input in fox since `idleSince`; a yawn after 10 minutes, then every 20.
+function foxShouldYawn({ now, idleSince, yawned }) {
+  if (now - idleSince < FOX_YAWN_IDLE) return false;
+  return yawned < idleSince || now - yawned >= FOX_YAWN_AGAIN;
+}
+for (const type of ['pointerdown', 'keydown', 'wheel', 'touchstart']) window.addEventListener(type, () => { foxMotion.activity = Date.now(); }, { passive: true, capture: true });
+setInterval(() => {
+  const now = Date.now();
+  if (state.sessions.some((s) => s.state === 'working')) foxMotion.busy = now;
+  if (foxShouldYawn({ now, idleSince: Math.max(foxMotion.activity, foxMotion.busy), yawned: foxMotion.yawned })) { foxMotion.yawned = now; foxGesture('yawn'); }
+}, 30_000);
 let inboxSeen = null;
+let winkKeys = null; // unread replies at the last render, to tell a new one
 function renderReplyInbox() {
   if (!inboxSeen) {
     // A browser can load new JS while an older server is still running. Wait for its new overview shape.
@@ -122,6 +145,10 @@ function renderReplyInbox() {
   }
   const unread = state.sessions.filter((s) => !s.parentId && !s.archived && s.latestReply && s.latestReply.turn > (inboxSeen[s.id] ?? 0))
     .sort((a, b) => (b.latestReply.at ?? b.updatedAt ?? 0) - (a.latestReply.at ?? a.updatedAt ?? 0));
+  // A reply that was not unread on the last render is new: the fox winks (not on the first render, not for old ones).
+  const keys = unread.map((s) => `${s.id}:${s.latestReply.turn}`);
+  if (winkKeys && keys.some((k) => !winkKeys.has(k))) foxGesture('wink');
+  winkKeys = new Set(keys);
   const root = $('#reply-inbox'), list = $('#reply-inbox-list'), toggle = $('#reply-inbox-toggle');
   root.classList.toggle('hidden', !unread.length);
   if (!unread.length) { list.classList.add('hidden'); toggle.setAttribute('aria-expanded', 'false'); return; }
