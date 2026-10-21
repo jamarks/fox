@@ -9,6 +9,7 @@ export const FX_SETTINGS = [
   { key: 'statusLine.workspace', label: 'Folder and branch in the footer', description: 'Where fx is working and on which git branch', type: 'bool', default: false },
   { key: 'fast_mode', label: 'Fast mode', description: 'Faster answers when the provider supports it', type: 'bool', default: false },
   { key: 'effort', label: 'Effort', description: 'How much the model thinks before answering', type: 'choice', choices: ['auto', 'low', 'medium', 'high'], default: 'auto' },
+  { key: 'auto_compact_percent', label: 'Automatic compaction threshold (%)', description: 'Compact the conversation at this percentage of usable input capacity', type: 'integer', min: 10, max: 80, default: 80, introduced: '2026-10-21', documentation: 'https://fx.sh/docs/configure-fx/configuration.md#agent-and-model-settings', upstreamDefault: '80%' },
   { key: 'max_agent_steps', label: 'Maximum steps per turn', description: 'Stop a turn after this many agent steps; 0 means unlimited', type: 'integer', min: 0, max: 2147483647, default: 0, introduced: '2026-10-18', documentation: 'https://fx.sh/docs/configure-fx/configuration.md#project-configuration', upstreamDefault: '0 (unlimited)' },
 ];
 
