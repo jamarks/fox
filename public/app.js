@@ -1875,6 +1875,7 @@ function openSettings() {
   if (mobileLayout.matches) showMobileView('terminal');
   renderThemeDots();
   loadTools();
+  loadSkills();
   loadFxSettings();
   loadDeploy();
   syncUrl(true);
@@ -1990,6 +1991,55 @@ $('#settings-tools').addEventListener('click', async (e) => {
     if (st.status === 'done') { note.textContent = 'Signed in. New sessions have it.'; return loadTools(); }
     if (st.status === 'failed') { btn.disabled = false; btn.textContent = 'Sign in'; note.textContent = st.error || 'The sign-in did not finish.'; return; }
   }
+});
+// Skills are instructions, not programs. Always show SKILL.md and the full file list before copying any files.
+let skillPreview = null;
+async function skillApi(action, body) {
+  const r = await fetch(`/api/skills/${action}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || 'That did not work.'); return j;
+}
+async function loadSkills() {
+  try {
+    const r = await fetch('/api/skills'); if (!r.ok) throw new Error('Could not load skills.');
+    const { items, sources, scopes } = await r.json();
+    $('#skill-scope').innerHTML = '<option value="global">Every workspace</option>' + scopes.map((s) => `<option value="${esc(s.id)}">${esc(s.name)} workspace</option>`).join('');
+    $('#skill-source').setAttribute('list', 'skill-sources');
+    const groups = new Map();
+    for (const item of items) { if (!groups.has(item.group)) groups.set(item.group, []); groups.get(item.group).push(item); }
+    $('#settings-skills').innerHTML = `<datalist id="skill-sources">${sources.map((s) => `<option value="${esc(s)}">`).join('')}</datalist>` +
+      (items.length ? [...groups].map(([group, skills]) => `<div class="skill-group">${esc(group === 'fx' ? 'fx' : group.includes(' · ') ? group : 'from ' + group)}</div>` + skills.map((s) => `<div class="set-row skill-row"><span class="set-main">${esc(s.name)}<span class="set-sub">${esc(s.description || 'No description')}${s.source ? ' · ' + esc(s.source) : ''}</span></span><button type="button" class="set-act" data-skill-read="${esc(s.id)}">Read</button>${s.owned ? `<button type="button" class="set-act" data-skill-remove="${esc(s.id)}">Remove</button>` : ''}</div>`).join('')).join('') : '<div class="set-foot">No skills found yet.</div>');
+  } catch (err) { $('#skill-note').textContent = err.message; }
+}
+$('#skill-form').addEventListener('submit', async (e) => {
+  e.preventDefault(); const btn = e.target.querySelector('button'); btn.disabled = true; skillPreview = null;
+  $('#skill-preview').innerHTML = ''; $('#skill-note').textContent = 'Checking repository…';
+  try {
+    const j = await skillApi('preview', { source: $('#skill-source').value.trim(), skill: $('#skill-name').value.trim(), scope: $('#skill-scope').value });
+    skillPreview = j.token;
+    $('#skill-preview').innerHTML = `<div class="skill-review"><strong>Review from ${esc(j.source)}</strong><span class="set-sub">${esc(j.scope === 'global' ? 'Every workspace' : $('#skill-scope').selectedOptions[0].textContent)} · ${j.skills.length} skill(s)</span>${j.skills.map((s) => `<details ${j.skills.length === 1 ? 'open' : ''}><summary>${esc(s.name)} · ${s.files.length} files · ${s.files.reduce((a, f) => a + f.size, 0)} bytes</summary><p>${esc(s.description)}</p><div class="set-sub">${s.files.map((f) => `${esc(f.name)} (${f.size} B)`).join('<br>')}</div><div class="md skill-text">${renderMarkdown(s.text)}</div></details>`).join('')}<button type="button" class="set-act" id="skill-confirm">Install these skills</button></div>`;
+    $('#skill-note').textContent = 'These are untrusted instructions. Review before installing.';
+  } catch (err) { $('#skill-note').textContent = err.message; } finally { btn.disabled = false; }
+});
+$('#skill-preview').addEventListener('click', async (e) => {
+  if (e.target.id !== 'skill-confirm' || !skillPreview) return;
+  const token = skillPreview; skillPreview = null; e.target.disabled = true;
+  try { const j = await skillApi('install', { token }); $('#skill-preview').innerHTML = ''; $('#skill-note').textContent = `${j.installed.join(', ')} installed. New and resumed sessions see it.`; await loadSkills(); }
+  catch (err) { $('#skill-note').textContent = err.message; }
+});
+$('#settings-skills').addEventListener('click', async (e) => {
+  const read = e.target.closest('[data-skill-read]'), remove = e.target.closest('[data-skill-remove]');
+  if (!read && !remove) return;
+  const btn = read || remove; btn.disabled = true;
+  try {
+    if (read) {
+      const j = await skillApi('read', { id: read.dataset.skillRead });
+      const prev = $('#skill-preview'); prev.innerHTML = `<div class="skill-review"><strong>${esc(j.name)} · ${esc(j.group)}</strong><span class="set-sub">${esc(shortPath(j.path))}${j.source ? ' · ' + esc(j.source) : ''}</span><div class="md skill-text">${renderMarkdown(j.text)}</div></div>`;
+      prev.scrollIntoView({ block: 'nearest' });
+    } else if (confirm('Remove this fox-installed skill? Any changes to its files will prevent removal.')) {
+      await skillApi('remove', { id: remove.dataset.skillRemove });
+      $('#skill-note').textContent = 'Removed. New and resumed sessions see the change.'; await loadSkills();
+    }
+  } catch (err) { $('#skill-note').textContent = err.message; } finally { btn.disabled = false; }
 });
 $('#sign-out').addEventListener('click', async () => {
   const response = await fetch('/api/auth/logout', { method: 'POST' });
