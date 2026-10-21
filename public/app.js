@@ -399,8 +399,12 @@ function updateTermLoading() {
 }
 setInterval(updateTermLoading, 500);
 
+// With no terminal open and no session chosen, the right column (a session's files and subagents) has nothing to show:
+// it steps aside like on the Jobs page, without touching the saved choice.
+function syncNothingOpen() { document.body.classList.toggle('nothing-open', !state.tabs.size && !state.selected); }
 function selectSession(id) {
   state.selected = id;
+  syncNothingOpen();
   updatePageTitle();
   markReplyRead(id);
   renderSessions();
@@ -985,6 +989,7 @@ function renderTabs() {
   const active = state.tabs.get(state.activeTab);
   $('#mobile-terminal-title').textContent = !active ? 'Terminal' : active.kind === 'view' ? active.label : tabLabel(state.activeTab);
   $('#empty-state').style.display = state.tabs.size ? 'none' : 'flex';
+  syncNothingOpen();
   updateDictationAvailability();
 }
 
