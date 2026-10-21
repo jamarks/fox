@@ -70,9 +70,10 @@ body.no-transcript #transcript { display: none; }
 /* Pages that are not about one session (Jobs, Pull requests, Settings, the mosaic) take the whole width: the right
    column only shows a session's files and subagents. It comes back as it was when you leave them; nothing is saved. */
 @media (min-width: 1101px) {
-  body:has(#job-view:not(.hidden)), body:has(#pr-view:not(.hidden)), body:has(#settings-view:not(.hidden)), body:has(#terminals.show-mosaic) { grid-template-columns: var(--left) 1fr; }
+  body:has(#job-view:not(.hidden)), body:has(#pr-view:not(.hidden)), body:has(#settings-view:not(.hidden)), body:has(#terminals.show-mosaic), body.nothing-open { grid-template-columns: var(--left) 1fr; }
   body:has(#job-view:not(.hidden)) :is(#transcript, #rs-right), body:has(#pr-view:not(.hidden)) :is(#transcript, #rs-right),
-  body:has(#settings-view:not(.hidden)) :is(#transcript, #rs-right), body:has(#terminals.show-mosaic) :is(#transcript, #rs-right) { display: none; }
+  body:has(#settings-view:not(.hidden)) :is(#transcript, #rs-right), body:has(#terminals.show-mosaic) :is(#transcript, #rs-right),
+  body.nothing-open :is(#transcript, #rs-right) { display: none; }
   body:has(#terminals.show-mosaic) #toggle-transcript { display: none; }
 }
 .interrupted { color: var(--warn); font-size: 11px; margin: 4px 0 8px 10px; }
