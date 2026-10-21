@@ -358,6 +358,10 @@ async function openSession(id) {
   if (s.archived || s.state === 'external') { selectSession(id); if (mobileLayout.matches) showMobileView('read'); return; }
   // No terminal: fx is not running for this session (it slept, or never ran here). Resuming takes a few seconds.
   const wake = state.waking = { id, title: displayTitle(s), since: Date.now() };
+  // Show the choice at once: the session is selected and the center says it is waking, before fx is up. Keys stop
+  // going to the terminal that was in front, so nothing typed meanwhile lands in another session.
+  selectSession(id);
+  document.activeElement?.blur?.();
   updateTermLoading();
   // Only the session still wanted takes the center when it is up; one the person left keeps running in tmux.
   try { await openTerminal({ cwd: s.workspace, resume: id }, () => state.waking === wake); }
@@ -377,8 +381,9 @@ function updateTermLoading() {
   const tab = state.tabs.get(state.activeTab);
   // Waking ends when fx has drawn something: tmux attaches at once and shows an empty pane until fx starts.
   if (state.waking && tab?.ready && termHasText(tab.term) && state.terminals.find((t) => t.name === tab.name)?.resume === state.waking.id) state.waking = null;
-  // Waking covers the center only while no other terminal is in front: a tab the person switched to is never hidden.
-  const waking = state.waking && (!tab || tab.closed || state.terminals.find((t) => t.name === tab.name)?.resume === state.waking.id) ? state.waking : null;
+  // Waking covers the center as soon as it starts: it is what the person just chose. Choosing anything else (another
+  // session or tab) cancels it in openSession and activateTab, so it never covers a terminal picked after it.
+  const waking = state.waking;
   const connecting = !waking && tab && !tab.ready && !tab.closed && Date.now() - (tab.openedAt ?? 0) > 500;
   box.classList.toggle('hidden', !waking && !connecting);
   if (!waking && !connecting) return;
