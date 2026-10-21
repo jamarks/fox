@@ -20,12 +20,12 @@ fx is the coding agent from Vercel Labs. fox runs it on a VPS or a computer at h
 ## What's new
 
 <!-- changelog:start -->
-- **2026-10-18** Model per job, URLs for every page, no stale waking overlay ([#10](https://github.com/jamarks/fox/pull/10))
-- **2026-10-18** Docs: deploy branch chosen in Settings, fox-update every minute ([#8](https://github.com/jamarks/fox/pull/8))
-- **2026-10-18** Sidebar footer in one line, cleaner cards, jobs list with last run, merged mark on PR links ([#9](https://github.com/jamarks/fox/pull/9))
-- **2026-10-18** Steer named subagents from their result rows ([#7](https://github.com/jamarks/fox/pull/7))
-- **2026-10-18** Foxjob: retry once when the provider drops fx's answer ([#6](https://github.com/jamarks/fox/pull/6))
-- **2026-10-18** Security hardening, jobs from fx wait for approval, pinned install, deploy branch in Settings ([#5](https://github.com/jamarks/fox/pull/5))
+- **2026-10-21** Waking a session hides the terminal behind the notice ([#30](https://github.com/jamarks/fox/pull/30))
+- **2026-10-21** Opening a sleeping session shows at once ([#29](https://github.com/jamarks/fox/pull/29))
+- **2026-10-21** Right column steps aside on Jobs, Pull requests, Settings and the mosaic ([#28](https://github.com/jamarks/fox/pull/28))
+- **2026-10-21** Expose new fx settings as opt-in controls ([#27](https://github.com/jamarks/fox/pull/27))
+- **2026-10-21** Check provider headroom before launching a swarm ([#26](https://github.com/jamarks/fox/pull/26))
+- **2026-10-20** Choose model effort and speed without changing defaults ([#25](https://github.com/jamarks/fox/pull/25))
 
 All of it: [CHANGELOG.md](CHANGELOG.md).
 <!-- changelog:end -->

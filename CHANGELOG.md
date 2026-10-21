@@ -2,8 +2,33 @@
 
 What changed in fox, newest first: one line per merged pull request. Written by a job from the pull requests; edit the PR title to change a line.
 
+## 2026-10-21
+
+- Waking a session hides the terminal behind the notice ([#30](https://github.com/jamarks/fox/pull/30))
+- Opening a sleeping session shows at once ([#29](https://github.com/jamarks/fox/pull/29))
+- Right column steps aside on Jobs, Pull requests, Settings and the mosaic ([#28](https://github.com/jamarks/fox/pull/28))
+- Expose new fx settings as opt-in controls ([#27](https://github.com/jamarks/fox/pull/27))
+- Check provider headroom before launching a swarm ([#26](https://github.com/jamarks/fox/pull/26))
+
+## 2026-10-20
+
+- Choose model effort and speed without changing defaults ([#25](https://github.com/jamarks/fox/pull/25))
+- Show where a swarm actually spent its time ([#24](https://github.com/jamarks/fox/pull/24))
+
+## 2026-10-19
+
+- Fix Mosaic navigation, refresh and sleeping sessions ([#23](https://github.com/jamarks/fox/pull/23))
+- Mosaic: lighter layout, even spacing, formatted replies ([#20](https://github.com/jamarks/fox/pull/20))
+- Mosaic: show the live bottom of each terminal, not old scrollback ([#19](https://github.com/jamarks/fox/pull/19))
+- Show PR loading state and all history by creation date ([#18](https://github.com/jamarks/fox/pull/18))
+- Browse merged pull request history from the sidebar ([#17](https://github.com/jamarks/fox/pull/17))
+- Watch several live fx sessions in one quiet mosaic ([#14](https://github.com/jamarks/fox/pull/14))
+- Use broom icon for memory cleanup ([#13](https://github.com/jamarks/fox/pull/13))
+
 ## 2026-10-18
 
+- Running version in the sidebar footer ([#12](https://github.com/jamarks/fox/pull/12))
+- README: TL;DR and what's new; detail in docs/ ([#11](https://github.com/jamarks/fox/pull/11))
 - Model per job, URLs for every page, no stale waking overlay ([#10](https://github.com/jamarks/fox/pull/10))
 - Docs: deploy branch chosen in Settings, fox-update every minute ([#8](https://github.com/jamarks/fox/pull/8))
 - Sidebar footer in one line, cleaner cards, jobs list with last run, merged mark on PR links ([#9](https://github.com/jamarks/fox/pull/9))
