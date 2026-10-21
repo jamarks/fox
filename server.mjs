@@ -31,6 +31,7 @@ import { createPrs } from './prs.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 import { ensureFoxNotes, foxNotes } from './notes.mjs';
 import { createModels, launchArgs } from './models.mjs';
+import { createUsage } from './usage.mjs';
 import { parseTimeline, turnTimeline } from './timeline.mjs';
 const execFileP = promisify(execFile);
 
@@ -410,6 +411,7 @@ async function fxJson(args, env = {}) {
 }
 async function readFxSettings() { return (await readJson(join(homedir(), '.fx', 'settings.json'))) ?? {}; }
 const models = createModels({ fx: fxJson, file: join(STATE_DIR, 'models.json'), readSettings: readFxSettings });
+const usage = createUsage({ fx: fxJson });
 
 // ---------- optional tools for fx (MCP servers) ----------
 let mcpPath = null;
@@ -800,6 +802,13 @@ async function handlePanelRequest(req, res) {
     }
     if (p === '/api/models' && req.method === 'GET') return send(res, 200, await models.get());
     if (p === '/api/models/refresh' && req.method === 'POST') { try { return send(res, 200, await models.refresh()); } catch (err) { return send(res, 500, { error: String(err.stderr || err.message) }); } }
+    if (p === '/api/usage/refresh' && req.method === 'POST') {
+      try {
+        const provider = JSON.parse(await readBody(req) || '{}').provider;
+        if (typeof provider !== 'string' || !(await models.get()).providers.some((x) => x.id === provider)) return send(res, 400, { error: 'Unknown provider' });
+        return send(res, 200, await usage.refresh(provider));
+      } catch { return send(res, 503, { status: 'unavailable' }); }
+    }
     if (p === '/api/terminals' && req.method === 'GET') return send(res, 200, await listTerminals());
     if (p === '/api/terminals' && req.method === 'POST') {
       const body = JSON.parse(await readBody(req) || '{}');
