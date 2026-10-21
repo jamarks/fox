@@ -67,6 +67,14 @@ button:disabled { opacity: .3; cursor: not-allowed; }
 body.no-transcript { grid-template-columns: var(--left) 1fr; }
 body.no-transcript #rs-right { display: none; }
 body.no-transcript #transcript { display: none; }
+/* Pages that are not about one session (Jobs, Pull requests, Settings, the mosaic) take the whole width: the right
+   column only shows a session's files and subagents. It comes back as it was when you leave them; nothing is saved. */
+@media (min-width: 1101px) {
+  body:has(#job-view:not(.hidden)), body:has(#pr-view:not(.hidden)), body:has(#settings-view:not(.hidden)), body:has(#terminals.show-mosaic) { grid-template-columns: var(--left) 1fr; }
+  body:has(#job-view:not(.hidden)) :is(#transcript, #rs-right), body:has(#pr-view:not(.hidden)) :is(#transcript, #rs-right),
+  body:has(#settings-view:not(.hidden)) :is(#transcript, #rs-right), body:has(#terminals.show-mosaic) :is(#transcript, #rs-right) { display: none; }
+  body:has(#terminals.show-mosaic) #toggle-transcript { display: none; }
+}
 .interrupted { color: var(--warn); font-size: 11px; margin: 4px 0 8px 10px; }
 .tab { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-bottom: 0; border-radius: 6px 6px 0 0; background: var(--panel-2); color: var(--muted); cursor: pointer; white-space: nowrap; }
 .tab.active { background: var(--bg); color: var(--text); }
