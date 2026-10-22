@@ -10,7 +10,9 @@ Primer caso concreto: Claude Code, para usar Opus y Sonnet con la suscripción d
 
 Hecho: el contrato en `harnesses/` con fx como primer adaptador (la API de fx da lo mismo que antes, comparado contra `main` sobre 65 sesiones reales), y Claude Code en niveles 1–3: elegirlo en el `+`, terminal, estado por pantalla, retomar, Read, archivos y previews, búsqueda, new replies, subagentes (con `meta.json` y su hand-back) y respuesta desde el teléfono. Contrato corto en `docs/harnesses.md`.
 
-Falta: métricas de Claude Code, MCP/Settings por agente (fase 4 del inventario), el estado genérico por actividad de tmux, cargar adaptadores desde `~/.config/fox/harnesses/`, e instalar Claude Code en el servidor (`setup.sh` y login).
+Después (mismo día): métricas por agente, Tools con un switch por agente (Claude recibe el comando que fx ya usa en esa máquina), instalación con `setup-server.sh --claude-code` y login con `claude auth login`.
+
+Falta: modo de permisos de Claude Code en fox, confiar de antemano en las carpetas de los workspaces, jobs con Claude (`foxjob.ask`), Settings de Claude (modelo por defecto, effort), Follow up a subagentes de Claude, Linear por API key para Claude, cupo de la suscripción en el `+`, y del plan general: estado genérico por actividad de tmux y adaptadores desde `~/.config/fox/harnesses/`.
 
 ## La idea central
 
