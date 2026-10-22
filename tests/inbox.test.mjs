@@ -34,7 +34,7 @@ test('first load baselines history, polling adds unread, selection clears only t
   const state = { sessions: [{ id: 'abcd', archived: false, parentId: null, workspace: '/repo', title: 'Session' }], selected: null };
   const ctx = { state, $: (selector) => elements[selector.slice(1)], localStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
     sessionById: (id) => state.sessions.find((s) => s.id === id), displayTitle: (s) => s.title, shortPath: (s) => s, fmtTime: String, esc: String,
-    globalMessage: null, convoShown: new Set(), setTranscript() {}, renderSessions() {}, loadTranscript() {}, syncUrl() {}, updatePageTitle() {}, syncNothingOpen() {}, gestures: [], foxGesture(name) { ctx.gestures.push(name); },
+    globalMessage: null, convoShown: new Set(), setTranscript() {}, renderSessions() {}, loadTranscript() {}, syncUrl() {}, updatePageTitle() {}, syncNothingOpen() {}, foxMotion: { activity: 0 }, gestures: [], foxGesture(name) { ctx.gestures.push(name); },
     mobileLayout: { matches: false }, opened: [], openSession(id) { ctx.opened.push(id); },
   };
   vm.runInNewContext(source.slice(start, end) + selection, ctx);
@@ -47,6 +47,7 @@ test('first load baselines history, polling adds unread, selection clears only t
   state.sessions[0].latestReply = { turn: 2, text: 'Second', at: 2, messageIndex: 3 };
   vm.runInNewContext('renderReplyInbox()', ctx);
   assert.deepEqual(ctx.gestures, ['wink'], 'a new reply: the fox winks');
+  assert.ok(ctx.foxMotion.activity > 0, 'a new reply breaks a quiet spell');
   vm.runInNewContext('renderReplyInbox()', ctx);
   assert.deepEqual(ctx.gestures, ['wink'], 'the same reply again: no second wink');
   assert.equal(elements['reply-inbox-count'].textContent, 1);
@@ -68,6 +69,35 @@ test('the model of a session is the one that answered last, not fx\'s default in
   assert.equal(lastAnswerModel([JSON.stringify({ event: { user: { text: 'q' } } })]), null);
   assert.equal(lastAnswerModel([reply('gpt-6.1-sol'), JSON.stringify({ event: { user: { text: 'q' } } }), reply('gpt-6-luna'), '{"event":{"tool":{}}}']), 'gpt-6-luna');
   assert.equal(lastAnswerModel([reply('gpt-6-luna'), '{not json "provider_replay"']), 'gpt-6-luna');
+});
+
+test('hidden or reduced-motion yawns do not consume the next visible yawn', () => {
+  const source = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('const FOX_YAWN_IDLE'), source.indexOf('let inboxSeen = null;'));
+  let now = 0, tick;
+  const fox = { classList: { add() {}, remove() {} }, getBoundingClientRect() {} };
+  const ctx = { Date: { now: () => now }, state: { sessions: [] }, document: { hidden: false, querySelector: () => fox },
+    window: { addEventListener() {} }, matchMedia: () => ({ matches: false }),
+    setInterval: (fn) => { tick = fn; }, setTimeout: () => 1, clearTimeout() {} };
+  vm.runInNewContext(code, ctx);
+  now = 10 * 60_000;
+  ctx.document.hidden = true;
+  tick();
+  ctx.document.hidden = false;
+  vm.runInNewContext('this.yawned = foxMotion.yawned', ctx);
+  assert.equal(ctx.yawned, 0, 'hidden yawn was not counted');
+  tick();
+  vm.runInNewContext('this.yawned = foxMotion.yawned', ctx);
+  assert.equal(ctx.yawned, now, 'the fox yawns when visible again');
+  now += 20 * 60_000;
+  ctx.matchMedia = () => ({ matches: true });
+  tick();
+  vm.runInNewContext('this.yawned = foxMotion.yawned', ctx);
+  assert.equal(ctx.yawned, 10 * 60_000, 'reduced motion never consumes a yawn');
+  ctx.state.sessions = [{ state: 'working' }];
+  ctx.matchMedia = () => ({ matches: false });
+  tick();
+  assert.equal(ctx.yawned, 10 * 60_000, 'working sessions prevent a yawn');
 });
 
 test('the fox yawns after 10 quiet minutes, then every 20, and any activity starts it over', () => {
