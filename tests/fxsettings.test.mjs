@@ -217,7 +217,7 @@ test('tool output budget is opt-in, preserves config and validates bytes', async
 
 test('tool output budget UI validates drafts and keeps badge state independent of activation', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  const source = app.slice(app.indexOf('// fx\'s own settings (see fxsettings.mjs).'), app.indexOf('// Tools for fx (MCP'));
+  const source = app.slice(app.indexOf('// fx\'s own settings (see fxsettings.mjs).'), app.indexOf('// Tools (MCP servers'));
   const storage = new Map();
   let click, saved = {}, writes = [];
   const panel = { innerHTML: '', addEventListener: (_, fn) => { click = fn; } };

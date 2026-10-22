@@ -692,6 +692,11 @@ async function openTerminal({ cwd, resume, harness, provider, model, effort, spe
   if (t.error) { state.waking = null; updateTermLoading(); alert(t.error); return; }
   await refresh();
   if (!stillWanted()) return;
+  if (!resume) {
+    closeSettings({ sync: false });
+    closePrs({ sync: false });
+    if (state.jobView) closeJob({ sync: false });
+  }
   attachTab(t);
   if (t.resume) selectSession(t.resume);
 }
