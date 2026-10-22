@@ -220,7 +220,7 @@ function wsRepoLine(r, wsId = null) {
   // The branch is the workspace copy's, shared by its sessions: a button to change it (branches.mjs) when fox knows the workspace.
   const off = r.branch && r.default && r.branch !== r.default;
   const branch = !r.branch ? '' : wsId && r.status === 'ready'
-    ? `<button type="button" class="ws-branch${off ? ' off' : ''}" data-branch-ws="${esc(wsId)}" data-branch-dir="${esc(r.dir)}" title="Change the branch of this workspace's ${esc(r.dir)} (all its sessions use it)">${esc(r.branch)}</button>`
+    ? `<button type="button" class="ws-branch${off ? ' off' : ''}" data-branch-ws="${esc(wsId)}" data-branch-dir="${esc(r.dir)}" title="${esc(r.branch)}: change the branch of this workspace's ${esc(r.dir)} (all its sessions use it)">${esc(r.branch)}</button>`
     : `<span class="ws-branch">${esc(r.branch)}</span>`;
   return `<div class="ws-line" title="${esc(r.owner)}/${esc(r.name)}"><span>${esc(r.dir)}</span>${branch}${stateHtml}</div>`;
 }
@@ -692,6 +692,11 @@ async function openTerminal({ cwd, resume, harness, provider, model, effort, spe
   if (t.error) { state.waking = null; updateTermLoading(); alert(t.error); return; }
   await refresh();
   if (!stillWanted()) return;
+  if (!resume) {
+    closeSettings({ sync: false });
+    closePrs({ sync: false });
+    if (state.jobView) closeJob({ sync: false });
+  }
   attachTab(t);
   if (t.resume) selectSession(t.resume);
 }
@@ -3155,10 +3160,10 @@ async function openBranchMenu(anchor, wsId, dir) {
   if (branchMenu !== menu) return;
   if (info.error) { menu.innerHTML = `<div class="bm-note err">${esc(info.error)}</div>`; return; }
   const others = info.branches.filter((b) => b.name !== info.current && b.name !== info.default).slice(0, 12);
-  menu.innerHTML = `<div class="bm-head"><b>${esc(dir)}</b> on <span class="mono">${esc(info.current)}</span>${info.merged ? ' <span class="bm-tag">merged</span>' : ''}${info.dirty ? ` <span class="bm-tag warn">±${info.dirty}</span>` : ''}</div>`
+  menu.innerHTML = `<div class="bm-head" title="${esc(info.current)}"><b>${esc(dir)}</b> <span>on</span> <span class="mono">${esc(info.current)}</span>${info.merged ? ' <span class="bm-tag">merged</span>' : ''}${info.dirty ? ` <span class="bm-tag warn">±${info.dirty}</span>` : ''}</div>`
     + `<div class="bm-note">Every session in this workspace uses this copy.</div>`
     + (info.current !== info.default ? `<button type="button" class="bm-main" data-to="${esc(info.default)}">Back to ${esc(info.default)}</button>` : `<button type="button" data-update>Update ${esc(info.default)}</button>`)
-    + (others.length ? `<div class="bm-sub">Other branches</div>${others.map((b) => `<button type="button" data-to="${esc(b.name)}"><span class="mono">${esc(b.name)}</span><small>${esc(fmtAgo(b.at))}${b.local ? '' : ' · remote'}</small></button>`).join('')}` : '')
+    + (others.length ? `<div class="bm-sub">Other branches</div>${others.map((b) => `<button type="button" data-to="${esc(b.name)}" title="${esc(b.name)}"><span class="mono">${esc(b.name)}</span><small>${esc(fmtAgo(b.at))}${b.local ? '' : ' · remote'}</small></button>`).join('')}` : '')
     + `<button type="button" data-new-branch>New branch…</button><div class="bm-msg" role="status"></div>`;
   const say = (html, cls = '') => { const m = menu.querySelector('.bm-msg'); m.className = `bm-msg ${cls}`; m.innerHTML = html; };
   const act = async (path, body, label) => {

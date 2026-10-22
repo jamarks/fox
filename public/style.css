@@ -601,6 +601,11 @@ a.section-title.fold:hover { color: var(--text); }
 .ws-line .ws-state.ok { color: var(--ok); } .ws-line .ws-state.err { color: var(--err); } .ws-line .ws-state.warn { color: var(--warn); }
 .ws-line .ws-branch { color: var(--muted); }
 button.ws-more { font: inherit; color: var(--muted); padding: 0 4px; margin: 0 -4px; display: inline-flex; align-items: center; gap: 4px; } button.ws-more:hover { color: var(--text); }
+/* Long branch names stay on one line (full name on hover), in the sidebar and in the menu */
+.ws-line .ws-branch { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branch-menu button .mono, .branch-menu .bm-head .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branch-menu .bm-head { display: flex; gap: 6px; align-items: baseline; min-width: 0; } .branch-menu .bm-head > * { flex: none; } .branch-menu .bm-head .mono { flex: 1 1 auto; }
+.branch-menu button small { flex: none; }
 button.ws-branch { font: inherit; padding: 0 4px; margin: 0 -4px; border-radius: 4px; }
 button.ws-branch:hover { color: var(--text); background: var(--panel-2); }
 button.ws-branch.off { color: var(--warn); } /* not on the repo's default branch: worth a look */
@@ -816,6 +821,7 @@ body.metrics-page { display: block; height: auto; min-height: 100%; }
 .ns-actions button.linkish { margin-right: auto; }
 body.night #wsdialog, body.night #jobdialog, body.night #newsheet { background: rgba(3, 5, 12, .7); }
 body.night #wsdialog .sheet, body.night #jobdialog .sheet, body.night #newsheet .sheet { background: #0d101c; }
+body.night .branch-menu { background: #0d101c; } /* the branch menu too: solid over the stars */
 
 /* Paste on a phone: iOS offers no Paste over the terminal, so a button asks for the clipboard, and this sheet
    (a real text box, where holding a finger does offer Paste) is the fallback */
