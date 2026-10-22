@@ -605,8 +605,61 @@ function pasteIntoTerminal(text, target = state.activeTab) {
   return true;
 }
 let agentDraft = null;
+let skillRequest = 0, shelfSkills = [], skillShelfCwd = null;
+function skillCwd() {
+  const terminal = state.terminals.find((t) => t.name === state.activeTab);
+  if (terminal?.harness === 'fx') return terminal.cwd;
+  if (terminal) return null;
+  const selected = sessionById(state.selected);
+  return selected && selected.harness === 'fx' ? selected.workspace : null;
+}
+function renderSkillShelf() {
+  const q = $('#skill-search').value.trim().toLowerCase();
+  const box = $('#skill-list'); box.replaceChildren();
+  const matches = shelfSkills.filter((s) => `${s.name} ${s.description} ${s.source}`.toLowerCase().includes(q));
+  if (!matches.length) { box.textContent = shelfSkills.length ? 'No matching skills' : 'No skills in this folder'; return; }
+  for (const skill of matches) {
+    const row = document.createElement('button'); row.type = 'button'; row.className = 'skill-row';
+    const name = document.createElement('strong'); name.textContent = skill.name;
+    const source = document.createElement('small'); source.textContent = skill.source;
+    const description = document.createElement('span'); description.textContent = skill.description;
+    row.append(name, source, description);
+    row.addEventListener('click', () => {
+      if (!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(skill.name)) return;
+      const draft = `Use the ${skill.name} skill to `;
+      const active = state.terminals.find((t) => t.name === state.activeTab && t.harness === 'fx' && t.cwd === skillShelfCwd);
+      if (active && pasteIntoTerminal(draft, active.name)) { closePasteSheet(); state.tabs.get(active.name)?.term.focus(); }
+      else { $('#paste-hint').classList.remove('hidden'); $('#paste-hint').textContent = 'Open an fx terminal in this folder to insert the draft.'; }
+    });
+    box.appendChild(row);
+  }
+}
+async function openSkillShelf() {
+  const cwd = skillCwd();
+  if (!cwd) { toast('Select an fx session to browse skills'); return; }
+  agentDraft = null; skillShelfCwd = cwd;
+  $('#paste-title').textContent = 'Skills'; $('#paste-hint').classList.remove('hidden');
+  $('#paste-hint').textContent = `${shortPath(cwd)} · choose a skill to insert a draft (Enter sends)`;
+  $('#paste-text').classList.add('hidden'); $('#pasteform button[type="submit"]').classList.add('hidden');
+  $('#skill-shelf').classList.remove('hidden'); $('#skill-search').value = ''; shelfSkills = [];
+  $('#skill-list').textContent = 'Loading skills…'; $('#pastesheet').classList.remove('hidden'); $('#skill-search').focus();
+  const request = ++skillRequest;
+  try {
+    const response = await fetch(`/api/skills?cwd=${encodeURIComponent(cwd)}`);
+    if (!response.ok) throw new Error('Could not load skills');
+    const skills = await response.json();
+    if (request !== skillRequest) return;
+    shelfSkills = Array.isArray(skills) ? skills : [];
+    renderSkillShelf();
+  } catch { if (request === skillRequest) $('#skill-list').textContent = 'Could not load skills'; }
+}
+$('#skills').addEventListener('click', openSkillShelf);
+$('#skill-search').addEventListener('input', renderSkillShelf);
 function closePasteSheet() {
+  ++skillRequest; skillShelfCwd = null;
   $('#pastesheet').classList.add('hidden'); $('#paste-text').value = ''; agentDraft = null;
+  $('#skill-shelf').classList.add('hidden'); $('#paste-text').classList.remove('hidden');
+  $('#pasteform button[type="submit"]').classList.remove('hidden');
   $('#paste-title').textContent = 'Paste'; $('#paste-hint').classList.add('hidden');
   $('#pasteform button[type="submit"]').textContent = 'Insert';
 }
@@ -636,7 +689,7 @@ function openAgentDraft(button) {
   const anchor = selection.anchorNode;
   const answer = (anchor?.nodeType === 1 ? anchor : anchor?.parentElement)?.closest('.agent-answer');
   const excerpt = selection.rangeCount === 1 && row?.contains(answer) && answer?.contains(selection.focusNode) ? selection.toString().trim() : '';
-  agentDraft = draft;
+  closePasteSheet(); agentDraft = draft;
   const name = /^[\w-]+$/.test(draft.name) ? draft.name : JSON.stringify(draft.name);
   $('#paste-text').value = `Tell ${name}: ${excerpt ? `Regarding “${excerpt}”, ` : ''}`;
   describeAgentDraft(parent);
@@ -679,6 +732,7 @@ function describeAgentDraftButton(parent) {
 }
 $('#paste').addEventListener('click', async () => {
   if (agentDraft) { $('#pastesheet').classList.remove('hidden'); $('#paste-text').focus(); return; }
+  closePasteSheet();
   try { const text = await navigator.clipboard?.readText?.(); if (text) return pasteIntoTerminal(text); } catch {} // iOS asks with its own Paste bubble
   $('#pastesheet').classList.remove('hidden');
   $('#paste-text').focus();
