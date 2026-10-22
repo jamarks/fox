@@ -913,11 +913,9 @@ a.set-val[href]:hover { color: var(--text); }
 .switch { display: block; }
 .set-main { flex: 1 1 auto; }
 .set-go { margin-left: auto; }
-/* On a phone, Jobs and Settings are pages of their own: the session's bar (title, paste, mic) does not belong there */
-@media (max-width: 1100px) {
-  body:has(#job-view:not(.hidden)) #tabbar, body:has(#settings-view:not(.hidden)) #tabbar, body:has(#pr-view:not(.hidden)) #tabbar, body:has(#skill-view:not(.hidden)) #tabbar,
-  body:has(#job-view:not(.hidden)) #dictation-pill, body:has(#settings-view:not(.hidden)) #dictation-pill, body:has(#pr-view:not(.hidden)) #dictation-pill, body:has(#skill-view:not(.hidden)) #dictation-pill { display: none; }
-}
+/* Jobs, Pull requests, Skills and Settings are pages of their own: the terminals' bar (tabs, paste, mic) does not belong there */
+body:has(#job-view:not(.hidden)) #tabbar, body:has(#settings-view:not(.hidden)) #tabbar, body:has(#pr-view:not(.hidden)) #tabbar, body:has(#skill-view:not(.hidden)) #tabbar,
+body:has(#job-view:not(.hidden)) #dictation-pill, body:has(#settings-view:not(.hidden)) #dictation-pill, body:has(#pr-view:not(.hidden)) #dictation-pill, body:has(#skill-view:not(.hidden)) #dictation-pill { display: none; }
 /* fx's answers in Read, formatted (see markdown.js) */
 .msg .text.md { white-space: normal; line-height: 1.55; }
 .md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
