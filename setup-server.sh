@@ -4,6 +4,7 @@
 #   ... | sudo bash -s -- --tailscale          no domain: only your tailnet's devices reach it
 #   ... | sudo bash -s -- --origin https://…   you already route that address to 127.0.0.1:4848
 #   ... | sudo bash                            no way in yet: reach fox over an SSH tunnel
+#   add --claude-code to also install Claude Code, to run sessions on your Claude Pro or Max subscription
 # Or from a checkout: sudo ./setup-server.sh [same options]. Running it again is safe: every step checks first.
 # It never asks for or stores a secret. The logins (fx's provider, GitHub, Cloudflare, Tailscale) are yours: it
 # stops and tells you, or prints the exact command. What it sets up, step by step, is below; docs/server.md
@@ -12,7 +13,7 @@ set -euo pipefail
 
 FOX_REPO="${FOX_REPO:-https://github.com/jamarks/fox.git}"
 FOX_REF="${FOX_REF:-release}"
-MODE="" HOSTNAME_ARG="" ORIGIN="" FIREWALL=1 HARDEN_SSH=1
+MODE="" HOSTNAME_ARG="" ORIGIN="" FIREWALL=1 HARDEN_SSH=1 CLAUDE_CODE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --cloudflare) MODE=cloudflare; HOSTNAME_ARG="${2:?--cloudflare needs a hostname, e.g. fox.example.com}"; shift ;;
@@ -20,7 +21,8 @@ while [ $# -gt 0 ]; do
     --origin) MODE=origin; ORIGIN="${2:?--origin needs an https:// address}"; shift ;;
     --no-firewall) FIREWALL=0 ;;
     --no-ssh-hardening) HARDEN_SSH=0 ;;
-    -h|--help) sed -n '2,12p' "$0" 2>/dev/null || true; exit 0 ;;
+    --claude-code) CLAUDE_CODE=1 ;;
+    -h|--help) sed -n '2,13p' "$0" 2>/dev/null || true; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
   shift
@@ -116,6 +118,12 @@ if [ ! -x /home/fox/.local/bin/fx ]; then
 fi
 grep -q '.local/bin' /home/fox/.bashrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >> /home/fox/.bashrc
 ok "fx $(as_fox fx --version 2>/dev/null | tail -1)"
+# Claude Code, next to fx: fox offers it in the new-session sheet once it is installed. It updates itself.
+if [ "$CLAUDE_CODE" = 1 ] || [ -x /home/fox/.local/bin/claude ]; then
+  step "Claude Code"
+  [ -x /home/fox/.local/bin/claude ] || runuser -u fox -- env HOME=/home/fox bash -c 'curl -fsSL https://claude.ai/install.sh | bash' >/dev/null
+  ok "Claude Code $(as_fox claude --version 2>/dev/null | tail -1)"
+fi
 # GitHub: one token per owner, picked by the repo's owner (deploy/git). gh's own login covers the rest.
 install -d -o fox -g fox /home/fox/.local/bin
 install -o fox -g fox -m 755 "$DEPLOY/git/fox-git-credential" "$DEPLOY/git/fox-git-token" "$DEPLOY/git/gh" /home/fox/.local/bin/
@@ -205,6 +213,10 @@ if ! as_fox fx status 2>/dev/null | grep -q 'connected_providers=.\+'; then
   printf '\n  %s%d. Sign fx in to a model provider%s, from your computer (the login comes back to port 1455 on the server):\n' "$bold" $n "$reset"; n=$((n+1))
   printf '     ssh -t -L 1455:localhost:1455 %s@%s sudo -iu fox fx login codex     %s(ChatGPT subscription)%s\n' "$ME" "$IP" "$dim" "$reset"
   printf '     ssh -t %s@%s sudo -iu fox fx setup                                   %s(or a Vercel AI Gateway key)%s\n' "$ME" "$IP" "$dim" "$reset"
+fi
+if [ -x /home/fox/.local/bin/claude ] && ! as_fox claude auth status 2>/dev/null | grep -q '"loggedIn": true'; then
+  printf '\n  %s%d. Sign Claude Code in%s to your Claude Pro or Max subscription: it prints a link; open it, approve, paste the code back:\n' "$bold" $n "$reset"; n=$((n+1))
+  printf '     ssh -t %s@%s sudo -iu fox claude auth login\n' "$ME" "$IP"
 fi
 if ! as_fox gh auth status >/dev/null 2>&1; then
   printf '\n  %s%d. GitHub%s (optional): sudo -iu fox gh auth login, with a fine-grained token for the repos fx may use.\n' "$bold" $n "$reset"; n=$((n+1))

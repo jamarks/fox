@@ -5,7 +5,8 @@ const readJson = async (path) => { try { return JSON.parse(await readFile(path, 
 const fileStamp = async (path) => { try { const s = await stat(path); return `${s.mtimeMs}:${s.size}`; } catch { return ''; } };
 
 // Cache only searchable text, not tool calls/results or artifact contents. Nothing is written to disk.
-export function createSearchIndex(sessionsDir, loadState) {
+// `others` adds sessions of other harnesses, already in fox's shape: { id, name, title, updatedAt, messages }.
+export function createSearchIndex(sessionsDir, loadState, others = async () => []) {
   const cache = new Map();
   async function update() {
     const [ids, state] = await Promise.all([readdir(sessionsDir).catch(() => []), loadState()]);
@@ -54,7 +55,8 @@ export function createSearchIndex(sessionsDir, loadState) {
     if (!q) return [];
     await update();
     const hits = [];
-    for (const [id, entry] of cache) {
+    const extra = await others().catch(() => []);
+    for (const [id, entry] of [...cache, ...extra.map((e) => [e.id, { alias: '', ...e }])]) {
       const matchedName = [entry.name, entry.alias, entry.title].find((text) => text.toLocaleLowerCase().includes(q));
       if (matchedName) hits.push({ id, kind: 'name', text: matchedName, updatedAt: entry.updatedAt });
       for (const message of entry.messages) {

@@ -60,12 +60,14 @@ const ICON = {
 };
 // Vendor badge for a model id: two letters on the vendor's color. Works for "vendor/model" ids and bare names.
 const VENDORS = [
-  [/^openai\/|^gpt-|^o[1-9]/, 'OA', '#10a37f', 'OpenAI'], [/^google\/|gemini|gemma/, 'G', '#4285f4', 'Google'], [/^anthropic\/|claude/, 'A', '#d97757', 'Anthropic'],
+  [/^openai\/|^gpt-|^o[1-9]/, 'OA', '#10a37f', 'OpenAI'], [/^google\/|gemini|gemma/, 'G', '#4285f4', 'Google'], [/^anthropic\/|claude|^(opus|sonnet|haiku|fable)\b/, 'A', '#d97757', 'Anthropic'],
   [/^deepseek/, 'DS', '#a78bfa', 'DeepSeek'], [/^meta\/|llama/, 'M', '#22b8cf', 'Meta'], [/^(x|space)ai\/|grok/, 'X', '#444a57', 'xAI'],
   [/^mistral/, 'Mi', '#ff7000', 'Mistral'], [/^amazon\/|nova/, 'Am', '#ff9900', 'Amazon'], [/^alibaba\/|qwen/, 'Q', '#6b4cff', 'Alibaba'],
   [/^moonshot|kimi/, 'K', '#3b3b3b', 'Moonshot'], [/^xiaomi\/|mimo/, 'Xm', '#ff6900', 'Xiaomi'], [/^perplexity/, 'P', '#20808d', 'Perplexity'],
   [/^cohere/, 'Co', '#39594d', 'Cohere'], [/^zai\/|^z-ai|glm/, 'Z', '#2d5bff', 'Z.ai'], [/^minimax/, 'Mm', '#e0372f', 'MiniMax'],
 ];
+// The agent that runs a session (fx, Claude Code…), for the words that name it.
+const agentName = (s) => s?.harnessLabel ?? 'fx';
 function vendorOf(model) { const m = String(model ?? '').toLowerCase(); return VENDORS.find(([re]) => re.test(m)); }
 function modelBadge(model) {
   if (!model) return '';
@@ -75,7 +77,7 @@ function modelBadge(model) {
 }
 // "openai/gpt-5.2" → "gpt-5.2" once the vendor pill says who makes it.
 // Who pays: a subscription (codex, grok) or the pay-per-use Vercel AI Gateway. Shown next to the model.
-const providerLabel = (p) => ({ gateway: 'Vercel AI Gateway (pay per use)', codex: 'ChatGPT subscription', grok: 'Grok subscription' })[p] ?? (p || 'unknown provider');
+const providerLabel = (p) => ({ gateway: 'Vercel AI Gateway (pay per use)', codex: 'ChatGPT subscription', grok: 'Grok subscription', claude: 'Claude Code (your Claude sign-in)' })[p] ?? (p || 'unknown provider');
 const providerTag = (p) => !p ? '' : p === 'gateway' ? '<span class="prov gw">▲ gateway</span>' : `<span class="prov">${esc(p)}</span>`;
 const modelShort = (model) => String(model ?? '').replace(/^[a-z0-9-]+\//i, '');
 const STATE_LABEL = { working: 'working', ready: 'waiting', needs_input: 'needs input', external: 'other terminal', done: 'done', idle: '' };
@@ -85,6 +87,7 @@ const STATE_ORDER = { needs_input: 0, working: 1, ready: 2, external: 3, done: 4
 async function refresh() {
   const { sessions, terminals, repos, workspaces } = await (await fetch('/api/overview')).json();
   state.sessions = sessions;
+  if (sessions.some((s) => s.state === 'working')) foxMotion.busy = Date.now();
   state.workspaces = workspaces ?? [];
   state.terminals = terminals;
   state.repos = repos ?? {};
@@ -107,8 +110,34 @@ function detectTransitions() {
   }
 }
 
+// ---------- the fox's gestures ----------
+const FOX_YAWN_IDLE = 10 * 60_000, FOX_YAWN_AGAIN = 20 * 60_000;
+const foxMotion = { last: {}, activity: Date.now(), busy: 0, yawned: 0, timer: null };
+function foxGesture(name) {
+  const fox = document.querySelector('.brand .fox');
+  if (!fox || document.hidden || matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+  if (Date.now() - (foxMotion.last[name] ?? 0) < 4000) return false; // several replies at once: one wink
+  foxMotion.last[name] = Date.now();
+  clearTimeout(foxMotion.timer);
+  fox.classList.remove('wink', 'yawn'); void fox.getBoundingClientRect(); fox.classList.add(name);
+  foxMotion.timer = setTimeout(() => fox.classList.remove(name), name === 'yawn' ? 2700 : 800);
+  return true;
+}
+// Quiet means no session working and no input or new reply in fox since `idleSince`.
+function foxShouldYawn({ now, idleSince, yawned }) {
+  if (now - idleSince < FOX_YAWN_IDLE) return false;
+  return !yawned || yawned < idleSince || now - yawned >= FOX_YAWN_AGAIN;
+}
+for (const type of ['pointerdown', 'keydown', 'wheel', 'touchstart']) window.addEventListener(type, () => { foxMotion.activity = Date.now(); }, { passive: true, capture: true });
+setInterval(() => {
+  const now = Date.now();
+  if (state.sessions.some((s) => s.state === 'working')) foxMotion.busy = now;
+  if (foxShouldYawn({ now, idleSince: Math.max(foxMotion.activity, foxMotion.busy), yawned: foxMotion.yawned }) && foxGesture('yawn')) foxMotion.yawned = now;
+}, 30_000);
+
 // ---------- unread replies ----------
 let inboxSeen = null;
+let winkKeys = null; // unread replies at the last render, to tell a new one
 function renderReplyInbox() {
   if (!inboxSeen) {
     // A browser can load new JS while an older server is still running. Wait for its new overview shape.
@@ -122,6 +151,13 @@ function renderReplyInbox() {
   }
   const unread = state.sessions.filter((s) => !s.parentId && !s.archived && s.latestReply && s.latestReply.turn > (inboxSeen[s.id] ?? 0))
     .sort((a, b) => (b.latestReply.at ?? b.updatedAt ?? 0) - (a.latestReply.at ?? a.updatedAt ?? 0));
+  // A reply that was not unread on the last render is new: the fox winks (not on the first render, not for old ones).
+  const keys = unread.map((s) => `${s.id}:${s.latestReply.turn}`);
+  if (winkKeys && keys.some((k) => !winkKeys.has(k))) {
+    foxMotion.activity = Date.now();
+    foxGesture('wink');
+  }
+  winkKeys = new Set(keys);
   const root = $('#reply-inbox'), list = $('#reply-inbox-list'), toggle = $('#reply-inbox-toggle');
   root.classList.toggle('hidden', !unread.length);
   if (!unread.length) { list.classList.add('hidden'); toggle.setAttribute('aria-expanded', 'false'); return; }
@@ -176,22 +212,30 @@ function renderSummary() {
 // ---------- workspaces: folders made of GitHub repos ----------
 const workspaceFor = (path) => (state.workspaces ?? []).find((w) => path === w.dir || String(path ?? '').startsWith(w.dir + '/'));
 // One repo of a workspace: its folder, branch and what needs attention (uncommitted, behind, ahead, clone state).
-function wsRepoLine(r) {
+function wsRepoLine(r, wsId = null) {
   const stateHtml = r.status === 'cloning' ? '<span class="ws-state">cloning…</span>'
     : r.status === 'missing' ? '<span class="ws-state">waiting to clone</span>'
     : r.status === 'error' ? `<span class="ws-state err" title="${esc(r.error ?? '')}">clone failed</span>`
     : `<span class="ws-state ${r.changed ? 'warn' : ''}">${[r.changed ? `±${r.changed}` : '', r.behind ? `↓${r.behind}` : '', r.ahead ? `↑${r.ahead}` : ''].filter(Boolean).join(' ')}</span>`;
-  return `<div class="ws-line" title="${esc(r.owner)}/${esc(r.name)}"><span>${esc(r.dir)}</span>${r.branch ? `<span class="ws-branch">${esc(r.branch)}</span>` : ''}${stateHtml}</div>`;
+  // The branch is the workspace copy's, shared by its sessions: a button to change it (branches.mjs) when fox knows the workspace.
+  const off = r.branch && r.default && r.branch !== r.default;
+  const branch = !r.branch ? '' : wsId && r.status === 'ready'
+    ? `<button type="button" class="ws-branch${off ? ' off' : ''}" data-branch-ws="${esc(wsId)}" data-branch-dir="${esc(r.dir)}" title="Change the branch of this workspace's ${esc(r.dir)} (all its sessions use it)">${esc(r.branch)}</button>`
+    : `<span class="ws-branch">${esc(r.branch)}</span>`;
+  return `<div class="ws-line" title="${esc(r.owner)}/${esc(r.name)}"><span>${esc(r.dir)}</span>${branch}${stateHtml}</div>`;
 }
 
 // In the sidebar only the repos that need you show up (uncommitted, behind or ahead, cloning, failed);
 // when all are clean, one quiet line says how many there are. The edit dialog lists them all.
+const wsShowAll = new Set(); // workspaces whose repo lines are all shown, this page only
 function wsRepoSummary(wsp) {
-  const attention = wsp.repos.filter((r) => r.status !== 'ready' || r.changed || r.behind || r.ahead);
+  // Repos that need a look show their line; the rest fold into one line that opens them all (to change a branch there too).
+  const open = wsShowAll.has(wsp.id);
+  const attention = wsp.repos.filter((r) => open || r.status !== 'ready' || r.changed || r.behind || r.ahead || (r.branch && r.default && r.branch !== r.default));
   const n = wsp.repos.length;
   if (!n) return '';
   const clean = n - attention.length;
-  return `<div class="ws-repos-line">${attention.map(wsRepoLine).join('')}${clean ? `<div class="ws-line" title="${esc(wsp.repos.filter((r) => !attention.includes(r)).map((r) => r.dir).join(', '))}"><span>${attention.length ? `${clean} more` : `${GITHUB_MARK}${n}`}</span></div>` : ''}</div>`;
+  return `<div class="ws-repos-line">${attention.map((r) => wsRepoLine(r, wsp.id)).join('')}${clean ? `<div class="ws-line"><button type="button" class="ws-more" data-ws-all="${esc(wsp.id)}" title="Show ${esc(wsp.repos.filter((r) => !attention.includes(r)).map((r) => r.dir).join(', '))} and their branches">${attention.length ? `${clean} more` : `${GITHUB_MARK}${n}`}</button></div>` : open ? `<div class="ws-line"><button type="button" class="ws-more" data-ws-all="${esc(wsp.id)}">fewer</button></div>` : ''}</div>`;
 }
 
 function renderSessions() {
@@ -256,7 +300,7 @@ function sessionCard(s, index = null) {
   // Only needs-input (and another terminal) still say it in words; no process, nothing.
   const quiet = s.state === 'ready' || s.state === 'working';
   const asleep = foxConfig.remote && s.state === 'idle' && !s.archived;
-  const stateHtml = asleep ? '<span class="st asleep" title="Asleep: its tools are off to save memory. Opening it wakes it up in a few seconds." aria-label="asleep"><i></i></span>' : s.state !== 'idle' ? `<span class="st ${s.state}" title="${s.state === 'external' ? 'open in another terminal; fx allows one process per session' : STATE_LABEL[s.state]}"><i></i>${quiet ? '' : STATE_LABEL[s.state]}</span>` : '';
+  const stateHtml = asleep ? '<span class="st asleep" title="Asleep: its tools are off to save memory. Opening it wakes it up in a few seconds." aria-label="asleep"><i></i></span>' : s.state !== 'idle' ? `<span class="st ${s.state}" title="${s.state === 'external' ? `open in another terminal; ${esc(agentName(s))} allows one process per session` : STATE_LABEL[s.state]}"><i></i>${quiet ? '' : STATE_LABEL[s.state]}</span>` : '';
   el.innerHTML = `
     ${index ? `<span class="idx">${index}</span>` : ''}
     <div class="row">
@@ -264,7 +308,7 @@ function sessionCard(s, index = null) {
       <div class="actions">
         ${s.terminal ? `<button class="icon ${state.pinned.has(s.terminal) ? 'on' : ''}" data-pin="${esc(s.terminal)}" title="${state.pinned.has(s.terminal) ? 'Unpin tab' : 'Pin as tab'}">${ICON.pin}</button>` : ''}
         <button class="icon" data-rename="${esc(s.id)}" title="Rename">${ICON.rename}</button>
-        <button class="icon" data-${s.archived ? 'unarchive' : 'archive'}="${esc(s.id)}" title="${s.archived ? 'Restore' : (s.terminal ? 'Archive (stops the fx process)' : 'Archive')}">${s.archived ? ICON.restore : ICON.archive}</button>
+        <button class="icon" data-${s.archived ? 'unarchive' : 'archive'}="${esc(s.id)}" title="${s.archived ? 'Restore' : (s.terminal ? `Archive (stops ${esc(agentName(s))})` : 'Archive')}">${s.archived ? ICON.restore : ICON.archive}</button>
       </div>
     </div>
     <div class="sub">
@@ -320,6 +364,8 @@ $('#session-groups').addEventListener('click', async (e) => {
   const d = btn?.dataset ?? {};
   if (d.new) return newSessionSheet(d.new);
   if (d.editWs) return openWorkspaceDialog(d.editWs);
+  if (d.branchWs) return openBranchMenu(btn, d.branchWs, d.branchDir);
+  if (d.wsAll) { wsShowAll.has(d.wsAll) ? wsShowAll.delete(d.wsAll) : wsShowAll.add(d.wsAll); return renderSessions(); }
   if (d.pin) return setPinned(d.pin, !state.pinned.has(d.pin));
   if (d.rename) return renameInline(d.rename);
   if (d.archive) {
@@ -327,7 +373,7 @@ $('#session-groups').addEventListener('click', async (e) => {
     if (s?.terminal) {
       // An idle fx loses nothing when stopped (the session is on disk); only ask when it is mid-task.
       const busy = s.state === 'working' || s.state === 'needs_input';
-      if (busy && !confirm(s.state === 'working' ? 'fx is working in this session. Stop it and archive?' : 'fx is waiting for your answer in this session. Stop it and archive?')) return;
+      if (busy && !confirm(s.state === 'working' ? `${agentName(s)} is working in this session. Stop it and archive?` : `${agentName(s)} is waiting for your answer in this session. Stop it and archive?`)) return;
       await post(`/api/terminals/${encodeURIComponent(s.terminal)}`, null, 'DELETE');
       closeTab(s.terminal);
     }
@@ -392,8 +438,8 @@ function updateTermLoading() {
   const secs = (Date.now() - (waking?.since ?? tab.openedAt)) / 1000;
   $('#term-loading-title').textContent = waking ? `Waking up ${waking.title}` : (tab.attempts ? 'Reconnecting…' : 'Connecting…');
   $('#term-loading-hint').textContent = waking
-    ? (secs < 20 ? 'This session was asleep to save memory. fx is resuming the conversation; it takes a few seconds.'
-      : secs < 60 ? 'Taking longer than usual: fx is starting its tools.'
+    ? (secs < 20 ? `This session was asleep to save memory. ${agentName(sessionById(waking.id))} is resuming the conversation; it takes a few seconds.`
+      : secs < 60 ? `Taking longer than usual: ${agentName(sessionById(waking.id))} is starting its tools.`
       : 'Still waking up. If nothing happens, open the session again.')
     : (tab.attempts ? `The connection dropped; trying again (${tab.attempts}).` : '');
 }
@@ -640,8 +686,8 @@ $('#paste').addEventListener('click', async () => {
 $('#pasteform').addEventListener('submit', (e) => { e.preventDefault(); if (agentDraft) { if (!$('#pasteform button[type="submit"]').disabled) void insertAgentDraft(); } else if (pasteIntoTerminal($('#paste-text').value)) closePasteSheet(); });
 $('#paste-cancel').addEventListener('click', closePasteSheet);
 $('#pastesheet').addEventListener('click', (e) => { if (e.target.id === 'pastesheet') closePasteSheet(); });
-async function openTerminal({ cwd, resume, provider, model, effort, speed, addDirs }, stillWanted = () => true) {
-  const t = await post('/api/terminals', { cwd, resume, provider, model, effort, speed, ...(resume ? {} : { addDirs }) });
+async function openTerminal({ cwd, resume, harness, provider, model, effort, speed, addDirs }, stillWanted = () => true) {
+  const t = await post('/api/terminals', { cwd, resume, provider, model, effort, speed, ...(resume ? {} : { addDirs, harness }) });
   if (!stillWanted()) return refresh();
   if (t.error) { state.waking = null; updateTermLoading(); alert(t.error); return; }
   await refresh();
@@ -977,7 +1023,7 @@ function renderTabs() {
     // The dot only shows when there is something to know: working, needs input, or dead. Waiting is the default.
     const dot = st === 'working' || st === 'needs_input' || st === 'closed' ? `<span class="st ${st}" title="${STATE_LABEL[st] || st}"><i></i></span>` : '';
     el.innerHTML = `${dot}<span class="tab-label">${esc(tabLabel(name))}</span>${pinned
-      ? `<span class="close" data-close="${esc(name)}" title="Unpin and close (fx keeps running)">×</span>`
+      ? `<span class="close" data-close="${esc(name)}" title="Unpin and close (it keeps running)">×</span>`
       : `<span class="pin" data-pin="${esc(name)}" title="Pin as tab">${ICON.pin}</span>`}`;
     el.addEventListener('click', (e) => {
       if (e.target.dataset.close) { state.pinned.delete(name); savePinned(); closeTab(name); renderSessions(); }
@@ -1187,6 +1233,7 @@ async function refreshResults(parent) {
   cachedResults = { id: parent.id, key: resultsKey(parent), runs, byAgent, assigned };
 }
 function answerFor(parent, c) {
+  if (c?.answer) return c.answer; // a harness that keeps each subagent's answer on its row (Claude Code)
   if (cachedResults.id !== parent.id) return null;
   if (c?.name) { const rounds = cachedResults.byAgent.get(c.name) ?? []; return rounds.length ? rounds.at(-1).text : null; }
   return cachedResults.assigned.get(c.id) ?? null;
@@ -1550,7 +1597,7 @@ function renderGlobalHits() {
   globalResults.innerHTML = globalHits.map((hit, i) => {
     const s = sessionById(hit.id);
     if (!s) return '';
-    const label = hit.kind === 'name' ? 'session' : hit.kind === 'user' ? 'you' : 'fx';
+    const label = hit.kind === 'name' ? 'session' : hit.kind === 'user' ? 'you' : agentName(s);
     return `<button type="button" role="option" aria-selected="${i === globalActive}" class="global-search-result${i === globalActive ? ' active' : ''}" data-result="${i}">
       <div class="gs-context"><strong>${esc(displayTitle(s))}</strong><span>· ${esc(shortPath(s.workspace))}${s.archived ? ' · archived' : ''}${s.parentId ? ' · subagent' : ''}</span></div>
       <div class="gs-text">${esc(label)} · ${markedMatch(hit.text, q)}</div>
@@ -1650,7 +1697,7 @@ async function loadTranscript(id, quiet = false) {
     const match = globalMessage?.id === id && globalMessage.index === messageIndex;
     if (ev.kind === 'user') html.push(`<div class="msg user${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? 'task from parent' : 'you'}</div><div class="text">${esc(ev.text)}</div></div>`);
     else if (ev.kind === 'assistant' && !ev.text?.trim()) continue; // a turn step with only tool calls
-    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? (s.subagent?.name ? ICON.threads + ' ' + esc(s.subagent.name) : 'subagent') : 'fx'}</div><div class="text md">${renderMarkdown(ev.text)}</div></div>`);
+    else if (ev.kind === 'assistant') html.push(`<div class="msg assistant${match ? ' global-match' : ''}" data-message="${messageIndex++}"><div class="who">${isChild ? (s.subagent?.name ? ICON.threads + ' ' + esc(s.subagent.name) : 'subagent') : esc(agentName(s))}</div><div class="text md">${renderMarkdown(ev.text)}</div></div>`);
     else if (ev.kind === 'tool_call') {
       const st = ev.result?.status ?? 'pending';
       const isSub = ev.name === 'subagent';
@@ -1952,14 +1999,18 @@ $('#settings-fx').addEventListener('click', async (e) => {
     $('#settings-fx-note').textContent = 'New sessions use it; an open one picks it up when it is resumed.';
   } catch (err) { btn.disabled = false; $('#settings-fx-note').textContent = err.message; }
 });
-// Tools for fx (MCP servers from fox's catalog), for every session: a switch for the ones fx has (off keeps the
+// Tools (MCP servers from fox's catalog), for every session of fx and, when installed, of Claude Code. For fx: a switch for the ones fx has (off keeps the
 // setup, fx skips it), Add for the rest, Sign in when one needs it. Nothing changes without a tap.
+// With Claude Code installed, each tool has a switch per agent, named; with fx alone it reads as before.
 function toolRow(t) {
-  const sub = [esc(t.description), t.cost && t.enabled ? esc(t.cost) : ''].filter(Boolean).join(' · ');
+  const sub = [esc(t.description), t.cost && (t.enabled || t.claude?.enabled) ? esc(t.cost) : ''].filter(Boolean).join(' · ');
   const main = `<span class="set-main">${esc(t.label)}<span class="set-sub">${sub}</span></span>`;
-  if (!t.installed) return `<div class="set-row">${main}<button type="button" class="set-act" data-add-tool="${t.id}">Add</button></div>`;
-  const signin = t.enabled && t.needsSignIn ? `<button type="button" class="set-act warn" data-signin-tool="${t.id}">Sign in</button>` : '';
-  return `<div class="set-row">${main}${signin}<button type="button" class="switch-btn ${t.enabled ? 'on' : ''}" data-toggle-tool="${t.id}" role="switch" aria-checked="${t.enabled}" aria-label="${esc(t.label)}"><span class="switch"></span></button></div>`;
+  const named = (label, html) => t.claude ? `<span class="tool-agent">${label}${html}</span>` : html;
+  const fx = !t.installed ? `<button type="button" class="set-act" data-add-tool="${t.id}">Add${t.claude ? ' to fx' : ''}</button>`
+    : (t.enabled && t.needsSignIn ? `<button type="button" class="set-act warn" data-signin-tool="${t.id}">Sign in</button>` : '')
+      + named('fx', `<button type="button" class="switch-btn ${t.enabled ? 'on' : ''}" data-toggle-tool="${t.id}" role="switch" aria-checked="${t.enabled}" aria-label="${esc(t.label)}${t.claude ? ' for fx' : ''}"><span class="switch"></span></button>`);
+  const claude = t.claude ? named('Claude', `<button type="button" class="switch-btn ${t.claude.enabled ? 'on' : ''}" data-claude-tool="${t.id}" role="switch" aria-checked="${t.claude.enabled}" aria-label="${esc(t.label)} for Claude Code"><span class="switch"></span></button>`) : '';
+  return `<div class="set-row">${main}${fx}${claude}</div>`;
 }
 async function loadTools() {
   let tools = [];
@@ -1967,9 +2018,21 @@ async function loadTools() {
   $('#settings-tools').innerHTML = tools.map(toolRow).join('');
 }
 $('#settings-tools').addEventListener('click', async (e) => {
-  const btn = e.target.closest('[data-add-tool], [data-signin-tool], [data-toggle-tool]');
+  const btn = e.target.closest('[data-add-tool], [data-signin-tool], [data-toggle-tool], [data-claude-tool]');
   if (!btn || btn.disabled) return;
   const note = $('#settings-tools-note');
+  if (btn.dataset.claudeTool) {
+    // Claude Code: on adds the server to its config, off removes it. It signs in to a tool itself.
+    const on = !btn.classList.contains('on');
+    btn.disabled = true; note.textContent = '';
+    const r = await fetch(`/api/tools/${btn.dataset.claudeTool}/${on ? 'on' : 'off'}?agent=claude`, { method: 'POST' });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { btn.disabled = false; note.textContent = j.error || 'That did not work.'; return; }
+    $('#settings-tools').innerHTML = j.map(toolRow).join('');
+    const oauth = j.find((t) => t.id === btn.dataset.claudeTool)?.claude?.oauth;
+    note.textContent = !on ? 'New Claude Code sessions start without it.' : oauth ? 'New Claude Code sessions have it. Sign in once with /mcp in one of them.' : 'New Claude Code sessions have it.';
+    return;
+  }
   const id = btn.dataset.addTool ?? btn.dataset.signinTool ?? btn.dataset.toggleTool;
   const action = btn.dataset.addTool ? 'add' : btn.dataset.signinTool ? 'signin' : btn.classList.contains('on') ? 'off' : 'on';
   btn.disabled = true; note.textContent = '';
@@ -2106,6 +2169,33 @@ $('#ns-usage-refresh').addEventListener('click', async () => {
   } catch { usageReports.set(provider, old?.data ? { ...old, status: 'stale' } : { status: 'unavailable' }); }
   renderNsUsage();
 });
+// Agents fox can start (fx, Claude Code…): only installed ones; the switch shows when there is a choice.
+let harnessesCatalog = [{ id: 'fx', label: 'fx' }];
+const nsHarness = () => $('#ns-agent').dataset.value || 'fx';
+async function loadHarnesses() {
+  try { harnessesCatalog = await (await fetch('/api/harnesses')).json(); } catch {}
+  let chosen = 'fx';
+  try { chosen = localStorage.getItem('fox.lastHarness') || 'fx'; } catch {}
+  if (!harnessesCatalog.some((h) => h.id === chosen)) chosen = harnessesCatalog[0]?.id ?? 'fx';
+  $('#ns-agent-row').classList.toggle('hidden', harnessesCatalog.length < 2);
+  $('#ns-agent').innerHTML = harnessesCatalog.map((h) => `<button type="button" role="radio" data-harness="${esc(h.id)}">${esc(h.label)}</button>`).join('');
+  return setNsHarness(chosen);
+}
+async function setNsHarness(id) {
+  $('#ns-agent').dataset.value = id;
+  $('#ns-claude-auth').classList.add('hidden');
+  for (const b of $('#ns-agent').querySelectorAll('button')) { b.classList.toggle('on', b.dataset.harness === id); b.setAttribute('aria-checked', String(b.dataset.harness === id)); }
+  if (id === 'fx') return loadModels();
+  // Another harness: its own short model list, none of fx's provider, usage or speed options.
+  const h = harnessesCatalog.find((x) => x.id === id);
+  const sel = $('#ns-model');
+  sel.innerHTML = `<option value="">${esc(h?.label ?? id)} default</option>` + (h?.models ?? []).map((m) => `<option value="${esc(id)}|${esc(m.id)}">${esc(m.name)}</option>`).join('');
+  try { const last = localStorage.getItem(`fox.lastModel.${id}`); if (last && [...sel.options].some((o) => o.value === last)) sel.value = last; } catch {}
+  for (const el of ['#ns-usage', '#ns-options', '#ns-auth']) $(el).classList.add('hidden');
+  $('#ns-claude-auth').classList.toggle('hidden', id !== 'claude' || h?.signedIn !== false);
+  updateNsBadge();
+}
+$('#ns-agent').addEventListener('click', (e) => { const b = e.target.closest('[data-harness]'); if (b) setNsHarness(b.dataset.harness).then(() => $('#ns-model').focus()); });
 // Asked each time a sheet opens: the server answers from its cache and only lists again after an fx login.
 async function loadModels(force = false) {
   modelsCatalog = await (await fetch(force ? '/api/models/refresh' : '/api/models', { method: force ? 'POST' : 'GET' })).json();
@@ -2128,6 +2218,7 @@ async function loadModels(force = false) {
     }
   }
   $('#ns-auth').classList.toggle('hidden', (modelsCatalog.providers ?? []).length > 0);
+  $('#ns-usage').classList.remove('hidden');
   try { const last = localStorage.getItem('fox.lastModel'); if (last && [...sel.options].some((o) => o.value === last)) sel.value = last; } catch {}
   updateNsBadge();
   renderNsUsage();
@@ -2165,7 +2256,7 @@ function newSessionSheet(cwd) {
     state.workspaces = list;
     if (!$('#newsheet').classList.contains('hidden') && workspaceFor($('#newsheet').dataset.cwd)?.id === wsp.id) renderNsWorkspace(workspaceFor($('#newsheet').dataset.cwd));
   }).catch(() => {});
-  loadModels().then(() => $('#ns-model').focus());
+  loadHarnesses().then(() => $('#ns-model').focus());
 }
 // Workspace repos in the new-session sheet, and a warning when another session is working there.
 function renderNsWorkspace(wsp) {
@@ -2180,6 +2271,11 @@ function nsSelection() {
   return at < 0 ? [null, null] : [v.slice(0, at), v.slice(at + 1)];
 }
 function updateNsBadge() {
+  if (nsHarness() !== 'fx') {
+    $('#ns-badge').innerHTML = modelBadge(nsSelection()[1] ?? 'claude');
+    $('#ns-prov').innerHTML = ''; $('#ns-prov').title = '';
+    return;
+  }
   const [chosenProvider, chosenModel] = nsSelection();
   const provider = chosenProvider ?? modelsCatalog?.default?.provider, model = chosenModel ?? modelsCatalog?.default?.model;
   $('#ns-badge').innerHTML = modelBadge(model);
@@ -2204,8 +2300,13 @@ $('#newsheet').addEventListener('click', (e) => { if (e.target.id === 'newsheet'
 $('#newform').addEventListener('submit', async (e) => {
   e.preventDefault();
   const cwd = $('#newsheet').dataset.cwd;
-  const v = $('#ns-model').value;
-  try { localStorage.setItem('fox.lastModel', v); } catch {}
+  const v = $('#ns-model').value, harness = nsHarness();
+  try { localStorage.setItem(harness === 'fx' ? 'fox.lastModel' : `fox.lastModel.${harness}`, v); localStorage.setItem('fox.lastHarness', harness); } catch {}
+  if (harness !== 'fx') {
+    const addDirs = [...$('#ns-companion-list').querySelectorAll('input:checked')].map((input) => input.value);
+    $('#newsheet').classList.add('hidden');
+    return openTerminal({ cwd, harness, model: nsSelection()[1], addDirs });
+  }
   const [provider, model] = nsSelection();
   const effort = provider ? $('#ns-effort').value || null : null;
   const speed = provider ? $('#ns-speed').value : null;
@@ -2561,7 +2662,7 @@ function renderPrsEntry() {
 const PR_REVIEW = { good: ['✓ reviewed', 'good'], fixed: ['✓ fixed by review', 'good'], 'needs-you': ['needs you', 'wait'], outdated: ['changed since review', 'wait'], reviewed: ['reviewed', ''] };
 function prChip(p) {
   if (p.checks === 'failing') return '<span class="pr-chip bad">checks fail</span>';
-  if (p.draft) return '<span class="pr-chip">draft</span>';
+  if (p.draft) return '<span class="pr-chip">paused</span>';
   if (!p.job) return '<span class="pr-chip">yours</span>';
   const [text, cls] = p.review ? PR_REVIEW[p.review.verdict] ?? PR_REVIEW.reviewed : ['not reviewed yet', 'wait'];
   return `<span class="pr-chip ${cls}">${text}</span>`;
@@ -2586,7 +2687,9 @@ function renderPrList() {
     const row = `<div class="pr-row${open ? ' open' : ''}${done ? ' done' : ''}${prFilter === 'all' ? ' all' : ''}" data-pr="${esc(key)}" role="listitem"><span class="jdot ${done ? status === 'merged' ? 'ok' : 'none' : p.ready ? 'ok' : p.checks === 'failing' ? 'failed' : 'paused'}"></span>`
       + `<span class="pt"><b>#${p.number}</b> ${esc(p.title.replace(/^[A-Z]+-\d+:\s*/, ''))} <span class="pm">· ${meta}</span></span>${statusChip}`
       + `<span class="plines"><span class="pr-add">+${p.additions}</span> <span class="pr-del">−${p.deletions}</span></span>`
-      + (done ? '<span></span>' : `<span class="pr-acts"><button type="button" class="merge" data-act="merge">Merge</button><button type="button" class="shut" data-act="close">Close</button></span>`) + '</div>';
+      + (done ? '<span></span>' : p.draft
+        ? `<span class="pr-acts"><button type="button" data-act="resume" title="Back to the queue: the review job looks at it again">Resume</button><button type="button" class="shut" data-act="close">Close</button></span>`
+        : `<span class="pr-acts"><button type="button" class="merge" data-act="merge">Merge</button><button type="button" data-act="pause" title="Keep it for later: a draft, out of the agent's queue and the review job's">Later</button><button type="button" class="shut" data-act="close">Close</button></span>`) + '</div>';
     if (!open) return row;
     const files = prFiles.get(key);
     const filesHtml = files ? `<div class="pr-files">${files.map((x) => `<span class="pf" title="${esc(x.path)}">${esc(x.path)}</span><span class="pr-add">+${x.additions}</span><span class="pr-del">−${x.deletions}</span>`).join('')}</div>` : '<div class="muted">Loading files…</div>';
@@ -2656,6 +2759,8 @@ $('#pr-list').addEventListener('click', async (e) => {
   const p = (prFilter === 'open' ? state.prs?.prs : state[`${prFilter}Prs`]?.prs)?.find((x) => prKey(x) === key);
   if (!p || p.state !== 'OPEN') return;
   const act = btn.dataset.act;
+  // Later and Resume only switch the PR between ready and paused (a draft): undoable, so one click.
+  if ((act === 'pause' || act === 'resume') && !btn.classList.contains('armed')) btn.classList.add('armed');
   if (!btn.classList.contains('armed')) {
     const unreviewed = act === 'merge' && p.job && (!p.review || p.review.verdict === 'outdated');
     btn.classList.add('armed'); btn.textContent = act === 'merge' ? (unreviewed ? 'Not reviewed yet. Merge?' : 'Merge?') : 'Close?';
@@ -2663,13 +2768,13 @@ $('#pr-list').addEventListener('click', async (e) => {
     setTimeout(() => { if (btn.isConnected) { btn.classList.remove('armed'); btn.textContent = act === 'merge' ? 'Merge' : 'Close'; } }, 4000);
     return;
   }
-  btn.disabled = true; btn.textContent = act === 'merge' ? 'Merging…' : 'Closing…';
+  btn.disabled = true; btn.textContent = { merge: 'Merging…', close: 'Closing…', pause: 'Pausing…', resume: 'Resuming…' }[act];
   const reason = act === 'close' ? ($('#pr-list .pr-open .pr-reason')?.value ?? '') : '';
   const [repo, n] = key.split('#');
   const r = await fetch(`/api/prs/${repo}/${n}/${act}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason }) });
   const out = await r.json().catch(() => ({}));
-  if (!r.ok) { toast(out.error || `Could not ${act} #${p.number}`); btn.disabled = false; btn.classList.remove('armed'); btn.textContent = act === 'merge' ? 'Merge' : 'Close'; return; }
-  toast(act === 'merge' ? `Merged #${p.number}` : `Closed #${p.number}`);
+  if (!r.ok) { toast(out.error || `Could not ${act} #${p.number}`); btn.disabled = false; btn.classList.remove('armed'); btn.textContent = { merge: 'Merge', close: 'Close', pause: 'Later', resume: 'Resume' }[act]; return; }
+  toast({ merge: `Merged #${p.number}`, close: `Closed #${p.number}`, pause: `#${p.number} paused for later`, resume: `#${p.number} back in the queue` }[act]);
   if (state.prOpen === key) state.prOpen = null;
   prFiles.delete(key);
   await loadPrs(true, prFilter);
@@ -3031,6 +3136,60 @@ $('#pair-stop').addEventListener('click', async () => {
     await showPairingState();
   } catch (error) { $('#pair-status').textContent = error.message; }
 });
+
+// ---------- a workspace repo's branch (branches.mjs): back to main, another branch, update, a new one ----------
+// The copy is shared by every session in the workspace, so the server refuses while one works, and uncommitted work is
+// only ever moved into a wip/ branch (after asking), never dropped.
+let branchMenu = null;
+function closeBranchMenu() { branchMenu?.remove(); branchMenu = null; }
+async function openBranchMenu(anchor, wsId, dir) {
+  closeBranchMenu();
+  const menu = branchMenu = document.createElement('div');
+  menu.className = 'branch-menu'; menu.setAttribute('role', 'menu');
+  const r = anchor.getBoundingClientRect();
+  menu.style.left = `${Math.min(r.left, innerWidth - 300)}px`; menu.style.top = `${r.bottom + 4}px`;
+  menu.innerHTML = '<div class="bm-note">Loading branches…</div>';
+  document.body.appendChild(menu);
+  const base = `/api/workspaces/${encodeURIComponent(wsId)}/repos/${encodeURIComponent(dir)}`;
+  const info = await (await fetch(`${base}/branches`)).json().catch(() => ({ error: 'Could not read the branches.' }));
+  if (branchMenu !== menu) return;
+  if (info.error) { menu.innerHTML = `<div class="bm-note err">${esc(info.error)}</div>`; return; }
+  const others = info.branches.filter((b) => b.name !== info.current && b.name !== info.default).slice(0, 12);
+  menu.innerHTML = `<div class="bm-head"><b>${esc(dir)}</b> on <span class="mono">${esc(info.current)}</span>${info.merged ? ' <span class="bm-tag">merged</span>' : ''}${info.dirty ? ` <span class="bm-tag warn">±${info.dirty}</span>` : ''}</div>`
+    + `<div class="bm-note">Every session in this workspace uses this copy.</div>`
+    + (info.current !== info.default ? `<button type="button" class="bm-main" data-to="${esc(info.default)}">Back to ${esc(info.default)}</button>` : `<button type="button" data-update>Update ${esc(info.default)}</button>`)
+    + (others.length ? `<div class="bm-sub">Other branches</div>${others.map((b) => `<button type="button" data-to="${esc(b.name)}"><span class="mono">${esc(b.name)}</span><small>${esc(fmtAgo(b.at))}${b.local ? '' : ' · remote'}</small></button>`).join('')}` : '')
+    + `<button type="button" data-new-branch>New branch…</button><div class="bm-msg" role="status"></div>`;
+  const say = (html, cls = '') => { const m = menu.querySelector('.bm-msg'); m.className = `bm-msg ${cls}`; m.innerHTML = html; };
+  const act = async (path, body, label) => {
+    say(`${esc(label)}…`);
+    const res = await fetch(`${base}/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const out = await res.json().catch(() => ({}));
+    if (branchMenu !== menu) return;
+    if (res.status === 409 && out.dirty && path === 'switch') {
+      say(`${esc(out.error)}<div class="bm-row"><button type="button" class="bm-main" data-keep="${esc(body.branch)}">Keep them in a wip/ branch and switch</button><button type="button" data-cancel>Cancel</button></div>`, 'warn');
+      return;
+    }
+    if (!res.ok) return say(esc(out.error || 'Could not do it.'), 'err');
+    closeBranchMenu();
+    toast([out.branch ? `On ${out.branch}` : 'Updated', out.update && out.update !== 'no upstream' ? out.update : '', out.kept ? `work kept in ${out.kept.name}${out.kept.pushed ? '' : ' (not pushed)'}` : ''].filter(Boolean).join(' · '));
+    refresh();
+  };
+  menu.addEventListener('click', async (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.to) return act('switch', { branch: b.dataset.to }, `Switching to ${b.dataset.to}`);
+    if (b.dataset.keep) return act('switch', { branch: b.dataset.keep, keep: true }, 'Keeping your work and switching');
+    if (b.dataset.cancel !== undefined) return say('');
+    if (b.dataset.update !== undefined) return act('update', {}, 'Updating');
+    if (b.dataset.newBranch !== undefined) {
+      say('<input class="bm-input" placeholder="new-branch-name" spellcheck="false" autocapitalize="none" />', '');
+      const input = menu.querySelector('.bm-input'); input.focus();
+      input.addEventListener('keydown', (k) => { if (k.key === 'Enter' && input.value.trim()) act('branch', { name: input.value.trim() }, `Creating ${input.value.trim()}`); if (k.key === 'Escape') closeBranchMenu(); });
+    }
+  });
+}
+document.addEventListener('pointerdown', (e) => { if (branchMenu && !branchMenu.contains(e.target) && !e.target.closest('[data-branch-ws]')) closeBranchMenu(); });
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && branchMenu) closeBranchMenu(); });
 
 // ---------- boot ----------
 // Deep links: ?session=<id> selects a session and shows its transcript; ?open=<id> also opens its terminal tab.

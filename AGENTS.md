@@ -14,6 +14,8 @@ fox is a web panel for the fx coding agent: each fx session runs in tmux on this
 
 Server (`server.mjs` is the HTTP/WebSocket entry point; the rest are its parts, each with tests in `tests/`):
 
+- `harnesses/`: one file per coding agent fox can run (`fx.mjs`, `claude.mjs` for Claude Code). Everything about an agent's files on disk, its command line and its screen lives there; the rest of fox only sees sessions and events in fox's shape (`docs/harnesses.md`). Adding an agent = a file there plus its tests in `tests/harnesses.test.mjs`.
+
 - `auth.mjs`, `enrollment.mjs`, `pairing.mjs`: passkey sign-in, first enrollment (`bin/fox-enroll.mjs`), phone pairing.
 - `workspaces.mjs`: named folders under `~/workspaces` made of GitHub repos; `gitsync.mjs` fast-forwards their clean checkouts when a session starts, and a job's repo before each run.
 - `jobs.mjs`, `schedule.mjs`: scheduled scripts (store, runner, schedules). `bin/fox-job.mjs` is the CLI, `bin/fox-jobs.mjs` the runner service on a server. A run's script prints `FOX_SUMMARY:` and `FOX_LINK: <label> <url>` lines.

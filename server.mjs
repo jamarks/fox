@@ -16,9 +16,8 @@ import * as pty from 'node-pty';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createSearchIndex } from './search.mjs';
-import { latestCompletedReply, lastAnswerModel, screenModel } from './inbox.mjs';
 import { readMetrics } from './metrics.mjs';
-import { TOOLS, isInstalled, isEnabled, withEnabled, addArgs } from './tools.mjs';
+import { TOOLS, isInstalled, isEnabled, withEnabled, addArgs, findServer } from './tools.mjs';
 import { createSkills } from './skills.mjs';
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
@@ -29,11 +28,14 @@ import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
 import { createJobStore, createRunner, updateJobRepo } from './jobs.mjs';
 import { createPrStates } from './prstate.mjs';
 import { createPrs } from './prs.mjs';
+import { createBranches } from './branches.mjs';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 import { ensureFoxNotes, foxNotes } from './notes.mjs';
 import { createModels, launchArgs } from './models.mjs';
 import { createUsage } from './usage.mjs';
-import { parseTimeline, turnTimeline } from './timeline.mjs';
+import { turnTimeline } from './timeline.mjs';
+import { createFx } from './harnesses/fx.mjs';
+import { createClaude, claudeBin } from './harnesses/claude.mjs';
 const execFileP = promisify(execFile);
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -61,6 +63,13 @@ const DROP_DIR = join(STATE_DIR, 'drops');
 const DROP_LIMIT = 25 * 1024 * 1024;
 const STATE_FILE = join(STATE_DIR, 'state.json');
 const DEPLOY_FILE = join(STATE_DIR, 'deploy-branch');
+// The coding agents fox can run (see docs/harnesses.md). fx first: it is the default and owns any id nobody claims.
+const HARNESSES = [createFx({ sessionsDir: SESSIONS_DIR, bin: FX_BIN }), createClaude({ bin: claudeBin(), stateDir: STATE_DIR })];
+const harnessById = (id) => HARNESSES.find((h) => h.id === id) ?? null;
+async function harnessFor(sessionId) {
+  for (const h of HARNESSES) { await h.loadRegistry?.(); if (h.id !== 'fx' && h.has(sessionId)) return h; }
+  return HARNESSES[0];
+}
 const FOX_UPDATE = process.env.FOX_UPDATE_BIN || '/usr/local/sbin/fox-update';
 const DEPLOY_BRANCHES = ['release', 'main'];
 const deployBranch = async () => (await readFile(DEPLOY_FILE, 'utf8').catch(() => '')).trim() === 'main' ? 'main' : 'release';
@@ -87,7 +96,16 @@ function updateLaunchState(change) {
   launchStateWrite = next.catch(() => {});
   return next;
 }
-const searchSessions = createSearchIndex(SESSIONS_DIR, loadState);
+// fx's sessions are indexed from its files; the other harnesses' from their events, which they cache.
+const searchSessions = createSearchIndex(SESSIONS_DIR, loadState, async () => {
+  const st = await loadState();
+  const rows = (await listSessions()).filter((s) => s.harness !== 'fx');
+  return Promise.all(rows.map(async (s) => {
+    let index = 0;
+    const messages = (await readEvents(s.id)).filter((e) => e.kind === 'user' || e.kind === 'assistant').map((e) => ({ index: index++, kind: e.kind, text: e.text ?? '' }));
+    return { id: s.id, name: Object.hasOwn(st.names, s.id) ? String(st.names[s.id]) : '', title: s.title, updatedAt: s.updatedAt ?? 0, messages };
+  }));
+});
 // Dev-server previews on a server: FOX_PREVIEW_URL=https://fox-{port}.example.com and FOX_PREVIEW_PORTS=3000,5173.
 // Each hostname is routed to 127.0.0.1:<port> by the tunnel and protected by Access (see docs/plans).
 // Named apps (see apps.mjs): FOX_APPS_URL=https://{name}.example.com and FOX_APPS_PORT, the port the tunnel's
@@ -114,6 +132,11 @@ Other files here are notes, scratch work and job scripts.
 }
 const workspaces = createWorkspaces({ stateDir: STATE_DIR, rootDir: join(homedir(), 'workspaces'), agentNotes: workspaceAgentNotes });
 const skills = createSkills({ home: homedir(), stateDir: STATE_DIR, workspaces });
+// A workspace repo's branch, changed from the sidebar (branches.mjs); refused while a session there is working.
+const branches = createBranches({
+  workspaces,
+  busy: async (dir) => (await listTerminals()).filter((t) => t.activity === 'working' && t.cwd && (t.cwd === dir || t.cwd.startsWith(dir + '/'))).map((t) => t.name),
+});
 // Jobs (see jobs.mjs). On a server the runner is its own service (FOX_JOBS_RUNNER=external), so deploying fox
 // never kills a job mid-run; on a laptop it runs inside fox.
 const jobStore = createJobStore({ stateDir: STATE_DIR });
@@ -126,6 +149,8 @@ if (APPS) {
 // On a laptop fox leaves your fx instructions alone; FOX_FX_NOTES=1 or 0 overrides either way.
 if ((process.env.FOX_FX_NOTES ?? (process.env.FOX_PUBLIC_ORIGIN ? '1' : '0')) === '1') {
   ensureFoxNotes(join(homedir(), '.fx', 'AGENTS.md'), foxNotes({ preview: PREVIEW, apps: APPS })).catch((err) => console.error(`fox: could not update fx instructions: ${err.message}`));
+  // The same block for Claude Code, in its personal instructions, once it is installed.
+  if (harnessById('claude')?.available()) ensureFoxNotes(join(homedir(), '.claude', 'CLAUDE.md'), foxNotes({ preview: PREVIEW, apps: APPS })).catch((err) => console.error(`fox: could not update Claude Code instructions: ${err.message}`));
 }
 const inlineRunner = process.env.FOX_JOBS_RUNNER === 'external' ? null : createRunner({ store: jobStore, beforeRun: updateJobRepo });
 inlineRunner?.start().catch((err) => console.error(`fox: jobs runner failed: ${err.message}`));
@@ -179,101 +204,31 @@ async function readJson(path, fallback = null) {
   try { return JSON.parse(await readFile(path, 'utf8')); } catch { return fallback; }
 }
 
+// Every harness's sessions in one list, with what fox itself keeps (names, archive, extra folders) on top.
 async function listSessions() {
-  if (!existsSync(SESSIONS_DIR)) return [];
   const st = await loadState();
-  const stateBySession = new Map(); // reservado para enriquecer desde /api/overview
-  const ids = await readdir(SESSIONS_DIR);
   const sessions = [];
-  for (const id of ids) {
-    if (!safeSessionId(id)) continue; // a folder named like markup is not a session (ids end up in the page)
-    const dir = join(SESSIONS_DIR, id);
-    const meta = await readJson(join(dir, 'session.json'));
-    if (!meta) continue;
-    const usage = await readJson(join(dir, 'usage-v2.json'));
-    const snap = usage?.snapshot ?? {};
-    let turns = 0;
-    let firstPrompt = '';
-    let latestReply = null;
-    try {
-      const raw = await readFile(join(dir, 'events.jsonl'), 'utf8');
-      latestReply = latestCompletedReply(raw);
-      for (const l of raw.split('\n')) {
-        if (!l.includes('"user"')) continue;
-        turns += 1;
-        if (!firstPrompt) { try { firstPrompt = JSON.parse(l).event?.user?.text ?? ''; } catch {} }
-      }
-    } catch {}
-    // Subagentes: el padre lista hijos en subagent/children.json; el hijo apunta al padre en subagent/owner.json.
-    const owner = await readJson(join(dir, 'subagent', 'owner.json'));
-    const childrenFile = await readJson(join(dir, 'subagent', 'children.json'));
-    const children = (childrenFile?.children ?? []).filter((c) => safeSessionId(c?.id)).map((c) => ({
-      id: c.id,
-      kind: c.kind,
-      name: c.persistent?.agent ?? null,
-      phase: c.phase, // running | idle | finished
-      task: c.active?.message ?? null,
-      startedAt: c.active?.created_at_ms ?? null,
-      outcome: c.last_outcome ?? null,
-      failure: c.last_failure ?? null,
-    }));
-    let lastKind = null, partial = null, answeredBy = null;
-    try {
-      const raw = await readFile(join(dir, 'events.jsonl'), 'utf8');
-      const lines = raw.trim().split('\n');
-      for (let i = lines.length - 1; i >= 0 && !lastKind; i--) {
-        try {
-          const ev = JSON.parse(lines[i]).event;
-          lastKind = Object.keys(ev)[0];
-          // A cancelled turn keeps what the model had started to write (a subagent's unfinished answer).
-          if (lastKind === 'interrupted') partial = ev.interrupted?.partial_text || null;
-        } catch {}
-      }
-      answeredBy = lastAnswerModel(lines);
-    } catch {}
-    sessions.push({
-      id,
-      lastKind,
-      partial,
-      parentId: owner?.parent_id ?? null,
-      children,
-      title: meta.title ?? '(untitled)',
-      customName: Object.hasOwn(st.names, id) ? st.names[id] : null,
-      archived: st.archived.includes(id),
-      firstPrompt: firstPrompt.replace(/\s+/g, ' ').slice(0, 160),
-      latestReply,
-      addDirs: Array.isArray(st.launchDirs[id]) ? st.launchDirs[id] : [],
-      workspace: meta.workspace_root ?? meta.origin_workspace_root ?? '?',
-      provider: meta.provider,
-      // session.json keeps fx's default; the model that answered is in each reply (picked at start or with /model).
-      model: answeredBy ?? meta.model,
-      createdAt: meta.created_at_ms,
-      updatedAt: meta.updated_at_ms,
-      subagentChild: Boolean(meta.subagent_child),
-      live: await ownerAlive(dir),
-      turns,
-      usage: {
-        input: snap.input_tokens ?? 0,
-        output: snap.output_tokens ?? 0,
-        cacheRead: snap.cache_read_tokens ?? 0,
-        cost: snap.total_cost ?? 0,
-        wallMs: snap.wall_duration_ms ?? 0,
-      },
-    });
+  for (const h of HARNESSES) {
+    let rows = [];
+    try { rows = await h.listSessions(); } catch (err) { console.error(`fox: listing ${h.label} sessions failed: ${err.message}`); }
+    for (const s of rows) sessions.push({ ...s, harness: h.id, harnessLabel: h.label,
+      customName: Object.hasOwn(st.names, s.id) ? st.names[s.id] : null,
+      archived: st.archived.includes(s.id),
+      addDirs: Array.isArray(st.launchDirs[s.id]) ? st.launchDirs[s.id] : [] });
   }
   sessions.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   return sessions;
 }
 
-// fx deja owner.live con el pid del proceso dueño; si ese pid ya no existe, el candado es huérfano.
-async function ownerAlive(dir) {
-  const owner = await readJson(join(dir, 'owner.live'));
-  if (!owner?.pid) return false;
-  try { process.kill(owner.pid, 0); return true; } catch { return false; }
-}
-
 function safeSessionId(id) {
   return /^[A-Za-z0-9_-]{4,64}$/.test(id) ? id : null;
+}
+
+// File tabs ask about their file every few seconds (live reload); one list of sessions serves them for a moment.
+let recent = { at: 0, list: null };
+async function recentSessions() {
+  if (!recent.list || Date.now() - recent.at > 2000) recent = { at: Date.now(), list: listSessions() };
+  return recent.list;
 }
 
 // Files a session touched: what fx wrote, edited or read (its own tool calls and its subagents'), plus
@@ -286,10 +241,10 @@ const OPEN_AS_TEXT = new Set(['.command', '.tool', '.terminal', '.sh', '.zsh', '
 const OPEN_IN_FINDER = new Set(['.app', '.pkg', '.mpkg', '.dmg', '.jar', '.scpt', '.scptd', '.workflow', '.action', '.prefpane', '.saver', '.osax', '.kext', '.plugin', '.bundle', '.dylib']);
 const realPath = (p) => { try { return realpathSync(p); } catch { return p; } };
 async function sessionFiles(id) {
-  const meta = await readJson(join(SESSIONS_DIR, id, 'session.json'));
-  const root = realPath(meta?.workspace_root ?? meta?.origin_workspace_root ?? '');
-  if (!root) return [];
-  const kids = (await readJson(join(SESSIONS_DIR, id, 'subagent', 'children.json')))?.children ?? [];
+  const sessions = await recentSessions();
+  const session = sessions.find((s) => s.id === id);
+  const root = realPath(session?.workspace ?? '');
+  if (!session || !root || root === '?') return [];
   const files = new Map();
   const add = (ws, path, action, by) => {
     if (!path || typeof path !== 'string' || path.length > 400) return;
@@ -299,15 +254,16 @@ async function sessionFiles(id) {
     f.by.add(by);
     files.set(abs, f);
   };
+  // Each harness says what its tools did (effect + path); the answers' file mentions work the same for all.
   const scan = async (sid, by) => {
-    const ws = (await readJson(join(SESSIONS_DIR, sid, 'session.json')))?.workspace_root ?? root;
+    const ws = sessions.find((s) => s.id === sid)?.workspace ?? root;
     for (const ev of await readEvents(sid)) {
-      if (ev.kind === 'tool_call' && /^(write|edit|read)_file$/.test(ev.name) && !/error|fail/i.test(ev.result?.status ?? '')) add(ws, ev.args?.path, ev.name.split('_')[0], by);
+      if (ev.kind === 'tool_call' && ['write', 'edit', 'read'].includes(ev.effect) && !/error|fail/i.test(ev.result?.status ?? '')) add(ws, ev.path, ev.effect, by);
       if (ev.kind === 'assistant' && ev.text) for (const m of ev.text.matchAll(/`([^`\s]{1,400}\.[A-Za-z0-9]{1,10})`|\]\(([^)\s]{1,400}\.[A-Za-z0-9]{1,10})\)/g)) add(ws, m[1] ?? m[2], 'mention', by);
     }
   };
   await scan(id, 0);
-  for (const [i, c] of kids.entries()) if (safeSessionId(c.id)) await scan(c.id, i + 1);
+  for (const [i, c] of (session.children ?? []).entries()) if (safeSessionId(c.id)) await scan(c.id, i + 1);
   const out = [];
   for (const f of files.values()) {
     let st = null;
@@ -318,74 +274,9 @@ async function sessionFiles(id) {
   return out.sort((a, b) => FILE_RANK[b.action] - FILE_RANK[a.action] || a.rel.localeCompare(b.rel));
 }
 
-// Cache parsed completed snapshots by file signature; running turns are inferred from live
-// overview state and children.json, never from an assumed tail of events.jsonl.
-const timelineCache = new Map();
-async function timingEvents(id) {
-  const file = join(SESSIONS_DIR, id, 'events.jsonl');
-  const info = await stat(file).catch(() => null);
-  if (!info) return [];
-  const key = `${info.mtimeMs}:${info.size}`;
-  const hit = timelineCache.get(id);
-  if (hit?.key === key) return hit.events;
-  const events = parseTimeline(await readFile(file, 'utf8'));
-  if (timelineCache.size > 100) timelineCache.delete(timelineCache.keys().next().value);
-  timelineCache.set(id, { key, events });
-  return events;
-}
-
-async function readEvents(id) {
-  const dir = join(SESSIONS_DIR, id);
-  let raw;
-  try { raw = await readFile(join(dir, 'events.jsonl'), 'utf8'); } catch { return []; }
-  const out = [];
-  const callsById = new Map();
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue;
-    let rec;
-    try { rec = JSON.parse(line); } catch { out.push({ kind: 'raw', text: line }); continue; }
-    const ev = rec.event ?? {};
-    const kind = Object.keys(ev)[0];
-    const body = ev[kind] ?? {};
-    const ts = rec.timestamp_ms;
-    switch (kind) {
-      case 'user':
-        out.push({ kind, ts, text: body.text ?? '' });
-        break;
-      case 'assistant':
-        out.push({ kind, ts, text: body.text ?? '' });
-        break;
-      case 'tool_call': {
-        let args = body.arguments_json;
-        try { args = JSON.parse(args); } catch {}
-        const item = { kind, ts, callId: body.call_id, name: body.tool_name, args, result: null };
-        callsById.set(body.call_id, item);
-        out.push(item);
-        break;
-      }
-      case 'tool_result': {
-        const call = callsById.get(body.call_id);
-        const result = { status: body.status, preview: body.preview ?? '', bytes: body.output_bytes ?? 0, artifact: body.artifact_ref ?? null };
-        if (call) call.result = result; else out.push({ kind, ts, name: body.tool_name, result });
-        break;
-      }
-      case 'turn_completed':
-        out.push({ kind, ts });
-        break;
-      case 'interrupted':
-        out.push({ kind, ts, reason: body.reason ?? 'cancelled', partial: body.partial_text || null });
-        break;
-      default:
-        out.push({ kind: 'raw', ts, text: JSON.stringify(ev).slice(0, 2000) });
-    }
-  }
-  return out;
-}
-
-async function readArtifact(id, name) {
-  if (!/^[A-Za-z0-9._-]+$/.test(name)) return null;
-  try { return await readFile(join(SESSIONS_DIR, id, 'tool-results', name), 'utf8'); } catch { return null; }
-}
+const timingEvents = async (id) => (await harnessFor(id)).timing(id);
+const readEvents = async (id) => (await harnessFor(id)).events(id);
+const readArtifact = async (id, name) => (await harnessFor(id)).artifact(id, name);
 
 // ---------- git info por workspace (cacheado) ----------
 const gitCache = new Map(); // ws -> { at, info }
@@ -470,11 +361,15 @@ function startSignIn(tool) {
 async function listTools() {
   const config = await fxMcpConfig().catch(() => ({}));
   const st = await loadState();
+  // Claude Code, when installed, gets the same catalog in its own config; it signs in to a tool itself (/mcp).
+  const claude = harnessById('claude');
+  const claudeServers = claude?.available() ? await claude.mcp.servers() : null;
   return TOOLS.map((t) => {
     const installed = isInstalled(t, config);
     // fx keeps OAuth tokens to itself; fox only remembers that a sign-in it started went through.
     return { id: t.id, label: t.label, description: t.description, cost: t.cost ?? null, installed, enabled: installed && isEnabled(t, config),
-      needsSignIn: installed && t.auth === 'oauth' && !st.toolsSignedIn[t.id] };
+      needsSignIn: installed && t.auth === 'oauth' && !st.toolsSignedIn[t.id],
+      claude: claudeServers ? { enabled: Boolean(findServer(t, { mcp: claudeServers })), oauth: t.auth === 'oauth' } : null };
   });
 }
 
@@ -537,7 +432,9 @@ async function handlePanelRequest(req, res) {
     if (p === '/api/metrics') {
       const days = Number(url.searchParams.get('days') ?? 7);
       if (days !== 7 && days !== 30) return send(res, 400, { error: 'days must be 7 or 30' });
-      return send(res, 200, await readMetrics(SESSIONS_DIR, days));
+      // fx's sessions are counted from its files; the other agents' from their events.
+      const others = await Promise.all((await listSessions()).filter((s) => s.harness !== 'fx').map(async (s) => ({ agent: s.harnessLabel, createdAt: s.createdAt, events: await readEvents(s.id) })));
+      return send(res, 200, await readMetrics(SESSIONS_DIR, days, Date.now(), others));
     }
     if (p === '/api/sessions') return send(res, 200, await listSessions());
     if (p === '/api/search') return send(res, 200, await searchSessions(url.searchParams.get('q')));
@@ -554,7 +451,7 @@ async function handlePanelRequest(req, res) {
         if (t && !s.latestReply) {
           // The first turn can run for a long time before fx writes any reply to events.jsonl.
           const screen = await tmux('capture-pane', '-p', '-t', t.name).catch(() => '');
-          s.model = screenModel(screen) ?? s.model;
+          s.model = harnessById(s.harness)?.screenModel?.(screen) ?? s.model;
         }
       }));
       // Los hijos no tienen terminal propia: su estado sale de children.json del padre.
@@ -575,13 +472,14 @@ async function handlePanelRequest(req, res) {
       // Only fox-owned terminals currently listed by tmux may be captured; never accept a raw tmux target.
       if (!/^fx-[A-Za-z0-9_-]{1,100}$/.test(name)) return send(res, 404, { error: 'terminal not found' });
       const resume = await tmuxOption(name, '@fx_resume').catch(() => null);
-      if (!safeSessionId(resume) || !existsSync(join(SESSIONS_DIR, resume, 'session.json'))) return send(res, 404, { error: 'terminal not found' });
+      const h = safeSessionId(resume) ? await harnessFor(resume) : null;
+      if (!h?.has(resume)) return send(res, 404, { error: 'terminal not found' });
       // No -E: tmux's -1 endpoint is history, not the visible pane where fx is answering.
       const screen = await tmux('capture-pane', '-p', '-J', '-S', '-32', '-t', name);
       const lines = screen.replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))|[\x00-\x08\x0b-\x1f\x7f]/g, '').split('\n');
       while (lines.length && !lines.at(-1).trim()) lines.pop();
       const text = lines.slice(-32).join('\n').slice(-6000);
-      return send(res, 200, { text, model: screenModel(text) });
+      return send(res, 200, { text, model: h.screenModel?.(text) ?? null });
     }
     if ((m = p.match(/^\/api\/sessions\/([^/]+)\/timeline$/))) {
       const id = safeSessionId(m[1]);
@@ -627,8 +525,7 @@ async function handlePanelRequest(req, res) {
       // even when opened full screen in its own browser tab. HEAD answers the ETag for live reload.
       // A page with its CSS and JS: a short-lived /view/ link bound to this session's project folder.
       if (m[2] === 'view-url') {
-        const meta = await readJson(join(SESSIONS_DIR, id, 'session.json'));
-        const root = realPath(meta?.workspace_root ?? meta?.origin_workspace_root ?? '');
+        const root = realPath((await recentSessions()).find((s) => s.id === id)?.workspace ?? '');
         if (!root || !(f.path === root || f.path.startsWith(root + '/'))) return send(res, 400, { error: 'page is outside the project' });
         // A session that runs in your home folder (or /) is not a project: the link then covers the page's folder only.
         const scope = root === realPath(homedir()) || root === '/' ? dirname(f.path) : root;
@@ -710,6 +607,21 @@ async function handlePanelRequest(req, res) {
     if (req.method === 'POST' && (m = p.match(/^\/api\/tools\/([a-z0-9-]+)\/(add|signin|on|off)$/))) {
       const tool = TOOLS.find((t) => t.id === m[1]);
       if (!tool) return send(res, 404, { error: 'unknown tool' });
+      // Claude Code: on adds the server to its user config, off removes it (whatever name it was added under).
+      if (url.searchParams.get('agent') === 'claude') {
+        const claude = harnessById('claude');
+        if (!claude?.available() || (m[2] !== 'on' && m[2] !== 'off')) return send(res, 400, { error: 'Claude Code cannot do that' });
+        try {
+          const found = findServer(tool, { mcp: await claude.mcp.servers() });
+          // fx's own entry for the tool is already tuned for this machine (on a server: installed locally, headless,
+          // no npx); Claude Code gets the same command. Otherwise the catalog's.
+          const fxEntry = findServer(tool, await fxMcpConfig().catch(() => ({})))?.[1];
+          const command = !tool.url && Array.isArray(fxEntry?.command) && fxEntry.command.length ? fxEntry.command : tool.command;
+          if (m[2] === 'on' && !found) await claude.mcp.add({ ...tool, command });
+          if (m[2] === 'off' && found) await claude.mcp.remove(found[0]);
+        } catch (err) { return send(res, 500, { error: err.message }); }
+        return send(res, 200, await listTools());
+      }
       if (m[2] === 'on' || m[2] === 'off') {
         try { await setToolEnabled(tool, m[2] === 'on'); }
         catch (err) { return send(res, 500, { error: err.message }); }
@@ -741,11 +653,12 @@ async function handlePanelRequest(req, res) {
       }
       catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
     }
-    if ((m = p.match(/^\/api\/prs\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)\/(\d+)(?:\/(files|merge|close))$/))) {
+    if ((m = p.match(/^\/api\/prs\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)\/(\d+)(?:\/(files|merge|close|pause|resume))$/))) {
       const [, owner, name, num, action] = m;
       try {
         if (action === 'files' && req.method === 'GET') return send(res, 200, await prs.files(`${owner}/${name}`, num));
         if (action === 'merge' && req.method === 'POST') return send(res, 200, await prs.merge(`${owner}/${name}`, num));
+        if ((action === 'pause' || action === 'resume') && req.method === 'POST') return send(res, 200, await prs[action](`${owner}/${name}`, num));
         if (action === 'close' && req.method === 'POST') return send(res, 200, await prs.close(`${owner}/${name}`, num, JSON.parse(await readBody(req) || '{}').reason));
         return send(res, 405, { error: 'method not allowed' });
       } catch (err) { return send(res, err.status ?? 500, { error: String(err.stderr || err.message).trim().split('\n')[0] }); }
@@ -811,6 +724,18 @@ async function handlePanelRequest(req, res) {
       try { const ws = await workspaces.create(JSON.parse(await readBody(req) || '{}')); return send(res, 200, ws); }
       catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
     }
+    if ((m = p.match(/^\/api\/workspaces\/([0-9a-f-]{36})\/repos\/([A-Za-z0-9._-]+)\/(branches|switch|update|branch)$/))) {
+      const [, id, dir, action] = m;
+      try {
+        if (action === 'branches' && req.method === 'GET') return send(res, 200, await branches.list(id, dir));
+        if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
+        const body = JSON.parse(await readBody(req) || '{}');
+        const out = action === 'switch' ? await branches.switch(id, dir, body.branch, { keep: body.keep === true })
+          : action === 'update' ? await branches.update(id, dir) : await branches.create(id, dir, body.name);
+        await listWorkspaces(true);
+        return send(res, 200, out);
+      } catch (err) { return send(res, err.status ?? 500, { error: err.status ? err.message : 'Git operation failed. Check the repo on this machine.', dirty: err.dirty, busy: err.busy }); }
+    }
     if ((m = p.match(/^\/api\/workspaces\/([0-9a-f-]{36})(?:\/(fetch|retry))?$/))) {
       const [, id, action] = m;
       try {
@@ -821,6 +746,8 @@ async function handlePanelRequest(req, res) {
       } catch (err) { return send(res, err.status ?? 500, { error: err.message, blockers: err.blockers }); }
     }
     if (p === '/api/models' && req.method === 'GET') return send(res, 200, await models.get());
+    // Agents to start a session with: only the installed ones.
+    if (p === '/api/harnesses' && req.method === 'GET') return send(res, 200, await Promise.all(HARNESSES.filter((h) => h.available()).map(async (h) => ({ id: h.id, label: h.label, models: h.models ?? null, signedIn: h.signedIn ? await h.signedIn() : null }))));
     if (p === '/api/models/refresh' && req.method === 'POST') { try { return send(res, 200, await models.refresh()); } catch (err) { return send(res, 500, { error: String(err.stderr || err.message) }); } }
     if (p === '/api/usage/refresh' && req.method === 'POST') {
       try {
@@ -836,10 +763,13 @@ async function handlePanelRequest(req, res) {
       const resume = body.resume ? safeSessionId(String(body.resume)) : null;
       if (body.resume && !resume) return send(res, 400, { error: 'bad id' });
       try {
-        if (resume && (body.addDirs !== undefined || [body.provider, body.model, body.effort, body.speed].some((v) => v != null && v !== ''))) return send(res, 400, { error: 'Resume cannot change launch options' });
+        if (resume && (body.addDirs !== undefined || [body.provider, body.model, body.effort, body.speed, body.harness].some((v) => v != null && v !== ''))) return send(res, 400, { error: 'Resume cannot change launch options' });
+        const harness = resume ? await harnessFor(resume) : harnessById(body.harness ?? 'fx');
+        if (!harness?.available()) return send(res, 400, { error: 'Unknown or missing agent' });
         const addDirs = resume ? [] : await workspaces.validateCompanions(cwd, body.addDirs ?? []);
-        const flags = resume ? [] : [...launchArgs(await models.get(), body), ...(await workspaces.forPath(cwd) ? ['--no-additional-dirs'] : []), ...addDirs.flatMap((dir) => ['--add-dir', dir])];
-        return send(res, 200, await createTerminal({ cwd, resume, flags, addDirs }));
+        // fx's flags come from its model catalog; other harnesses get the model and folders as they are.
+        const flags = resume || harness.id !== 'fx' ? [] : [...launchArgs(await models.get(), body), ...(await workspaces.forPath(cwd) ? ['--no-additional-dirs'] : []), ...addDirs.flatMap((dir) => ['--add-dir', dir])];
+        return send(res, 200, await createTerminal({ harness, cwd, resume, flags, addDirs, model: harness.id === 'fx' ? null : body.model || null }));
       } catch (err) { return send(res, err.status ?? (err.message?.match(/Unknown provider|Unsupported|Resume cannot/) ? 400 : 500), { error: String(err.stderr || err.message) }); }
     }
     if (req.method === 'DELETE' && (m = p.match(/^\/api\/terminals\/([^/]+)$/))) {
@@ -961,15 +891,13 @@ async function tmuxOption(name, key) {
   return (await tmux('show-options', '-t', name, '-qv', key)).trim() || null;
 }
 
-// Heurística de estado leyendo la pantalla: fx muestra "• Thinking (4s)" o similar mientras trabaja,
-// y vuelve al prompt "┃" con el pie "auto · modelo" cuando espera.
-async function terminalActivity(name) {
+// Which harness runs in a terminal: set when fox starts it; terminals from before harnesses run fx.
+const terminalHarness = async (name) => harnessById(await tmuxOption(name, '@fox_harness').catch(() => null)) ?? HARNESSES[0];
+// Working, waiting or asking: each harness reads its own screen.
+async function terminalActivity(name, harness = null) {
   let screen = '';
   try { screen = await tmux('capture-pane', '-p', '-t', name); } catch { return 'unknown'; }
-  const lines = screen.split('\n').filter((l) => l.trim()).slice(-8);
-  if (lines.some((l) => /\[y\/n\]|\(y\/n\)|allow|approve|permission|confirm/i.test(l) && /\?/.test(l))) return 'needs_input';
-  if (lines.some((l) => /^\s*[•●◐◓◑◒◴◵◶◷⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s.*\(\d+s\)/.test(l) || /^\s*•\s+(Thinking|Working|Running)/i.test(l))) return 'working';
-  return 'ready';
+  return (harness ?? await terminalHarness(name)).activity(screen);
 }
 
 async function listTerminals() {
@@ -983,8 +911,9 @@ async function listTerminals() {
   for (const [name, created, attached] of entries) {
     let resume = known.get(name);
     const cwd = await tmuxOption(name, '@fx_cwd');
+    const harness = await terminalHarness(name);
     // Una terminal nueva todavía no sabe qué sesión de fx creó: la buscamos por workspace y fecha.
-    if (!resume && cwd) {
+    if (!resume && cwd && harness.id === 'fx') {
       const createdMs = Number(created) * 1000;
       const candidates = (await listSessions()).filter((s) => s.workspace === cwd && s.createdAt >= createdMs - 5000 && !assigned.has(s.id));
       if (candidates.length) {
@@ -994,7 +923,7 @@ async function listTerminals() {
       }
     }
     if (resume && pending[name]) matched.push([name, resume]);
-    out.push({ name, cwd, resume, attached: Number(attached) > 0, createdAt: Number(created) * 1000, activity: await terminalActivity(name) });
+    out.push({ name, cwd, resume, harness: harness.id, attached: Number(attached) > 0, createdAt: Number(created) * 1000, activity: await terminalActivity(name, harness) });
   }
   if (matched.length) await updateLaunchState((st) => {
     for (const [name, id] of matched) {
@@ -1071,16 +1000,26 @@ async function updateWorkspaceRepos(cwd) {
   await Promise.race([all, new Promise((r) => setTimeout(r, 8000))]);
 }
 
-async function createTerminal({ cwd, resume, flags = [], addDirs = [] }) {
-  const name = resume ? `${TMUX_PREFIX}${resume}` : `${TMUX_PREFIX}new-${Date.now().toString(36)}`;
-  const existing = (await listTerminals()).find((t) => t.name === name);
-  if (existing) return existing;
+// Terminal names keep the "fx-" prefix for every harness: it is fox's namespace in tmux, and sessions that
+// were already running when harnesses arrived keep working.
+async function createTerminal({ harness = HARNESSES[0], cwd, resume, flags = [], addDirs = [], model = null }) {
+  if (resume) {
+    const existing = (await listTerminals()).find((t) => t.name === `${TMUX_PREFIX}${resume}`);
+    if (existing) return existing;
+  }
   await updateWorkspaceRepos(cwd);
   // New sessions can start on a chosen provider/model; resumed ones keep what the session already has.
+  const launch = await harness.launch({ cwd, resume, flags, model, addDirs });
+  // A harness that knows its id up front (Claude Code) names the terminal after it at once; fx's id comes later.
+  const id = launch.id ?? resume ?? null;
+  const name = id ? `${TMUX_PREFIX}${id}` : `${TMUX_PREFIX}new-${Date.now().toString(36)}`;
   // tmux runs its command through a shell; every catalog value is a separate, quoted argument.
   const quote = (s) => `'${String(s).replaceAll("'", "'\\''")}'`;
-  const cmd = [FX_BIN, ...(resume ? ['session', 'resume', resume] : flags)].map(quote).join(' ');
+  const cmd = launch.argv.map(quote).join(' ');
   await tmux('new-session', '-d', '-s', name, '-x', '140', '-y', '40', '-c', cwd, cmd);
+  await tmux('set-option', '-t', name, '@fox_harness', harness.id);
+  // Focus events let a TUI know when you come back to it (Claude Code asks for them); harmless for the rest.
+  await tmux('set-option', '-s', 'focus-events', 'on').catch(() => {});
   await passHyperlinks();
   await tmux('set-option', '-t', name, 'status', 'off');
   await tmux('set-option', '-t', name, 'mouse', 'on');
@@ -1089,10 +1028,13 @@ async function createTerminal({ cwd, resume, flags = [], addDirs = [] }) {
   await tmux('set-option', '-w', '-t', name, 'window-size', 'latest');
   await tmux('set-option', '-w', '-t', name, 'aggressive-resize', 'on');
   await tmux('set-option', '-t', name, '@fx_cwd', cwd);
-  if (resume) await tmux('set-option', '-t', name, '@fx_resume', resume);
+  if (id) await tmux('set-option', '-t', name, '@fx_resume', id);
   // The fx ID appears after launch. Keep the chosen access roots by tmux name until it can be matched.
-  if (!resume && addDirs.length) await updateLaunchState((st) => { st.pendingDirs[name] = addDirs; });
-  return { name, cwd, resume: resume ?? null, attached: false, createdAt: Date.now(), activity: 'working' };
+  if (!resume && addDirs.length) {
+    if (id) await updateLaunchState((st) => { st.launchDirs[id] = addDirs; });
+    else await updateLaunchState((st) => { st.pendingDirs[name] = addDirs; });
+  }
+  return { name, cwd, resume: id, harness: harness.id, attached: false, createdAt: Date.now(), activity: 'working' };
 }
 
 async function killTerminal(name) {
@@ -1167,23 +1109,24 @@ wss.on('connection', (ws, req) => {
 async function sendMobileMessage(id, text) {
   const session = (await listSessions()).find((s) => s.id === id && !s.subagentChild);
   if (!session) return { status: 404, body: { error: 'Session not found' } };
+  const harness = harnessById(session.harness) ?? HARNESSES[0];
   let terminal = (await listTerminals()).find((t) => t.resume === id);
   if (!terminal) {
     if (session.live) return { status: 409, body: { error: 'Session is open outside fox; use that terminal to reply.' } };
     try {
-      terminal = await createTerminal({ cwd: session.workspace, resume: id });
+      terminal = await createTerminal({ harness, cwd: session.workspace, resume: id });
       let prompt = false;
       for (let attempt = 0; attempt < 50; attempt++) {
         const screen = await tmux('capture-pane', '-p', '-t', terminal.name);
-        if (/^\s*┃\s*$/m.test(screen)) { prompt = true; break; }
+        if (harness.ready(screen)) { prompt = true; break; }
         await new Promise((resolve) => setTimeout(resolve, 200));
       }
-      if (!prompt) return { status: 409, body: { error: 'fx did not become ready. Open the desktop terminal and check the session.' } };
+      if (!prompt) return { status: 409, body: { error: `${harness.label} did not become ready. Open the desktop terminal and check the session.` } };
     } catch (error) { return { status: 409, body: { error: `Could not resume session: ${error.message}` } }; }
   }
   const activity = await terminalActivity(terminal.name);
   if (activity === 'working' || activity === 'needs_input') {
-    return { status: 409, body: { error: activity === 'working' ? 'fx is still working. Wait for its reply.' : 'fx needs terminal input; use the desktop panel for this prompt.' } };
+    return { status: 409, body: { error: activity === 'working' ? `${harness.label} is still working. Wait for its reply.` : `${harness.label} needs terminal input; use the desktop panel for this prompt.` } };
   }
   // A named, unique tmux buffer and bracketed paste preserve newlines and prevent key-name interpretation.
   const buffer = `fox-mobile-${randomUUID()}`;
