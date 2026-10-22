@@ -75,12 +75,16 @@ export function createSkills({ home, stateDir, workspaces, web = fetchText, gh =
   const locked = (fn) => { const p = writing.then(fn); writing = p.catch(() => {}); return p; };
   const records = async () => { try { return JSON.parse(await readFile(record, 'utf8')); } catch { return {}; } };
   async function save(r) { await mkdir(stateDir, { recursive: true, mode: 0o700 }); const tmp = `${record}.${randomUUID()}`; await writeFile(tmp, JSON.stringify(r), { mode: 0o600 }); await rename(tmp, record); }
-  async function target(scope) {
-    if (scope === 'global') return join(home, '.fx/skills');
+  // Installs go to .claude/skills (in home, or in the workspace): Claude Code reads only that folder and fx reads it
+  // too, so one copy serves both agents. Earlier installs went to .fx/skills, which only fx reads; they still count.
+  async function base(scope) {
+    if (scope === 'global') return home;
     const ws = typeof scope === 'string' && scope.startsWith('workspace:') ? await workspaces.get(scope.slice(10)) : null;
     if (!ws || !resolve(ws.dir).startsWith(resolve(home, 'workspaces') + sep) || await lstat(ws.dir).then((s) => !s.isDirectory()).catch(() => true)) fail('Unknown workspace.');
-    return join(ws.dir, '.fx/skills');
+    return ws.dir;
   }
+  const target = async (scope) => join(await base(scope), '.claude/skills');
+  const roots = async (scope) => { const b = await base(scope); return [join(b, '.claude/skills'), join(b, '.fx/skills')]; };
   // Never follow a symlink in an installation destination (including a parent created by someone else).
   async function ensureParents(dir) {
     const root = resolve(dir); let path = root.startsWith(resolve(home) + sep) ? resolve(home) : fail('Invalid target.');
@@ -234,7 +238,7 @@ export function createSkills({ home, stateDir, workspaces, web = fetchText, gh =
       if (!p || p.until < Date.now()) fail('Preview expired. Preview again.', 409);
       const root = await target(p.scope), owned = await records();
       await ensureParents(root);
-      for (const s of p.skills) if (await lstat(join(root, s.name)).catch(() => null)) fail(`${s.name} already exists; nothing was replaced.`, 409);
+      for (const s of p.skills) for (const r of await roots(p.scope)) if (await lstat(join(r, s.name)).catch(() => null)) fail(`${s.name} already exists; nothing was replaced.`, 409);
       const installed = [];
       try {
         for (const s of p.skills) {
@@ -257,8 +261,7 @@ export function createSkills({ home, stateDir, workspaces, web = fetchText, gh =
       const item = (await list()).items.find((x) => x.id === id);
       if (!item?.owned) fail('Only skills installed by fox can be removed.', 403);
       const owned = await records(), entry = owned[`${item.scope}|${posix.basename(item.path)}`];
-      const root = await target(item.scope);
-      if (entry?.path !== join(root, posix.basename(item.path)) || !(await lstat(item.path)).isDirectory()) fail('Skill changed.', 409);
+      if (!(await roots(item.scope)).some((r) => entry?.path === join(r, posix.basename(item.path))) || !(await lstat(item.path)).isDirectory()) fail('Skill changed.', 409);
       const check = async (dir, prefix = '') => {
         for (const f of await readdir(dir, { withFileTypes: true })) {
           const name = prefix + f.name, path = join(dir, f.name);
