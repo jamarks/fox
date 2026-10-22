@@ -7,6 +7,7 @@ async function loadMetrics(days) {
   const id = ++request;
   for (const button of buttons) button.setAttribute('aria-pressed', String(Number(button.dataset.days) === days));
   table.hidden = true;
+  document.querySelector('#metrics-agents-wrap').hidden = true;
   document.querySelector('#metrics-range').textContent = '';
   status.textContent = 'Loading…';
   try {
@@ -32,6 +33,20 @@ async function loadMetrics(days) {
       }
       rows.append(row);
     }
+    // Per agent, only when more than one was used: with fx alone it repeats the table above.
+    const agents = (data.byAgent ?? []).filter((a) => Object.values(a.current).some(Boolean) || Object.values(a.previous).some(Boolean));
+    const agentRows = document.querySelector('#metrics-agents');
+    agentRows.replaceChildren(...agents.map((a) => {
+      const row = document.createElement('tr');
+      for (const [i, value] of [a.agent, a.current.sessions, a.current.prompts, a.current.completed].entries()) {
+        const cell = document.createElement(i === 0 ? 'th' : 'td');
+        if (i === 0) cell.scope = 'row';
+        cell.textContent = typeof value === 'number' ? value.toLocaleString('en') : value;
+        row.append(cell);
+      }
+      return row;
+    }));
+    document.querySelector('#metrics-agents-wrap').hidden = agents.length < 2;
     status.textContent = Object.values(data.current).some(Boolean) || Object.values(data.previous).some(Boolean) ? '' : 'No activity in either period.';
     table.hidden = false;
   } catch {

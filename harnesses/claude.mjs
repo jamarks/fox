@@ -142,7 +142,7 @@ function cleanEnv(env, argv) {
   return drop.length ? ['env', ...drop.flatMap((k) => ['-u', k]), ...argv] : argv;
 }
 
-export function createClaude({ bin, stateDir, projectsDir = join(homedir(), '.claude', 'projects'), liveDir = join(homedir(), '.claude', 'sessions'), env = process.env }) {
+export function createClaude({ bin, stateDir, projectsDir = join(homedir(), '.claude', 'projects'), liveDir = join(homedir(), '.claude', 'sessions'), configFile = join(homedir(), '.claude.json'), env = process.env }) {
   const registryFile = join(stateDir, 'claude-sessions.json');
   let registry = null;
   const loadRegistry = async () => registry ??= await readFile(registryFile, 'utf8').then(JSON.parse).catch(() => ({}));
@@ -277,6 +277,23 @@ export function createClaude({ bin, stateDir, projectsDir = join(homedir(), '.cl
     return existsSync(sub) ? sub : null;
   }
 
+  // `claude` itself, without the variables of a Claude Code session fox may run inside.
+  const run = (args) => {
+    const drop = new Set(inherited(env));
+    const clean = Object.fromEntries(Object.entries(env).filter(([k]) => !drop.has(k)));
+    return new Promise((done, fail) => execFile(bin, args, { timeout: 30_000, env: clean }, (err, stdout, stderr) => err ? fail(new Error(String(stderr || err.message).trim())) : done(stdout)));
+  };
+
+  // MCP servers for every session: Claude Code's user scope, kept in ~/.claude.json ("mcpServers"). It has no
+  // off switch for them, so off removes the server and on adds it again.
+  const mcp = {
+    async servers() {
+      try { return JSON.parse(await readFile(configFile, 'utf8')).mcpServers ?? {}; } catch { return {}; }
+    },
+    add: (tool) => run(['mcp', 'add', '--scope', 'user', ...(tool.url ? ['--transport', 'http', tool.name, tool.url] : [tool.name, '--', ...tool.command])]),
+    remove: (name) => run(['mcp', 'remove', '--scope', 'user', name]),
+  };
+
   // Signed in to a Claude account (or a key)? `claude auth status` answers in JSON; asked again every 30 s.
   let auth = { at: 0, ok: null };
   const signedIn = () => {
@@ -298,6 +315,7 @@ export function createClaude({ bin, stateDir, projectsDir = join(homedir(), '.cl
     models: CLAUDE_MODELS,
     available: () => existsSync(bin),
     signedIn,
+    mcp,
     has(id) {
       if (!registry) return false;
       const child = CHILD.exec(id);

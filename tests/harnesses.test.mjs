@@ -159,3 +159,23 @@ test('fox knows whether Claude Code is signed in, from `claude auth status`', as
   assert.equal(await createClaude({ bin: join(dir, 'out'), stateDir: dir, env: { PATH: '/bin:/usr/bin' } }).signedIn(), false);
   assert.equal(await createClaude({ bin: join(dir, 'missing'), stateDir: dir, env: { PATH: '/bin:/usr/bin' } }).signedIn(), false);
 });
+
+test('Claude Code tools live in its user config: fox reads them there and adds or removes them with its CLI', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'fox-claude-mcp-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = join(dir, 'calls');
+  await writeFile(join(dir, 'claude'), `#!/bin/sh\necho "$@" >> '${log}'\n`, { mode: 0o755 });
+  const configFile = join(dir, 'claude.json');
+  const claude = createClaude({ bin: join(dir, 'claude'), stateDir: dir, configFile, env: { PATH: '/bin:/usr/bin' } });
+  assert.deepEqual(await claude.mcp.servers(), {});
+  await writeFile(configFile, JSON.stringify({ mcpServers: { pw: { type: 'stdio', command: 'npx', args: ['@playwright/mcp@latest'] } } }));
+  assert.deepEqual(Object.keys(await claude.mcp.servers()), ['pw']);
+  await claude.mcp.add({ name: 'playwright', command: ['npx', '@playwright/mcp@latest'] });
+  await claude.mcp.add({ name: 'docs', url: 'https://mcp.context7.com/mcp' });
+  await claude.mcp.remove('pw');
+  assert.deepEqual((await readFile(log, 'utf8')).trim().split('\n'), [
+    'mcp add --scope user playwright -- npx @playwright/mcp@latest',
+    'mcp add --scope user --transport http docs https://mcp.context7.com/mcp',
+    'mcp remove --scope user pw',
+  ]);
+});

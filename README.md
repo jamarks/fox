@@ -39,7 +39,7 @@ All of it: [CHANGELOG.md](CHANGELOG.md).
 - **Workspaces**: a folder of GitHub repos, cloned once, with each repo's branch and changes at a glance. Start a session in one repo and explicitly grant fx file access to selected sibling repos for that launch only.
 - **Jobs**: scripts on a schedule, each with its model, log, summary and links. A job can have fx make a change and open a pull request it checked itself. [docs/jobs.md](docs/jobs.md)
 - **Pull requests** of your workspaces' repos in one list: what each does, its files, the review job's verdict; merge or close it from fox.
-- **Tools for fx** from Settings: a browser, Chrome DevTools, library docs, Vercel, Linear.
+- **Tools** from Settings, for fx and Claude Code: a browser, Chrome DevTools, library docs, Vercel, Linear.
 - **Search** across every session (⌥Space), **metrics** for the last 7 and 30 days, seven **themes** (one is a real star map).
 - **On a server**: open it from any device, see the dev servers fx starts, publish them as named apps. [docs/server.md](docs/server.md)
 

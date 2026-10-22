@@ -17,7 +17,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createSearchIndex } from './search.mjs';
 import { readMetrics } from './metrics.mjs';
-import { TOOLS, isInstalled, isEnabled, withEnabled, addArgs } from './tools.mjs';
+import { TOOLS, isInstalled, isEnabled, withEnabled, addArgs, findServer } from './tools.mjs';
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
 import { createAppRegistry, createAppRouter } from './apps.mjs';
@@ -353,11 +353,15 @@ function startSignIn(tool) {
 async function listTools() {
   const config = await fxMcpConfig().catch(() => ({}));
   const st = await loadState();
+  // Claude Code, when installed, gets the same catalog in its own config; it signs in to a tool itself (/mcp).
+  const claude = harnessById('claude');
+  const claudeServers = claude?.available() ? await claude.mcp.servers() : null;
   return TOOLS.map((t) => {
     const installed = isInstalled(t, config);
     // fx keeps OAuth tokens to itself; fox only remembers that a sign-in it started went through.
     return { id: t.id, label: t.label, description: t.description, cost: t.cost ?? null, installed, enabled: installed && isEnabled(t, config),
-      needsSignIn: installed && t.auth === 'oauth' && !st.toolsSignedIn[t.id] };
+      needsSignIn: installed && t.auth === 'oauth' && !st.toolsSignedIn[t.id],
+      claude: claudeServers ? { enabled: Boolean(findServer(t, { mcp: claudeServers })), oauth: t.auth === 'oauth' } : null };
   });
 }
 
@@ -420,7 +424,9 @@ async function handlePanelRequest(req, res) {
     if (p === '/api/metrics') {
       const days = Number(url.searchParams.get('days') ?? 7);
       if (days !== 7 && days !== 30) return send(res, 400, { error: 'days must be 7 or 30' });
-      return send(res, 200, await readMetrics(SESSIONS_DIR, days));
+      // fx's sessions are counted from its files; the other agents' from their events.
+      const others = await Promise.all((await listSessions()).filter((s) => s.harness !== 'fx').map(async (s) => ({ agent: s.harnessLabel, createdAt: s.createdAt, events: await readEvents(s.id) })));
+      return send(res, 200, await readMetrics(SESSIONS_DIR, days, Date.now(), others));
     }
     if (p === '/api/sessions') return send(res, 200, await listSessions());
     if (p === '/api/search') return send(res, 200, await searchSessions(url.searchParams.get('q')));
@@ -581,6 +587,17 @@ async function handlePanelRequest(req, res) {
     if (req.method === 'POST' && (m = p.match(/^\/api\/tools\/([a-z0-9-]+)\/(add|signin|on|off)$/))) {
       const tool = TOOLS.find((t) => t.id === m[1]);
       if (!tool) return send(res, 404, { error: 'unknown tool' });
+      // Claude Code: on adds the server to its user config, off removes it (whatever name it was added under).
+      if (url.searchParams.get('agent') === 'claude') {
+        const claude = harnessById('claude');
+        if (!claude?.available() || (m[2] !== 'on' && m[2] !== 'off')) return send(res, 400, { error: 'Claude Code cannot do that' });
+        try {
+          const found = findServer(tool, { mcp: await claude.mcp.servers() });
+          if (m[2] === 'on' && !found) await claude.mcp.add(tool);
+          if (m[2] === 'off' && found) await claude.mcp.remove(found[0]);
+        } catch (err) { return send(res, 500, { error: err.message }); }
+        return send(res, 200, await listTools());
+      }
       if (m[2] === 'on' || m[2] === 'off') {
         try { await setToolEnabled(tool, m[2] === 'on'); }
         catch (err) { return send(res, 500, { error: err.message }); }

@@ -1954,14 +1954,18 @@ $('#settings-fx').addEventListener('click', async (e) => {
     $('#settings-fx-note').textContent = 'New sessions use it; an open one picks it up when it is resumed.';
   } catch (err) { btn.disabled = false; $('#settings-fx-note').textContent = err.message; }
 });
-// Tools for fx (MCP servers from fox's catalog), for every session: a switch for the ones fx has (off keeps the
+// Tools (MCP servers from fox's catalog), for every session of fx and, when installed, of Claude Code. For fx: a switch for the ones fx has (off keeps the
 // setup, fx skips it), Add for the rest, Sign in when one needs it. Nothing changes without a tap.
+// With Claude Code installed, each tool has a switch per agent, named; with fx alone it reads as before.
 function toolRow(t) {
-  const sub = [esc(t.description), t.cost && t.enabled ? esc(t.cost) : ''].filter(Boolean).join(' · ');
+  const sub = [esc(t.description), t.cost && (t.enabled || t.claude?.enabled) ? esc(t.cost) : ''].filter(Boolean).join(' · ');
   const main = `<span class="set-main">${esc(t.label)}<span class="set-sub">${sub}</span></span>`;
-  if (!t.installed) return `<div class="set-row">${main}<button type="button" class="set-act" data-add-tool="${t.id}">Add</button></div>`;
-  const signin = t.enabled && t.needsSignIn ? `<button type="button" class="set-act warn" data-signin-tool="${t.id}">Sign in</button>` : '';
-  return `<div class="set-row">${main}${signin}<button type="button" class="switch-btn ${t.enabled ? 'on' : ''}" data-toggle-tool="${t.id}" role="switch" aria-checked="${t.enabled}" aria-label="${esc(t.label)}"><span class="switch"></span></button></div>`;
+  const named = (label, html) => t.claude ? `<span class="tool-agent">${label}${html}</span>` : html;
+  const fx = !t.installed ? `<button type="button" class="set-act" data-add-tool="${t.id}">Add${t.claude ? ' to fx' : ''}</button>`
+    : (t.enabled && t.needsSignIn ? `<button type="button" class="set-act warn" data-signin-tool="${t.id}">Sign in</button>` : '')
+      + named('fx', `<button type="button" class="switch-btn ${t.enabled ? 'on' : ''}" data-toggle-tool="${t.id}" role="switch" aria-checked="${t.enabled}" aria-label="${esc(t.label)}${t.claude ? ' for fx' : ''}"><span class="switch"></span></button>`);
+  const claude = t.claude ? named('Claude', `<button type="button" class="switch-btn ${t.claude.enabled ? 'on' : ''}" data-claude-tool="${t.id}" role="switch" aria-checked="${t.claude.enabled}" aria-label="${esc(t.label)} for Claude Code"><span class="switch"></span></button>`) : '';
+  return `<div class="set-row">${main}${fx}${claude}</div>`;
 }
 async function loadTools() {
   let tools = [];
@@ -1969,9 +1973,21 @@ async function loadTools() {
   $('#settings-tools').innerHTML = tools.map(toolRow).join('');
 }
 $('#settings-tools').addEventListener('click', async (e) => {
-  const btn = e.target.closest('[data-add-tool], [data-signin-tool], [data-toggle-tool]');
+  const btn = e.target.closest('[data-add-tool], [data-signin-tool], [data-toggle-tool], [data-claude-tool]');
   if (!btn || btn.disabled) return;
   const note = $('#settings-tools-note');
+  if (btn.dataset.claudeTool) {
+    // Claude Code: on adds the server to its config, off removes it. It signs in to a tool itself.
+    const on = !btn.classList.contains('on');
+    btn.disabled = true; note.textContent = '';
+    const r = await fetch(`/api/tools/${btn.dataset.claudeTool}/${on ? 'on' : 'off'}?agent=claude`, { method: 'POST' });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { btn.disabled = false; note.textContent = j.error || 'That did not work.'; return; }
+    $('#settings-tools').innerHTML = j.map(toolRow).join('');
+    const oauth = j.find((t) => t.id === btn.dataset.claudeTool)?.claude?.oauth;
+    note.textContent = !on ? 'New Claude Code sessions start without it.' : oauth ? 'New Claude Code sessions have it. Sign in once with /mcp in one of them.' : 'New Claude Code sessions have it.';
+    return;
+  }
   const id = btn.dataset.addTool ?? btn.dataset.signinTool ?? btn.dataset.toggleTool;
   const action = btn.dataset.addTool ? 'add' : btn.dataset.signinTool ? 'signin' : btn.classList.contains('on') ? 'off' : 'on';
   btn.disabled = true; note.textContent = '';

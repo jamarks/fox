@@ -61,7 +61,7 @@ test('step limit is opt-in, read-only until applied, and preserves existing sett
 
 test('new badge is browser-local and independent of application', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  const source = app.slice(app.indexOf('// fx\'s own settings (see fxsettings.mjs).'), app.indexOf('// Tools for fx (MCP'));
+  const source = app.slice(app.indexOf('// fx\'s own settings (see fxsettings.mjs).'), app.indexOf('// Tools (MCP'));
   const storage = new Map();
   let click, writes = 0;
   const panel = { innerHTML: '', addEventListener: (_, fn) => { click = fn; } };
@@ -131,7 +131,7 @@ test('compaction override is opt-in and validates the installed fx range', async
 
 test('compaction UI validates drafts and keeps badge state independent of activation', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  const source = app.slice(app.indexOf('// fx\'s own settings (see fxsettings.mjs).'), app.indexOf('// Tools for fx (MCP'));
+  const source = app.slice(app.indexOf('// fx\'s own settings (see fxsettings.mjs).'), app.indexOf('// Tools (MCP'));
   const storage = new Map();
   let click, saved = {}, writes = [];
   const panel = { innerHTML: '', addEventListener: (_, fn) => { click = fn; } };

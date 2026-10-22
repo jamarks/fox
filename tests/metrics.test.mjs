@@ -40,7 +40,7 @@ test('metrics compare exact adjacent rolling windows using event times, includin
 
 test('metrics UI switches periods, handles zero baselines and shows fetch failures', async () => {
   const element = () => ({ textContent: '', children: [], append(child) { this.children.push(child); }, replaceChildren() { this.children = []; }, setAttribute(key, value) { this[key] = value; }, addEventListener(_, handler) { this.click = handler; } });
-  const nodes = Object.fromEntries(['#metrics-status', '.metrics-table-wrap', '#metrics-range', '#metrics-rows'].map((key) => [key, element()]));
+  const nodes = Object.fromEntries(['#metrics-status', '.metrics-table-wrap', '#metrics-range', '#metrics-rows', '#metrics-agents-wrap', '#metrics-agents'].map((key) => [key, element()]));
   const buttons = [7, 30].map((days) => ({ ...element(), dataset: { days: String(days) } }));
   let fail = false;
   const urls = [];
@@ -59,5 +59,22 @@ test('metrics UI switches periods, handles zero baselines and shows fetch failur
   fail = true;
   await buttons[0].click();
   assert.equal(nodes['.metrics-table-wrap'].hidden, true);
+  assert.equal(nodes['#metrics-agents-wrap'].hidden, true); // one agent: no per-agent table
   assert.match(nodes['#metrics-status'].textContent, /Could not load/);
+});
+
+test('other agents add to the totals and get their own line', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fox-metrics-agents-'));
+  try {
+    await mkdir(join(root, 'fx1'));
+    await writeFile(join(root, 'fx1', 'session.json'), JSON.stringify({ created_at_ms: 99 * DAY }));
+    const claude = { agent: 'Claude Code', createdAt: 98 * DAY, events: [{ kind: 'user', ts: 98 * DAY }, { kind: 'assistant', ts: 98 * DAY }, { kind: 'turn_completed', ts: 98 * DAY }, { kind: 'user', ts: 90 * DAY }] };
+    const week = await readMetrics(root, 7, now, [claude]);
+    assert.deepEqual(week.current, { sessions: 2, prompts: 1, completed: 1 });
+    assert.deepEqual(week.previous, { sessions: 0, prompts: 1, completed: 0 });
+    assert.deepEqual(week.byAgent, [
+      { agent: 'fx', current: { sessions: 1, prompts: 0, completed: 0 }, previous: { sessions: 0, prompts: 0, completed: 0 } },
+      { agent: 'Claude Code', current: { sessions: 1, prompts: 1, completed: 1 }, previous: { sessions: 0, prompts: 1, completed: 0 } },
+    ]);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
