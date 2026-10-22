@@ -36,6 +36,17 @@ test('searches by description/source and inserts an unsent draft into the active
   assert.equal(f.$('#pastesheet').classList.contains('hidden'), true);
 });
 
+test('Enter in the shelf search never submits a previous paste draft', async () => {
+  const f = fixture();
+  f.$('#paste-text').value = 'previous draft';
+  await f.run('openSkillShelf()');
+  assert.equal(f.$('#paste-text').value, '');
+  f.$('#paste-text').value = 'unexpected draft';
+  f.$('#pasteform').events.submit({ preventDefault() {} });
+  assert.deepEqual(f.pasted, []);
+  assert.equal(f.$('#pastesheet').classList.contains('hidden'), false);
+});
+
 test('changing to another terminal or closing while loading cannot insert or show stale results', async () => {
   const f = fixture(); await f.run('openSkillShelf()');
   f.state.activeTab = 'claude'; f.$('#skill-list').children[0].events.click();

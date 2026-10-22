@@ -638,6 +638,7 @@ async function openSkillShelf() {
   const cwd = skillCwd();
   if (!cwd) { toast('Select an fx session to browse skills'); return; }
   agentDraft = null; skillShelfCwd = cwd;
+  $('#paste-text').value = '';
   $('#paste-title').textContent = 'Skills'; $('#paste-hint').classList.remove('hidden');
   $('#paste-hint').textContent = `${shortPath(cwd)} · choose a skill to insert a draft (Enter sends)`;
   $('#paste-text').classList.add('hidden'); $('#pasteform button[type="submit"]').classList.add('hidden');
@@ -737,7 +738,7 @@ $('#paste').addEventListener('click', async () => {
   $('#pastesheet').classList.remove('hidden');
   $('#paste-text').focus();
 });
-$('#pasteform').addEventListener('submit', (e) => { e.preventDefault(); if (agentDraft) { if (!$('#pasteform button[type="submit"]').disabled) void insertAgentDraft(); } else if (pasteIntoTerminal($('#paste-text').value)) closePasteSheet(); });
+$('#pasteform').addEventListener('submit', (e) => { e.preventDefault(); if (!$('#skill-shelf').classList.contains('hidden')) return; if (agentDraft) { if (!$('#pasteform button[type="submit"]').disabled) void insertAgentDraft(); } else if (pasteIntoTerminal($('#paste-text').value)) closePasteSheet(); });
 $('#paste-cancel').addEventListener('click', closePasteSheet);
 $('#pastesheet').addEventListener('click', (e) => { if (e.target.id === 'pastesheet') closePasteSheet(); });
 async function openTerminal({ cwd, resume, harness, provider, model, effort, speed, addDirs }, stillWanted = () => true) {

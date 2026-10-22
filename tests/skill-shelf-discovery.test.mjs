@@ -29,6 +29,15 @@ test('scans repo, parents before home and personal roots, not sibling repos or o
   assert.doesNotMatch(JSON.stringify(rows), /SECRET BODY/);
 });
 
+test('outside-home sessions do not scan unrelated ancestors', async (t) => {
+  const base = await mkdtemp(join(tmpdir(), 'fox-skills-')); t.after(() => rm(base, { recursive: true, force: true }));
+  const home = join(base, 'home'), repo = join(base, 'repo');
+  await mkdir(home); await mkdir(repo);
+  await add(join(base, '.fx/skills'), 'ancestor', skill('ancestor'));
+  await add(join(repo, '.fx/skills'), 'local', skill('local'));
+  assert.deepEqual((await listSkills(repo, home)).map((s) => s.name), ['local']);
+});
+
 test('refuses symlinks and invalid headers, and bounds names, descriptions and bytes', async (t) => {
   const home = await mkdtemp(join(tmpdir(), 'fox-skills-')); t.after(() => rm(home, { recursive: true, force: true }));
   const repo = join(home, 'repo'), outside = join(home, 'elsewhere');
@@ -37,15 +46,20 @@ test('refuses symlinks and invalid headers, and bounds names, descriptions and b
   await symlink(join(outside, 'skills'), join(repo, 'skills'));
   const root = join(repo, '.fx/skills');
   await add(root, 'good', skill('good'));
+  await add(root, 'long-body', skill('long-body', 'a'.repeat(180)) + 'x'.repeat(9000));
+  await add(root, 'folded', '---\r\nname: folded\r\ndescription: >\r\n  Review tests\r\n  before release\r\n---\r\n# Instructions\r\n');
   await add(root, 'no-header', '# Just instructions');
   await add(root, 'bad-name', skill('bad\nInjected'));
   await add(root, 'bad-desc', skill('bad-desc', 'Oops\u0007terminal'));
   await add(root, 'unclosed', '---\nname: unclosed\n');
-  await add(root, 'huge', skill('huge') + 'x'.repeat(8192));
+  await add(root, 'huge', skill('huge') + 'x'.repeat(128 * 1024));
   await symlink(join(outside, 'skills', 'secret'), join(root, 'linked'));
   await mkdir(join(root, 'file-link'));
   await symlink(join(outside, 'skills', 'secret', 'SKILL.md'), join(root, 'file-link', 'SKILL.md'));
-  assert.deepEqual((await listSkills(repo, home)).map((r) => r.name), ['good', 'no-header']);
+  const rows = await listSkills(repo, home);
+  assert.deepEqual(rows.map((r) => r.name), ['folded', 'good', 'long-body', 'no-header']);
+  assert.equal(rows[0].description, 'Review tests before release');
+  assert.equal(rows[2].description.length, 160);
   await assert.rejects(() => listSkills(join(home, 'missing'), home), { status: 400 });
   await assert.rejects(() => listSkills('../'.repeat(2200), home), { status: 400 });
 });
