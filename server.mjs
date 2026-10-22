@@ -593,7 +593,11 @@ async function handlePanelRequest(req, res) {
         if (!claude?.available() || (m[2] !== 'on' && m[2] !== 'off')) return send(res, 400, { error: 'Claude Code cannot do that' });
         try {
           const found = findServer(tool, { mcp: await claude.mcp.servers() });
-          if (m[2] === 'on' && !found) await claude.mcp.add(tool);
+          // fx's own entry for the tool is already tuned for this machine (on a server: installed locally, headless,
+          // no npx); Claude Code gets the same command. Otherwise the catalog's.
+          const fxEntry = findServer(tool, await fxMcpConfig().catch(() => ({})))?.[1];
+          const command = !tool.url && Array.isArray(fxEntry?.command) && fxEntry.command.length ? fxEntry.command : tool.command;
+          if (m[2] === 'on' && !found) await claude.mcp.add({ ...tool, command });
           if (m[2] === 'off' && found) await claude.mcp.remove(found[0]);
         } catch (err) { return send(res, 500, { error: err.message }); }
         return send(res, 200, await listTools());
