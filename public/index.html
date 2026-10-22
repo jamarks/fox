@@ -157,6 +157,16 @@
           <h3 class="set-sec">Tools <span class="set-note">every session</span></h3>
           <div id="settings-tools"></div>
           <div id="settings-tools-note" class="set-foot"></div>
+          <h3 class="set-sec">Skills for fx <span class="set-note">new and resumed sessions</span></h3>
+          <div class="set-foot">Loaded when needed. Use <code>$name</code> or <code>/skills</code> to pick one.</div>
+          <div id="settings-skills"></div>
+          <form id="skill-form" class="skill-form">
+            <label>From GitHub <input id="skill-source" placeholder="owner/repo" required spellcheck="false" autocomplete="off"></label>
+            <label>Skill (optional) <input id="skill-name" placeholder="all skills" spellcheck="false" autocomplete="off"></label>
+            <label>Install for <select id="skill-scope"><option value="global">Every workspace</option></select></label>
+            <button class="set-act" type="submit">Preview install</button>
+          </form>
+          <div id="skill-preview"></div><div id="skill-note" class="set-foot" role="status"></div>
           <h3 class="set-sec" id="set-devices">Devices</h3>
           <button type="button" id="pair-phone" class="set-row"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><path d="M7 12.5h2"/></svg><span>Pair phone</span><span class="set-go">›</span></button>
           <h3 class="set-sec set-keys">Keyboard</h3>
