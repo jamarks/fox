@@ -2073,6 +2073,7 @@ async function loadHarnesses() {
 }
 async function setNsHarness(id) {
   $('#ns-agent').dataset.value = id;
+  $('#ns-claude-auth').classList.add('hidden');
   for (const b of $('#ns-agent').querySelectorAll('button')) { b.classList.toggle('on', b.dataset.harness === id); b.setAttribute('aria-checked', String(b.dataset.harness === id)); }
   if (id === 'fx') return loadModels();
   // Another harness: its own short model list, none of fx's provider, usage or speed options.
@@ -2081,6 +2082,7 @@ async function setNsHarness(id) {
   sel.innerHTML = `<option value="">${esc(h?.label ?? id)} default</option>` + (h?.models ?? []).map((m) => `<option value="${esc(id)}|${esc(m.id)}">${esc(m.name)}</option>`).join('');
   try { const last = localStorage.getItem(`fox.lastModel.${id}`); if (last && [...sel.options].some((o) => o.value === last)) sel.value = last; } catch {}
   for (const el of ['#ns-usage', '#ns-options', '#ns-auth']) $(el).classList.add('hidden');
+  $('#ns-claude-auth').classList.toggle('hidden', id !== 'claude' || h?.signedIn !== false);
   updateNsBadge();
 }
 $('#ns-agent').addEventListener('click', (e) => { const b = e.target.closest('[data-harness]'); if (b) setNsHarness(b.dataset.harness).then(() => $('#ns-model').focus()); });

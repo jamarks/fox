@@ -9,6 +9,7 @@ From a fresh server to fox on your phone. A VPS and a computer at home are the s
   - **ChatGPT subscription** (`fx login codex`): a fixed monthly price.
   - **Vercel AI Gateway** (`fx setup`, an API key): pay per use; set a spending limit. It is the one that mixes models from several vendors in one task.
   - **Grok subscription** (`fx login grok`).
+- **Claude Code** *(optional)*, next to fx: with `--claude-code` the script installs it, and each new session can run fx or Claude Code. It uses your **Claude Pro or Max subscription** (no API key, no extra cost).
 - **A way in from your devices**, one of:
   - **Cloudflare**: a domain whose DNS is on Cloudflare, plus Cloudflare Zero Trust (free). fox gets a public HTTPS address behind a Cloudflare login.
   - **Tailscale**: no domain. fox is reachable only from your own devices signed in to your tailnet.
@@ -34,6 +35,8 @@ curl -fsSL https://raw.githubusercontent.com/jamarks/fox/release/setup-server.sh
 curl -fsSL https://raw.githubusercontent.com/jamarks/fox/release/setup-server.sh | sudo bash
 ```
 
+Add `--claude-code` to any of them to install Claude Code too (or run the script again later with it).
+
 The last one has no way in yet: open fox through `ssh -L 4848:localhost:4848 <you>@<server>` at http://localhost:4848. A passkey made there belongs to `localhost`; when you add a domain later, make a new one (see [If you lose your passkey](#if-you-lose-your-passkey)).
 
 Prefer to read it first? `git clone https://github.com/jamarks/fox && cd fox && git checkout release && sudo ./setup-server.sh --tailscale`: same script, every step commented. Running it again is safe; it checks before each step.
@@ -51,10 +54,17 @@ The script ends with what is left, with the exact commands for your server:
    ```
 
    Or `ssh -t <you>@<server> sudo -iu fox fx setup` for an AI Gateway key, pasted on the server, never in a chat.
-2. **GitHub** (optional): `sudo -iu fox gh auth login` with a **fine-grained token** limited to the repos fx should work on (Contents and Pull requests: read and write). A second owner (an org): `sudo -iu fox fox-git-token <org>`.
-3. **Create your passkey**: open your fox address and type the one-time code the script printed (10 minutes, single use; never put it in a URL). Expired? Run the script again. Save the passkey in a manager that syncs, so it works on your phone and your laptop.
+2. **Sign Claude Code in** (if you installed it) to your Claude subscription. It prints a link: open it on your computer or phone, approve with your Claude account, and paste the code it shows back into the terminal:
 
-Then open the address on any device, sign in with the passkey and press **+**.
+   ```bash
+   ssh -t <you>@<server> sudo -iu fox claude auth login
+   ```
+
+   The login stays on the server (`~/.claude` of fox's user) and renews itself; you do it once. `/login` inside a Claude Code session in fox does the same.
+3. **GitHub** (optional): `sudo -iu fox gh auth login` with a **fine-grained token** limited to the repos fx should work on (Contents and Pull requests: read and write). A second owner (an org): `sudo -iu fox fox-git-token <org>`.
+4. **Create your passkey**: open your fox address and type the one-time code the script printed (10 minutes, single use; never put it in a URL). Expired? Run the script again. Save the passkey in a manager that syncs, so it works on your phone and your laptop.
+
+Then open the address on any device, sign in with the passkey and press **+**. With Claude Code installed, the sheet has an **fx | Claude Code** switch: pick one per session, and both kinds sit side by side in the same workspace.
 
 ## What the script sets up
 

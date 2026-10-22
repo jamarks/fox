@@ -148,3 +148,14 @@ test('fx sessions keep their files on disk and get the same tool effects as any 
   assert.deepEqual(fx.launch({ resume: 'abcd1234' }), { argv: ['/bin/fx', 'session', 'resume', 'abcd1234'], id: 'abcd1234' });
   assert.deepEqual(fx.launch({ flags: ['--model', 'x'] }), { argv: ['/bin/fx', '--model', 'x'], id: null });
 });
+
+test('fox knows whether Claude Code is signed in, from `claude auth status`', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'fox-claude-auth-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const fake = (name, out) => writeFile(join(dir, name), `#!/bin/sh\n[ "$1 $2" = "auth status" ] && echo '${out}'\n`, { mode: 0o755 });
+  await fake('in', '{"loggedIn": true, "authMethod": "claude.ai"}');
+  await fake('out', '{"loggedIn": false, "authMethod": "none"}');
+  assert.equal(await createClaude({ bin: join(dir, 'in'), stateDir: dir, env: { PATH: '/bin:/usr/bin' } }).signedIn(), true);
+  assert.equal(await createClaude({ bin: join(dir, 'out'), stateDir: dir, env: { PATH: '/bin:/usr/bin' } }).signedIn(), false);
+  assert.equal(await createClaude({ bin: join(dir, 'missing'), stateDir: dir, env: { PATH: '/bin:/usr/bin' } }).signedIn(), false);
+});

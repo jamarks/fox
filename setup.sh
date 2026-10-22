@@ -73,6 +73,16 @@ else
   printf '  %sfox needs fx to do anything useful: curl -fsSL https://fx.sh/setup.sh | bash%s\n' "$dim" "$reset"
 fi
 
+step "Claude Code (optional)"
+if command -v claude >/dev/null 2>&1 || [ -x "$HOME/.local/bin/claude" ]; then
+  ok "Claude Code is installed: new sessions can run it instead of fx"
+elif ask "Also install Claude Code, to run sessions on your Claude Pro or Max subscription?"; then
+  curl -fsSL https://claude.ai/install.sh | bash
+  ok "Claude Code installed. Sign it in once: claude auth login"
+else
+  printf '  %sLater, if you want it: curl -fsSL https://claude.ai/install.sh | bash, then claude auth login%s\n' "$dim" "$reset"
+fi
+
 step "fox"
 # A system Node (apt) keeps its global folder for root: install into ~/.local instead of asking for sudo.
 PREFIX="$(npm prefix -g)"

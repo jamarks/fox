@@ -694,7 +694,7 @@ async function handlePanelRequest(req, res) {
     }
     if (p === '/api/models' && req.method === 'GET') return send(res, 200, await models.get());
     // Agents to start a session with: only the installed ones.
-    if (p === '/api/harnesses' && req.method === 'GET') return send(res, 200, HARNESSES.filter((h) => h.available()).map((h) => ({ id: h.id, label: h.label, models: h.models ?? null })));
+    if (p === '/api/harnesses' && req.method === 'GET') return send(res, 200, await Promise.all(HARNESSES.filter((h) => h.available()).map(async (h) => ({ id: h.id, label: h.label, models: h.models ?? null, signedIn: h.signedIn ? await h.signedIn() : null }))));
     if (p === '/api/models/refresh' && req.method === 'POST') { try { return send(res, 200, await models.refresh()); } catch (err) { return send(res, 500, { error: String(err.stderr || err.message) }); } }
     if (p === '/api/usage/refresh' && req.method === 'POST') {
       try {

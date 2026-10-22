@@ -9,6 +9,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 // A subagent is shown as its own session: <parent id>-<agent id>.
@@ -131,11 +132,14 @@ export function parseTranscript(raw, { sidechain = false } = {}) {
 
 // A fox started from inside a Claude Code session (an agent testing fox) inherits that session's variables, and a
 // claude launched with them talks to the parent's proxy instead of signing in as itself. Only then are they dropped.
-function cleanEnv(env, argv) {
+function inherited(env) {
   const inside = (k) => k === 'CLAUDECODE' || /^CLAUDE_(CODE|AGENT_SDK)_/.test(k);
-  if (!Object.keys(env).some(inside)) return argv;
-  const inherited = Object.keys(env).filter((k) => inside(k) || ['CLAUDE_PID', 'CLAUDE_EFFORT', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL'].includes(k));
-  return ['env', ...inherited.flatMap((k) => ['-u', k]), ...argv];
+  if (!Object.keys(env).some(inside)) return [];
+  return Object.keys(env).filter((k) => inside(k) || ['CLAUDE_PID', 'CLAUDE_EFFORT', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL'].includes(k));
+}
+function cleanEnv(env, argv) {
+  const drop = inherited(env);
+  return drop.length ? ['env', ...drop.flatMap((k) => ['-u', k]), ...argv] : argv;
 }
 
 export function createClaude({ bin, stateDir, projectsDir = join(homedir(), '.claude', 'projects'), liveDir = join(homedir(), '.claude', 'sessions'), env = process.env }) {
@@ -273,12 +277,27 @@ export function createClaude({ bin, stateDir, projectsDir = join(homedir(), '.cl
     return existsSync(sub) ? sub : null;
   }
 
+  // Signed in to a Claude account (or a key)? `claude auth status` answers in JSON; asked again every 30 s.
+  let auth = { at: 0, ok: null };
+  const signedIn = () => {
+    if (Date.now() - auth.at < 30_000 && auth.ok !== null) return auth.ok;
+    const drop = new Set(inherited(env));
+    const clean = Object.fromEntries(Object.entries(env).filter(([k]) => !drop.has(k)));
+    return new Promise((done) => execFile(bin, ['auth', 'status'], { timeout: 10_000, env: clean }, (err, stdout) => {
+      let ok = false;
+      try { ok = JSON.parse(stdout).loggedIn === true; } catch {}
+      auth = { at: Date.now(), ok };
+      done(ok);
+    }));
+  };
+
   return {
     id: 'claude',
     label: 'Claude Code',
     bin,
     models: CLAUDE_MODELS,
     available: () => existsSync(bin),
+    signedIn,
     has(id) {
       if (!registry) return false;
       const child = CHILD.exec(id);
