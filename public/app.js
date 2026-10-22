@@ -33,9 +33,12 @@ const briefArgs = (args) => {
 };
 const sessionById = (id) => state.sessions.find((s) => s.id === id);
 const displayTitle = (s) => s.customName || (s.subagent ? (s.subagent.name ? s.subagent.name : (s.subagent.task ?? s.firstPrompt ?? '').slice(0, 60) || s.title) : s.title);
+// The browser tab names what is in front: a page (Skills, Jobs…) over the session it covers.
+const PAGE_TITLES = { 'settings-view': 'Settings', 'job-view': 'Jobs', 'pr-view': 'Pull requests', 'skill-view': 'Skills' };
 function updatePageTitle() {
+  const page = Object.entries(PAGE_TITLES).find(([id]) => document.getElementById(id)?.classList.contains('hidden') === false)?.[1];
   const viewingSession = !mobileLayout.matches || document.body.dataset.mobileView !== 'sessions';
-  const name = viewingSession && sessionById(state.selected) ? displayTitle(sessionById(state.selected))?.trim() : '';
+  const name = page ?? (viewingSession && sessionById(state.selected) ? displayTitle(sessionById(state.selected))?.trim() : '');
   document.title = name ? `${name} · fox` : 'fox';
 }
 const post = (path, body, method = 'POST') => fetch(path, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json());
@@ -1106,6 +1109,7 @@ function renderTabs() {
 // the browser's history (push), so Back and Forward move between them; following the open session only replaces.
 let applyingUrl = false;
 function syncUrl(push = false) {
+  updatePageTitle();
   if (applyingUrl) return;
   const t = state.terminals.find((x) => x.name === state.activeTab);
   const sel = state.selected;
@@ -1136,7 +1140,7 @@ async function applyUrl() {
     else if (state.jobView) closeJob();
     if (edit) { if (state.jobDialog !== edit) await openJobDialog(edit === 'new' ? null : edit); }
     else if (state.jobDialog) closeJobDialog();
-  } finally { applyingUrl = false; }
+  } finally { applyingUrl = false; updatePageTitle(); }
 }
 window.addEventListener('popstate', applyUrl);
 function activateTab(name) {
