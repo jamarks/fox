@@ -17,7 +17,7 @@ async function fixture(t) {
 }
 
 test('catalog sources are shipped as data', () => assert.deepEqual(SOURCES, ['vercel-labs/skills', 'anthropics/skills', 'mattpocock/skills', 'vercel-labs/agent-browser']));
-test('discovers user, workspace and repo skills without following linked folders', async (t) => {
+test('discovers user and workspace skills, not the repos\' own, without following linked folders', async (t) => {
   const f = await fixture(t);
   for (const dir of [join(f.home, '.claude/skills/borrowed'), join(f.ws.dir, '.fx/skills/local'), join(f.ws.dir, 'repo/skills/inside')]) {
     await mkdir(dir, { recursive: true }); await writeFile(join(dir, 'SKILL.md'), '---\nname: custom\ndescription: Shared.\n---\n# Instructions');
@@ -28,8 +28,8 @@ test('discovers user, workspace and repo skills without following linked folders
   await symlink(join(f.home, 'private'), join(f.home, '.agents'));
   await symlink(join(f.home, 'private'), join(f.ws.dir, 'repo/.claude'));
   const api = f.api(); const list = await api.list();
-  assert.equal(list.items.length, 3);
-  assert.deepEqual(list.items.map((s) => s.group), ['Claude Code', 'project · workspace', 'project/repo · workspace']);
+  assert.equal(list.items.length, 2);
+  assert.deepEqual(list.items.map((s) => s.group), ['Claude Code', 'project · workspace']);
   assert.equal(list.items[0].owned, false);
   assert.match((await api.read(list.items[0].id)).text, /Instructions/);
   await assert.rejects(() => api.remove(list.items[0].id), /Only skills installed by fox/);

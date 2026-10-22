@@ -87,10 +87,9 @@ export function createSkills({ home, stateDir, workspaces, gh = (args) => exec('
     for (const [root, group] of USER_ROOTS) items.push(...await scan(join(home, root), group, 'global', owned));
     for (const ws of await workspaces.list()) {
       if (!resolve(ws.dir).startsWith(resolve(home, 'workspaces') + sep)) continue;
+      // fox's skills only: the workspace folder is fox's, its repos are not. A repo's own skills (a catalogue repo
+      // can carry dozens) still reach fx in sessions there, but they belong to that repo, not to this page.
       for (const [root, group] of PROJECT_ROOTS) items.push(...await scan(join(ws.dir, root), `${ws.name} · ${group}`, `workspace:${ws.id}`, owned));
-      // A repo is a session directory; fx sees its own local skills as well as the workspace root.
-      for (const repo of ws.repos ?? []) if (NAME.test(repo.dir)) for (const [root, group] of PROJECT_ROOTS)
-        items.push(...await scan(join(ws.dir, repo.dir, root), `${ws.name}/${repo.dir} · ${group}`, `repo:${ws.id}`, owned));
     }
     return { items, sources: SOURCES, scopes: (await workspaces.list()).map((w) => ({ id: `workspace:${w.id}`, name: w.name })) };
   }

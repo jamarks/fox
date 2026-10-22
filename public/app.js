@@ -2084,10 +2084,15 @@ async function loadSkills() {
     $('#skill-count').textContent = items.length || '';
     $('#skill-scope').innerHTML = '<option value="global">Every workspace</option>' + scopes.map((s) => `<option value="${esc(s.id)}">${esc(s.name)} workspace</option>`).join('');
     $('#skill-source').setAttribute('list', 'skill-sources');
+    // One group per place a skill applies: every workspace, or one workspace. Which folder it sits in (fx's,
+    // Claude Code's…) is on hover; one line per skill, the full text is behind Read.
     const groups = new Map();
-    for (const item of items) { if (!groups.has(item.group)) groups.set(item.group, []); groups.get(item.group).push(item); }
+    for (const item of items) {
+      const place = item.scope === 'global' ? 'Every workspace' : `${item.group.split(' · ')[0]} workspace`;
+      if (!groups.has(place)) groups.set(place, []); groups.get(place).push(item);
+    }
     $('#skill-list').innerHTML = `<datalist id="skill-sources">${sources.map((s) => `<option value="${esc(s)}">`).join('')}</datalist>` +
-      (items.length ? [...groups].map(([group, skills]) => `<div class="skill-group">${esc(group === 'fx' ? 'fx' : group.includes(' · ') ? group : 'from ' + group)}</div>` + skills.map((s) => `<div class="set-row skill-row"><span class="set-main">${esc(s.name)}<span class="set-sub">${esc(s.description || 'No description')}${s.source ? ' · ' + esc(s.source) : ''}</span></span><button type="button" class="set-act" data-skill-read="${esc(s.id)}">Read</button>${s.owned ? `<button type="button" class="set-act" data-skill-remove="${esc(s.id)}">Remove</button>` : ''}</div>`).join('')).join('') : '<div class="set-foot">No skills yet. Install adds them from a GitHub repository.</div>');
+      (items.length ? [...groups].map(([place, skills]) => `<div class="skill-group">${esc(place)} <span>${skills.length}</span></div>` + skills.map((s) => `<div class="skill-row" title="${esc(shortPath(s.path))}"><span class="skill-name">${esc(s.name)}</span><span class="skill-desc" title="${esc(s.description || '')}">${esc(s.description || 'No description')}</span>${s.source ? `<span class="skill-src">${esc(s.source)}</span>` : ''}<button type="button" class="set-act" data-skill-read="${esc(s.id)}">Read</button>${s.owned ? `<button type="button" class="set-act" data-skill-remove="${esc(s.id)}">Remove</button>` : ''}</div>`).join('')).join('') : '<div class="set-foot">No skills yet. Install adds them from a GitHub repository.</div>');
   } catch (err) { $('#skill-note').textContent = err.message; }
 }
 function skillsOpen() { return !$('#skill-view').classList.contains('hidden'); }
@@ -2142,7 +2147,7 @@ $('#skill-list').addEventListener('click', async (e) => {
   try {
     if (read) {
       const j = await skillApi('read', { id: read.dataset.skillRead });
-      row.insertAdjacentHTML('afterend', `<div class="skill-review"><span class="set-sub">${esc(j.group)} · ${esc(shortPath(j.path))}${j.source ? ' · ' + esc(j.source) : ''}</span><div class="md skill-text">${renderMarkdown(j.text)}</div></div>`);
+      row.insertAdjacentHTML('afterend', `<div class="skill-review"><span class="set-sub">${esc(shortPath(j.path))}${j.source ? ' · ' + esc(j.source) : ''}</span><div class="md skill-text">${renderMarkdown(j.text)}</div></div>`);
       read.classList.add('active');
     } else if (confirm('Remove this fox-installed skill? Any changes to its files will prevent removal.')) {
       await skillApi('remove', { id: remove.dataset.skillRemove });
