@@ -584,12 +584,14 @@ async function handlePanelRequest(req, res) {
       try { const { key, value } = JSON.parse(await readBody(req) || '{}'); return send(res, 200, await fxSettings.set(key, value)); }
       catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
     }
-    if (p === '/api/skills' || p === '/api/skills/preview' || p === '/api/skills/install' || p === '/api/skills/read' || p === '/api/skills/remove') {
+    if (p === '/api/skills' || p.startsWith('/api/skills/')) {
       try {
         if (p === '/api/skills' && req.method === 'GET') return send(res, 200, await skills.list());
+        if (p === '/api/skills/catalog' && req.method === 'GET') return send(res, 200, await skills.catalog());
         if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
         const body = JSON.parse(await readBody(req) || '{}');
-        const result = p === '/api/skills/preview' ? await skills.preview(body)
+        const result = p === '/api/skills/browse' ? await skills.browse(body)
+          : p === '/api/skills/preview' ? await skills.preview(body)
           : p === '/api/skills/install' ? await skills.install(body.token)
           : p === '/api/skills/read' ? await skills.read(body.id)
           : p === '/api/skills/remove' ? await skills.remove(body.id) : null;

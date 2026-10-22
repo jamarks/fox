@@ -191,12 +191,12 @@
           <div class="job-actions"><button type="button" id="skill-add" aria-expanded="false">Install</button><button type="button" id="skill-close" class="icon" aria-label="Close">×</button></div>
         </header>
         <div class="set-body">
-          <form id="skill-form" class="skill-form hidden">
-            <label>From GitHub <input id="skill-source" placeholder="owner/repo" required spellcheck="false" autocomplete="off"></label>
-            <label>Skill (optional) <input id="skill-name" placeholder="all skills" spellcheck="false" autocomplete="off"></label>
-            <label>Install for <select id="skill-scope"><option value="global">Every workspace</option></select></label>
-            <button class="set-act" type="submit">Preview install</button>
-          </form>
+          <div id="skill-install" class="hidden">
+            <div id="skill-repos" class="skill-repos"></div>
+            <form id="skill-other" class="skill-other hidden"><input id="skill-source" placeholder="owner/repo" required spellcheck="false" autocomplete="off"><button class="set-act" type="submit">Open</button></form>
+            <div id="skill-pick"></div>
+            <div id="skill-pick-foot" class="skill-pick-foot hidden"><label>Install for <select id="skill-scope"><option value="global">Every workspace</option></select></label><button type="button" class="set-act" id="skill-review">Review</button></div>
+          </div>
           <div id="skill-preview"></div><div id="skill-note" class="set-foot" role="status"></div>
           <div class="set-foot">Loaded when needed in new and resumed sessions. Use <code>$name</code> or <code>/skills</code> to pick one.</div>
           <div id="skill-list"></div>

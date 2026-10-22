@@ -34,10 +34,26 @@ const header = (text) => {
 };
 const safeFile = (p) => p.split('/').every((s) => s && s !== '.' && s !== '..' && s !== '.git') && !p.includes('\\') && !p.includes('\0');
 const plain = (b) => { try { return !b.includes(0) && new TextDecoder('utf-8', { fatal: true }).decode(b) !== undefined; } catch { return false; } };
+// Text only, but room for skills that ship reference files (Office schemas, API docs).
+const MAX_FILE = 1024 * 1024, MAX_TOTAL = 4 * 1024 * 1024, MAX_FILES = 120;
+// A skill is a folder under skills/ holding SKILL.md, at any depth (skills/<group>/<name> too), unless a folder above it
+// is already a skill: then it is that skill's own material. A SKILL.md at the root makes the whole repo one skill.
+function skillDirs(entries) {
+  const all = entries.filter((x) => x.type === 'blob' && /^skills\/(?:[^/]+\/)*[^/]+\/SKILL\.md$/.test(x.path)).map((x) => posix.dirname(x.path));
+  const dirs = all.filter((d) => !all.some((o) => d.startsWith(o + '/'))).sort();
+  if (entries.some((x) => x.path === 'SKILL.md' && x.type === 'blob')) dirs.unshift('');
+  return dirs;
+}
+const filesOf = (entries, dir) => entries.filter((x) => x.type !== 'tree' && (dir ? x.path.startsWith(`${dir}/`) : !x.path.includes('/')));
+async function pool(items, n, fn) {
+  const out = []; let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k]); } }));
+  return out;
+}
 
 export function createSkills({ home, stateDir, workspaces, gh = (args) => exec('gh', ['api', ...args], { timeout: 30000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GH_PROMPT_DISABLED: '1' } }).then((r) => r.stdout) }) {
   const record = join(stateDir, 'skills.json');
-  const previews = new Map();
+  const previews = new Map(), trees = new Map();
   let writing = Promise.resolve();
   const locked = (fn) => { const p = writing.then(fn); writing = p.catch(() => {}); return p; };
   const records = async () => { try { return JSON.parse(await readFile(record, 'utf8')); } catch { return {}; } };
@@ -103,32 +119,63 @@ export function createSkills({ home, stateDir, workspaces, gh = (args) => exec('
     if (b.length > 128 * 1024 || !plain(b)) fail('Skill is not plain text.', 400);
     return { ...item, text: b.toString('utf8') };
   }
-  async function preview({ source, skill, scope }) {
+  // A repo's tree, held a few minutes for the cards and lists; a preview reads it fresh, since that is what installs.
+  async function repoTree(source, fresh = false) {
     if (typeof source !== 'string' || !REPO.test(source) || source.includes('..')) fail('Enter a GitHub owner/repo.');
-    await target(scope);
-    if (skill && (typeof skill !== 'string' || !NAME.test(skill))) fail('Invalid skill name.');
+    const hit = trees.get(source);
+    if (!fresh && hit && hit.until > Date.now()) return hit.entries;
     const tree = JSON.parse(await gh([`repos/${source}/git/trees/HEAD?recursive=1`]));
     if (tree.truncated || !Array.isArray(tree.tree) || tree.tree.length > 10000) fail('Repository tree is too large or incomplete.');
-    const entries = tree.tree;
-    const skillDirs = entries.filter((x) => x.type === 'blob' && /^skills\/[^/]+\/SKILL\.md$/.test(x.path)).map((x) => posix.dirname(x.path));
-    if (entries.some((x) => x.path === 'SKILL.md')) skillDirs.push('');
-    const dirs = [...new Set(skillDirs)].filter((p) => !skill || posix.basename(p) === skill || (!p && source.split('/')[1] === skill));
-    if (!dirs.length) fail('No matching SKILL.md in this repository.', 404);
-    if (dirs.length > 40) fail('Choose one skill to install (too many in this repository).');
-    let total = 0; const skills = [];
-    for (const dir of dirs) {
-      const prefix = dir ? `${dir}/` : '';
-      const files = entries.filter((x) => x.type !== 'tree' && x.path.startsWith(prefix) && (!dir || !x.path.slice(prefix.length).startsWith('../')) && (dir || !x.path.includes('/')));
-      if (!files.some((x) => x.path === `${prefix}SKILL.md`) || files.length > 80) fail('Invalid skill folder.');
-      const data = [];
-      for (const f of files) {
-        const name = f.path.slice(prefix.length);
-        if (!safeFile(name) || f.mode !== '100644' && f.mode !== '100755' || !Number.isSafeInteger(f.size) || f.size > 128 * 1024 || (total += f.size) > 2 * 1024 * 1024 || !/^[a-f0-9]{40}$/.test(f.sha)) fail('Skill contains unsafe paths, links, or oversized files.');
-        const blob = JSON.parse(await gh([`repos/${source}/git/blobs/${f.sha}`]));
-        const b = Buffer.from(String(blob.content ?? '').replace(/\s/g, ''), 'base64');
-        if (blob.encoding !== 'base64' || b.length !== f.size || !plain(b)) fail('Skill contains non-text files or changed during download.');
-        data.push({ name, data: b });
-      }
+    trees.set(source, { until: Date.now() + 10 * 60_000, entries: tree.tree });
+    return tree.tree;
+  }
+  async function blob(source, f) {
+    const j = JSON.parse(await gh([`repos/${source}/git/blobs/${f.sha}`]));
+    const b = Buffer.from(String(j.content ?? '').replace(/\s/g, ''), 'base64');
+    if (j.encoding !== 'base64' || b.length !== f.size || !plain(b)) fail(`${f.path} is not a text file or changed during download.`);
+    return b;
+  }
+  // What the tree alone says would stop an install, so the list can say it before anything is downloaded.
+  function problem(files) {
+    if (files.length > MAX_FILES) return `${files.length} files, more than ${MAX_FILES}`;
+    if (files.some((f) => f.type !== 'blob' || f.mode !== '100644' && f.mode !== '100755' || !/^[a-f0-9]{40}$/.test(f.sha))) return 'contains links or submodules';
+    if (files.some((f) => !safeFile(f.path))) return 'contains unsafe paths';
+    if (files.some((f) => !Number.isSafeInteger(f.size) || f.size > MAX_FILE)) return 'has a file over 1 MB';
+    if (files.reduce((a, f) => a + f.size, 0) > MAX_TOTAL) return 'over 4 MB in all';
+    return null;
+  }
+  // The suggested repos with how many skills each has (from their trees only), for the cards.
+  async function catalog() {
+    return { repos: await Promise.all(SOURCES.map(async (source) => {
+      try { return { source, count: skillDirs(await repoTree(source)).length }; } catch { return { source, count: null }; }
+    })) };
+  }
+  // A repo's skills with the name and description from each SKILL.md: only those files are downloaded here.
+  async function browse({ source }) {
+    const entries = await repoTree(source), dirs = skillDirs(entries);
+    if (!dirs.length) fail('No SKILL.md in this repository.', 404);
+    if (dirs.length > 300) fail('Too many skills in this repository.');
+    const skills = await pool(dirs, 8, async (dir) => {
+      const files = filesOf(entries, dir), md = files.find((f) => f.path === (dir ? `${dir}/SKILL.md` : 'SKILL.md'));
+      let meta = { name: '', description: '' };
+      try { if (md.size <= MAX_FILE) meta = header((await blob(source, md)).toString('utf8')); } catch {}
+      const name = meta.name || posix.basename(dir) || source.split('/')[1];
+      return { dir, name, description: meta.description, files: files.length, size: files.reduce((a, f) => a + f.size, 0),
+        problem: problem(files) || (!NAME.test(name) || !meta.description ? 'SKILL.md needs a name and a description' : null) };
+    });
+    return { source, skills };
+  }
+  async function preview({ source, dirs, scope }) {
+    await target(scope);
+    const entries = await repoTree(source, true), known = skillDirs(entries);
+    if (!Array.isArray(dirs) || !dirs.length) fail('Choose at least one skill.');
+    if (dirs.length > 40) fail('Choose 40 skills or fewer.');
+    if (dirs.some((d) => typeof d !== 'string' || !known.includes(d))) fail('That skill is not in this repository.', 404);
+    const skills = [];
+    for (const dir of new Set(dirs)) {
+      const files = filesOf(entries, dir), prefix = dir ? `${dir}/` : '', why = problem(files);
+      if (why) fail(`${posix.basename(dir) || source}: ${why}.`);
+      const data = await pool(files, 8, async (f) => ({ name: f.path.slice(prefix.length), data: await blob(source, f) }));
       const meta = header(data.find((f) => f.name === 'SKILL.md').data.toString('utf8'));
       if (!NAME.test(meta.name) || !meta.description || meta.description.length > 4000) fail('SKILL.md needs a valid name and description.');
       if (skills.some((s) => s.name === meta.name)) fail('Duplicate skill names.');
@@ -185,5 +232,5 @@ export function createSkills({ home, stateDir, workspaces, gh = (args) => exec('
       return { removed: true };
     });
   }
-  return { list, read, preview, install, remove };
+  return { list, read, catalog, browse, preview, install, remove };
 }

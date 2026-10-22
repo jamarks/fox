@@ -2065,8 +2065,10 @@ $('#settings-tools').addEventListener('click', async (e) => {
   }
 });
 // ---------- skills: a page of its own, like Jobs and Pull requests ----------
-// Skills are instructions, not programs. Always show SKILL.md and the full file list before copying any files.
-let skillPreview = null, skillCount = null;
+// Skills are instructions, not programs. Install goes repo card → tick skills → review SKILL.md and every file → install.
+let skillPreview = null, skillCount = null, skillItems = [], skillSources = [], skillCounts = null, skillInstallSeen = false;
+let skillRepo = null, skillBrowse = null;
+const skillChecked = new Set();
 async function skillApi(action, body) {
   const r = await fetch(`/api/skills/${action}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const j = await r.json(); if (!r.ok) throw new Error(j.error || 'That did not work.'); return j;
@@ -2080,10 +2082,11 @@ async function loadSkills() {
   try {
     const r = await fetch('/api/skills'); if (!r.ok) throw new Error('Could not load skills.');
     const { items, sources, scopes } = await r.json();
-    skillCount = items.length; renderSkillsEntry();
+    skillItems = items; skillSources = sources; skillCount = items.length; renderSkillsEntry();
     $('#skill-count').textContent = items.length || '';
+    const scope = $('#skill-scope').value;
     $('#skill-scope').innerHTML = '<option value="global">Every workspace</option>' + scopes.map((s) => `<option value="${esc(s.id)}">${esc(s.name)} workspace</option>`).join('');
-    $('#skill-source').setAttribute('list', 'skill-sources');
+    if ([...$('#skill-scope').options].some((o) => o.value === scope)) $('#skill-scope').value = scope;
     // One group per place a skill applies: every workspace, or one workspace. Which folder it sits in (fx's,
     // Claude Code's…) is on hover; one line per skill, the full text is behind Read.
     const groups = new Map();
@@ -2091,9 +2094,47 @@ async function loadSkills() {
       const place = item.scope === 'global' ? 'Every workspace' : `${item.group.split(' · ')[0]} workspace`;
       if (!groups.has(place)) groups.set(place, []); groups.get(place).push(item);
     }
-    $('#skill-list').innerHTML = `<datalist id="skill-sources">${sources.map((s) => `<option value="${esc(s)}">`).join('')}</datalist>` +
-      (items.length ? [...groups].map(([place, skills]) => `<div class="skill-group">${esc(place)} <span>${skills.length}</span></div>` + skills.map((s) => `<div class="skill-row" title="${esc(shortPath(s.path))}"><span class="skill-name">${esc(s.name)}</span><span class="skill-desc" title="${esc(s.description || '')}">${esc(s.description || 'No description')}</span>${s.source ? `<span class="skill-src">${esc(s.source)}</span>` : ''}<button type="button" class="set-act" data-skill-read="${esc(s.id)}">Read</button>${s.owned ? `<button type="button" class="set-act" data-skill-remove="${esc(s.id)}">Remove</button>` : ''}</div>`).join('')).join('') : '<div class="set-foot">No skills yet. Install adds them from a GitHub repository.</div>');
+    $('#skill-list').innerHTML = items.length ? [...groups].map(([place, skills]) => `<div class="skill-group">${esc(place)} <span>${skills.length}</span></div>` + skills.map((s) => `<div class="skill-row" title="${esc(shortPath(s.path))}"><span class="skill-name">${esc(s.name)}</span><span class="skill-desc" title="${esc(s.description || '')}">${esc(s.description || 'No description')}</span>${s.source ? `<span class="skill-src">${esc(s.source)}</span>` : ''}<button type="button" class="set-act" data-skill-read="${esc(s.id)}">Read</button>${s.owned ? `<button type="button" class="set-act" data-skill-remove="${esc(s.id)}">Remove</button>` : ''}</div>`).join('')).join('') : '<div class="set-foot">No skills yet.</div>';
+    renderSkillRepos(); if (skillBrowse) renderSkillPick();
+    if (!items.length && !skillInstallSeen && skillsOpen()) showSkillInstall(true); // nothing installed: where to get them is the page
   } catch (err) { $('#skill-note').textContent = err.message; }
+}
+function showSkillInstall(show) {
+  skillInstallSeen = true;
+  $('#skill-install').classList.toggle('hidden', !show);
+  $('#skill-add').setAttribute('aria-expanded', String(show)); $('#skill-add').classList.toggle('active', show);
+  if (show && !skillCounts) {
+    skillCounts = {};
+    fetch('/api/skills/catalog').then((r) => r.json()).then(({ repos }) => { for (const r of repos) skillCounts[r.source] = r.count; renderSkillRepos(); }).catch(() => {});
+  }
+}
+function renderSkillRepos() {
+  const count = (src) => skillCounts?.[src] == null ? '' : `${skillCounts[src]} skill${skillCounts[src] === 1 ? '' : 's'}`;
+  const other = skillRepo && !skillSources.includes(skillRepo);
+  $('#skill-repos').innerHTML = skillSources.map((src) => `<button type="button" class="skill-repo${skillRepo === src ? ' on' : ''}" data-skill-repo="${esc(src)}"><b>${esc(src)}</b><span>${count(src)}</span></button>`).join('') +
+    `<button type="button" class="skill-repo${other || !$('#skill-other').classList.contains('hidden') ? ' on' : ''}" data-skill-other><b>${other ? esc(skillRepo) : 'Other repo…'}</b><span>owner/repo</span></button>`;
+}
+async function openSkillRepo(source) {
+  skillRepo = source; skillBrowse = null; skillChecked.clear(); skillPreview = null;
+  $('#skill-preview').innerHTML = ''; $('#skill-note').textContent = '';
+  $('#skill-pick').innerHTML = '<div class="set-foot">Reading the repository…</div>'; $('#skill-pick-foot').classList.add('hidden');
+  renderSkillRepos();
+  try {
+    const j = await skillApi('browse', { source });
+    if (skillRepo !== source) return;
+    skillBrowse = j; renderSkillPick();
+  } catch (err) { if (skillRepo === source) $('#skill-pick').innerHTML = `<div class="set-foot">${esc(err.message)}</div>`; }
+}
+// The repo's skills to tick. One already in the chosen place says so; one fox cannot install says why.
+function renderSkillPick() {
+  const scope = $('#skill-scope').value;
+  $('#skill-pick').innerHTML = skillBrowse.skills.map((s) => {
+    const installed = skillItems.some((i) => i.name === s.name && i.scope === scope), off = Boolean(s.problem) || installed;
+    if (off) skillChecked.delete(s.dir);
+    return `<label class="skill-row skill-pickrow${off ? ' off' : ''}"><input type="checkbox" value="${esc(s.dir)}"${off ? ' disabled' : ''}${skillChecked.has(s.dir) ? ' checked' : ''}><span class="skill-name">${esc(s.name)}</span><span class="skill-desc${s.problem ? ' bad' : ''}" title="${esc(s.problem || s.description || '')}">${esc(s.problem ? `Can't install: ${s.problem}` : s.description || 'No description')}</span>${installed ? '<span class="skill-src">installed</span>' : ''}</label>`;
+  }).join('');
+  $('#skill-pick-foot').classList.remove('hidden');
+  $('#skill-review').textContent = skillChecked.size ? `Review ${skillChecked.size}` : 'Review';
 }
 function skillsOpen() { return !$('#skill-view').classList.contains('hidden'); }
 function openSkills() {
@@ -2116,26 +2157,41 @@ function closeSkills({ sync = true } = {}) {
 $('#skills-entry').addEventListener('click', () => (skillsOpen() ? closeSkills() : openSkills()));
 $('#skill-close').addEventListener('click', () => closeSkills());
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && skillsOpen() && !e.defaultPrevented && !e.target.closest?.('input, select')) closeSkills(); });
-$('#skill-add').addEventListener('click', () => {
-  const form = $('#skill-form'), show = form.classList.toggle('hidden') === false;
-  $('#skill-add').setAttribute('aria-expanded', String(show)); $('#skill-add').classList.toggle('active', show);
-  if (show) $('#skill-source').focus();
+$('#skill-add').addEventListener('click', () => showSkillInstall($('#skill-install').classList.contains('hidden')));
+$('#skill-repos').addEventListener('click', (e) => {
+  const repo = e.target.closest('[data-skill-repo]');
+  if (repo) { $('#skill-other').classList.add('hidden'); return openSkillRepo(repo.dataset.skillRepo); }
+  if (!e.target.closest('[data-skill-other]')) return;
+  $('#skill-other').classList.remove('hidden'); renderSkillRepos(); $('#skill-source').focus();
 });
-$('#skill-form').addEventListener('submit', async (e) => {
-  e.preventDefault(); const btn = e.target.querySelector('button'); btn.disabled = true; skillPreview = null;
-  $('#skill-preview').innerHTML = ''; $('#skill-note').textContent = 'Checking repository…';
+$('#skill-other').addEventListener('submit', (e) => { e.preventDefault(); const src = $('#skill-source').value.trim(); if (src) openSkillRepo(src); });
+$('#skill-pick').addEventListener('change', (e) => {
+  if (e.target.type !== 'checkbox') return;
+  e.target.checked ? skillChecked.add(e.target.value) : skillChecked.delete(e.target.value);
+  $('#skill-review').textContent = skillChecked.size ? `Review ${skillChecked.size}` : 'Review';
+});
+$('#skill-scope').addEventListener('change', () => { if (skillBrowse) renderSkillPick(); });
+$('#skill-review').addEventListener('click', async () => {
+  if (!skillChecked.size) { $('#skill-note').textContent = 'Tick at least one skill.'; return; }
+  const btn = $('#skill-review'); btn.disabled = true; skillPreview = null;
+  $('#skill-preview').innerHTML = ''; $('#skill-note').textContent = 'Downloading for review…';
   try {
-    const j = await skillApi('preview', { source: $('#skill-source').value.trim(), skill: $('#skill-name').value.trim(), scope: $('#skill-scope').value });
+    const j = await skillApi('preview', { source: skillRepo, dirs: [...skillChecked], scope: $('#skill-scope').value });
     skillPreview = j.token;
-    $('#skill-preview').innerHTML = `<div class="skill-review"><strong>Review from ${esc(j.source)}</strong><span class="set-sub">${esc(j.scope === 'global' ? 'Every workspace' : $('#skill-scope').selectedOptions[0].textContent)} · ${j.skills.length} skill(s)</span>${j.skills.map((s) => `<details ${j.skills.length === 1 ? 'open' : ''}><summary>${esc(s.name)} · ${s.files.length} files · ${s.files.reduce((a, f) => a + f.size, 0)} bytes</summary><p>${esc(s.description)}</p><div class="set-sub">${s.files.map((f) => `${esc(f.name)} (${f.size} B)`).join('<br>')}</div><div class="md skill-text">${renderMarkdown(s.text)}</div></details>`).join('')}<button type="button" class="set-act" id="skill-confirm">Install these skills</button></div>`;
+    $('#skill-preview').innerHTML = `<div class="skill-review"><strong>Review from ${esc(j.source)}</strong><span class="set-sub">${esc($('#skill-scope').selectedOptions[0].textContent)} · ${j.skills.length} skill${j.skills.length === 1 ? '' : 's'}</span>${j.skills.map((s) => `<details ${j.skills.length === 1 ? 'open' : ''}><summary>${esc(s.name)} · ${s.files.length} files · ${Math.ceil(s.files.reduce((a, f) => a + f.size, 0) / 1024)} KB</summary><p>${esc(s.description)}</p><div class="set-sub">${s.files.map((f) => `${esc(f.name)} (${f.size} B)`).join('<br>')}</div><div class="md skill-text">${renderMarkdown(s.text)}</div></details>`).join('')}<button type="button" class="set-act" id="skill-confirm">Install ${j.skills.length === 1 ? 'this skill' : `these ${j.skills.length} skills`}</button></div>`;
     $('#skill-note').textContent = 'These are untrusted instructions. Review before installing.';
+    $('#skill-preview').scrollIntoView({ block: 'nearest' });
   } catch (err) { $('#skill-note').textContent = err.message; } finally { btn.disabled = false; }
 });
 $('#skill-preview').addEventListener('click', async (e) => {
   if (e.target.id !== 'skill-confirm' || !skillPreview) return;
   const token = skillPreview; skillPreview = null; e.target.disabled = true;
-  try { const j = await skillApi('install', { token }); $('#skill-preview').innerHTML = ''; $('#skill-note').textContent = `${j.installed.join(', ')} installed. New and resumed sessions see it.`; await loadSkills(); }
-  catch (err) { $('#skill-note').textContent = err.message; }
+  try {
+    const j = await skillApi('install', { token });
+    $('#skill-preview').innerHTML = ''; skillChecked.clear();
+    $('#skill-note').textContent = `${j.installed.join(', ')} installed. New and resumed sessions see ${j.installed.length === 1 ? 'it' : 'them'}.`;
+    await loadSkills();
+  } catch (err) { $('#skill-note').textContent = err.message; }
 });
 // Read opens the skill under its row; a second click closes it.
 $('#skill-list').addEventListener('click', async (e) => {

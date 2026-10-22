@@ -36,7 +36,7 @@ test('discovers user and workspace skills, not the repos\' own, without followin
 });
 test('preview shows files and markdown before writing; install is confirmed and removal refuses edits', async (t) => {
   const f = await fixture(t), api = f.api();
-  const p = await api.preview({ source: 'vercel-labs/skills', scope: 'workspace:one', skill: 'example' });
+  const p = await api.preview({ source: 'vercel-labs/skills', scope: 'workspace:one', dirs: ['skills/example'] });
   assert.equal(p.skills[0].files.length, 2);
   assert.match(p.skills[0].text, /Do not run scripts/);
   assert.deepEqual(await readdir(f.ws.dir), ['repo']);
@@ -55,36 +55,48 @@ test('preview shows files and markdown before writing; install is confirmed and 
   await api.remove(id);
   assert.equal((await api.list()).items.some((s) => s.name === 'example'), false);
 });
-test('only publishes top-level skill folders, not repository internal skill-data', async (t) => {
+test('browse lists skills under skills/, grouped folders too, not a skill\'s own material or other folders', async (t) => {
   const f = await fixture(t);
   f.tree.push({ path: 'skill-data/internal/SKILL.md', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 50 });
   f.files['skills/example/docs/internal/SKILL.md'] = 'nested resource';
   f.tree.push({ path: 'skills/example/docs/internal/SKILL.md', type: 'blob', mode: '100644', sha: 'c'.repeat(40), size: 15 });
-  const p = await f.api().preview({ source: 'x/y', scope: 'global' });
-  assert.deepEqual(p.skills.map((s) => s.name), ['example']);
+  f.files['skills/engineering/tdd/SKILL.md'] = '---\nname: tdd\ndescription: Small steps.\n---\n# TDD';
+  f.tree.push({ path: 'skills/engineering/tdd/SKILL.md', type: 'blob', mode: '100644', sha: 'd'.repeat(40), size: Buffer.byteLength(f.files['skills/engineering/tdd/SKILL.md']) });
+  f.tree.push({ path: 'skills/engineering/tdd/big.txt', type: 'blob', mode: '100644', sha: 'e'.repeat(40), size: 2_000_000 });
+  const api = f.api(), b = await api.browse({ source: 'x/y' });
+  assert.deepEqual(b.skills.map((s) => [s.dir, s.name, s.description, s.problem]), [
+    ['skills/engineering/tdd', 'tdd', 'Small steps.', 'has a file over 1 MB'],
+    ['skills/example', 'example', 'Test the preview.', null],
+  ]);
+  assert.deepEqual(await api.catalog().then((c) => c.repos.map((r) => r.count)), [2, 2, 2, 2]);
+  await assert.rejects(() => api.preview({ source: 'x/y', scope: 'global', dirs: ['skills/engineering/tdd'] }), /tdd: has a file over 1 MB/);
+  await assert.rejects(() => api.preview({ source: 'x/y', scope: 'global', dirs: ['skills/example/docs/internal'] }), /not in this repository/);
+  await assert.rejects(() => api.preview({ source: 'x/y', scope: 'global', dirs: [] }), /at least one/);
+  assert.deepEqual((await api.preview({ source: 'x/y', scope: 'global', dirs: ['skills/example'] })).skills.map((s) => s.name), ['example']);
 });
 test('accepts folded YAML descriptions and rejects empty descriptions', async (t) => {
   const f = await fixture(t);
   f.files['skills/example/SKILL.md'] = '---\nname: example\ndescription: >\n  Useful for tests\n  and safety.\n---\n# Sample';
   f.tree[0].size = Buffer.byteLength(f.files['skills/example/SKILL.md']);
-  const p = await f.api().preview({ source: 'x/y', scope: 'global' });
+  const p = await f.api().preview({ source: 'x/y', scope: 'global', dirs: ['skills/example'] });
   assert.equal(p.skills[0].description, 'Useful for tests and safety.');
   f.files['skills/example/SKILL.md'] = '---\nname: example\ndescription: >\n---\n# Sample';
   f.tree[0].size = Buffer.byteLength(f.files['skills/example/SKILL.md']);
-  await assert.rejects(() => f.api().preview({ source: 'x/y', scope: 'global' }), /name and description/);
+  await assert.rejects(() => f.api().preview({ source: 'x/y', scope: 'global', dirs: ['skills/example'] }), /name and description/);
 });
 test('rejects unsafe paths, symlinks, oversized files, collisions and unsafe destinations', async (t) => {
   const f = await fixture(t), api = f.api();
   await assert.rejects(() => api.preview({ source: '../../etc', scope: 'global' }), /owner\/repo/);
+  const one = { source: 'x/y', scope: 'global', dirs: ['skills/example'] };
   f.tree[1].mode = '120000';
-  await assert.rejects(() => api.preview({ source: 'x/y', scope: 'global' }), /unsafe/);
-  f.tree[1].mode = '100644'; f.tree[1].size = 200000;
-  await assert.rejects(() => api.preview({ source: 'x/y', scope: 'global' }), /unsafe/);
+  await assert.rejects(() => api.preview(one), /links/);
+  f.tree[1].mode = '100644'; f.tree[1].size = 2_000_000;
+  await assert.rejects(() => api.preview(one), /over 1 MB/);
   f.tree[1].size = Buffer.byteLength(f.files['skills/example/docs/notes.md']);
-  const p = await api.preview({ source: 'x/y', scope: 'global' });
+  const p = await api.preview(one);
   await mkdir(join(f.home, '.fx/skills/example'), { recursive: true });
   await assert.rejects(() => api.install(p.token), /already exists/);
-  const p2 = await api.preview({ source: 'x/y', scope: 'global' });
+  const p2 = await api.preview(one);
   const { rm } = await import('node:fs/promises'); await rm(join(f.home, '.fx/skills'), { recursive: true });
   await symlink(f.ws.dir, join(f.home, '.fx/skills'));
   await assert.rejects(() => api.install(p2.token), /symlink/);
