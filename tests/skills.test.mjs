@@ -1,51 +1,91 @@
-// fx's shelf reads metadata only, within its documented project/personal discovery roots.
-import test from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, symlink, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { listSkills } from '../skills.mjs';
+import { createSkills, SOURCES } from '../skills.mjs';
 
-const skill = (name, description = 'Review changes') => `---\nname: ${name}\ndescription: ${description}\n---\n# Instructions\nSECRET BODY\n`;
-async function add(root, name, text) {
-  const dir = join(root, name);
-  await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, 'SKILL.md'), text);
+async function fixture(t) {
+  const home = await mkdtemp(join(tmpdir(), 'fox-skills-'));
+  t.after(async () => { const { rm } = await import('node:fs/promises'); await rm(home, { recursive: true, force: true }); });
+  const ws = { id: 'one', name: 'project', dir: join(home, 'workspaces/project'), repos: [{ dir: 'repo' }] };
+  await mkdir(join(ws.dir, 'repo'), { recursive: true });
+  const files = { 'skills/example/SKILL.md': '---\nname: example\ndescription: Test the preview.\n---\n# Sample\nDo not run scripts.', 'skills/example/docs/notes.md': 'Notes' };
+  const tree = Object.entries(files).map(([path, text], i) => ({ path, type: 'blob', mode: '100644', sha: String(i + 1).padStart(40, 'a'), size: Buffer.byteLength(text) }));
+  const gh = async ([url]) => url.includes('/trees/') ? JSON.stringify({ tree }) : JSON.stringify({ encoding: 'base64', content: Buffer.from(files[tree.find((x) => url.endsWith(x.sha)).path]).toString('base64') });
+  return { home, ws, tree, files, gh, api: (override = {}) => createSkills({ home, stateDir: join(home, 'state'), workspaces: { get: async (id) => id === ws.id ? ws : null, list: async () => [ws] }, gh, ...override }) };
 }
 
-test('scans repo, parents before home and personal roots, not sibling repos or other folders', async (t) => {
-  const home = await mkdtemp(join(tmpdir(), 'fox-skills-')); t.after(() => rm(home, { recursive: true, force: true }));
-  const repo = join(home, 'workspaces', 'team', 'repo'); await mkdir(repo, { recursive: true });
-  await add(join(repo, '.fx/skills'), 'review', skill('review', 'Review changes'));
-  await add(join(home, 'workspaces', 'team', 'skills'), 'parent', skill('parent'));
-  await add(join(home, '.fx/skills'), 'personal', skill('personal'));
-  await add(join(home, '.config/opencode/skills'), 'compat', skill('compat'));
-  await add(join(home, 'skills'), 'not-a-project-root', skill('not-a-project-root'));
-  await add(join(home, 'workspaces', 'team', 'other', 'skills'), 'sibling', skill('sibling'));
-  const rows = await listSkills(repo, home);
-  assert.deepEqual(rows.map((r) => r.name), ['review', 'parent', 'personal', 'compat']);
-  assert.equal(rows[0].source, 'Project · .fx/skills');
-  assert.equal(rows[2].source, 'Personal · .fx/skills');
-  assert.doesNotMatch(JSON.stringify(rows), /SECRET BODY/);
+test('catalog sources are shipped as data', () => assert.deepEqual(SOURCES, ['vercel-labs/skills', 'anthropics/skills', 'mattpocock/skills', 'vercel-labs/agent-browser']));
+test('discovers user, workspace and repo skills without following linked folders', async (t) => {
+  const f = await fixture(t);
+  for (const dir of [join(f.home, '.claude/skills/borrowed'), join(f.ws.dir, '.fx/skills/local'), join(f.ws.dir, 'repo/skills/inside')]) {
+    await mkdir(dir, { recursive: true }); await writeFile(join(dir, 'SKILL.md'), '---\nname: custom\ndescription: Shared.\n---\n# Instructions');
+  }
+  await symlink(join(f.home, '.claude/skills/borrowed'), join(f.home, '.claude/skills/linked'));
+  await mkdir(join(f.home, 'private/skills/secret'), { recursive: true });
+  await writeFile(join(f.home, 'private/skills/secret/SKILL.md'), '---\nname: secret\n---\nPrivate data');
+  await symlink(join(f.home, 'private'), join(f.home, '.agents'));
+  await symlink(join(f.home, 'private'), join(f.ws.dir, 'repo/.claude'));
+  const api = f.api(); const list = await api.list();
+  assert.equal(list.items.length, 3);
+  assert.deepEqual(list.items.map((s) => s.group), ['Claude Code', 'project · workspace', 'project/repo · workspace']);
+  assert.equal(list.items[0].owned, false);
+  assert.match((await api.read(list.items[0].id)).text, /Instructions/);
+  await assert.rejects(() => api.remove(list.items[0].id), /Only skills installed by fox/);
 });
-
-test('refuses symlinks and invalid headers, and bounds names, descriptions and bytes', async (t) => {
-  const home = await mkdtemp(join(tmpdir(), 'fox-skills-')); t.after(() => rm(home, { recursive: true, force: true }));
-  const repo = join(home, 'repo'), outside = join(home, 'elsewhere');
-  await mkdir(repo); await mkdir(outside);
-  await add(join(outside, 'skills'), 'secret', skill('secret'));
-  await symlink(join(outside, 'skills'), join(repo, 'skills'));
-  const root = join(repo, '.fx/skills');
-  await add(root, 'good', skill('good'));
-  await add(root, 'no-header', '# Just instructions');
-  await add(root, 'bad-name', skill('bad\nInjected'));
-  await add(root, 'bad-desc', skill('bad-desc', 'Oops\u0007terminal'));
-  await add(root, 'unclosed', '---\nname: unclosed\n');
-  await add(root, 'huge', skill('huge') + 'x'.repeat(8192));
-  await symlink(join(outside, 'skills', 'secret'), join(root, 'linked'));
-  await mkdir(join(root, 'file-link'));
-  await symlink(join(outside, 'skills', 'secret', 'SKILL.md'), join(root, 'file-link', 'SKILL.md'));
-  assert.deepEqual((await listSkills(repo, home)).map((r) => r.name), ['good', 'no-header']);
-  await assert.rejects(() => listSkills(join(home, 'missing'), home), { status: 400 });
-  await assert.rejects(() => listSkills('../'.repeat(2200), home), { status: 400 });
+test('preview shows files and markdown before writing; install is confirmed and removal refuses edits', async (t) => {
+  const f = await fixture(t), api = f.api();
+  const p = await api.preview({ source: 'vercel-labs/skills', scope: 'workspace:one', skill: 'example' });
+  assert.equal(p.skills[0].files.length, 2);
+  assert.match(p.skills[0].text, /Do not run scripts/);
+  assert.deepEqual(await readdir(f.ws.dir), ['repo']);
+  await api.install(p.token);
+  await assert.rejects(() => api.install(p.token), /expired/);
+  const id = (await api.list()).items.find((s) => s.name === 'example').id;
+  assert.equal((await api.list()).items.find((s) => s.id === id).owned, true);
+  assert.equal((await api.read(id)).source, 'vercel-labs/skills');
+  assert.equal(await readFile(join(f.ws.dir, '.fx/skills/example/docs/notes.md'), 'utf8'), 'Notes');
+  await writeFile(join(f.ws.dir, '.fx/skills/example/SKILL.md'), 'changed');
+  await assert.rejects(() => api.remove(id), /changed/);
+  await writeFile(join(f.ws.dir, '.fx/skills/example/SKILL.md'), f.files['skills/example/SKILL.md']);
+  await mkdir(join(f.ws.dir, '.fx/skills/example/extra'));
+  await assert.rejects(() => api.remove(id), /changed/, 'even an added empty directory is user-owned');
+  const { rm } = await import('node:fs/promises'); await rm(join(f.ws.dir, '.fx/skills/example/extra'), { recursive: true });
+  await api.remove(id);
+  assert.equal((await api.list()).items.some((s) => s.name === 'example'), false);
+});
+test('only publishes top-level skill folders, not repository internal skill-data', async (t) => {
+  const f = await fixture(t);
+  f.tree.push({ path: 'skill-data/internal/SKILL.md', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 50 });
+  f.files['skills/example/docs/internal/SKILL.md'] = 'nested resource';
+  f.tree.push({ path: 'skills/example/docs/internal/SKILL.md', type: 'blob', mode: '100644', sha: 'c'.repeat(40), size: 15 });
+  const p = await f.api().preview({ source: 'x/y', scope: 'global' });
+  assert.deepEqual(p.skills.map((s) => s.name), ['example']);
+});
+test('accepts folded YAML descriptions and rejects empty descriptions', async (t) => {
+  const f = await fixture(t);
+  f.files['skills/example/SKILL.md'] = '---\nname: example\ndescription: >\n  Useful for tests\n  and safety.\n---\n# Sample';
+  f.tree[0].size = Buffer.byteLength(f.files['skills/example/SKILL.md']);
+  const p = await f.api().preview({ source: 'x/y', scope: 'global' });
+  assert.equal(p.skills[0].description, 'Useful for tests and safety.');
+  f.files['skills/example/SKILL.md'] = '---\nname: example\ndescription: >\n---\n# Sample';
+  f.tree[0].size = Buffer.byteLength(f.files['skills/example/SKILL.md']);
+  await assert.rejects(() => f.api().preview({ source: 'x/y', scope: 'global' }), /name and description/);
+});
+test('rejects unsafe paths, symlinks, oversized files, collisions and unsafe destinations', async (t) => {
+  const f = await fixture(t), api = f.api();
+  await assert.rejects(() => api.preview({ source: '../../etc', scope: 'global' }), /owner\/repo/);
+  f.tree[1].mode = '120000';
+  await assert.rejects(() => api.preview({ source: 'x/y', scope: 'global' }), /unsafe/);
+  f.tree[1].mode = '100644'; f.tree[1].size = 200000;
+  await assert.rejects(() => api.preview({ source: 'x/y', scope: 'global' }), /unsafe/);
+  f.tree[1].size = Buffer.byteLength(f.files['skills/example/docs/notes.md']);
+  const p = await api.preview({ source: 'x/y', scope: 'global' });
+  await mkdir(join(f.home, '.fx/skills/example'), { recursive: true });
+  await assert.rejects(() => api.install(p.token), /already exists/);
+  const p2 = await api.preview({ source: 'x/y', scope: 'global' });
+  const { rm } = await import('node:fs/promises'); await rm(join(f.home, '.fx/skills'), { recursive: true });
+  await symlink(f.ws.dir, join(f.home, '.fx/skills'));
+  await assert.rejects(() => api.install(p2.token), /symlink/);
 });

@@ -18,11 +18,12 @@ import { promisify } from 'node:util';
 import { createSearchIndex } from './search.mjs';
 import { readMetrics } from './metrics.mjs';
 import { TOOLS, isInstalled, isEnabled, withEnabled, addArgs, findServer } from './tools.mjs';
+import { createSkills } from './skills.mjs';
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
 import { createAppRegistry, createAppRouter } from './apps.mjs';
 import { createFxSettings } from './fxsettings.mjs';
-import { listSkills } from './skills.mjs';
+import { listSkills } from './skill-shelf.mjs';
 import { fastForward, SAFE_GIT } from './gitsync.mjs';
 import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
 import { createJobStore, createRunner, updateJobRepo } from './jobs.mjs';
@@ -131,6 +132,7 @@ Other files here are notes, scratch work and job scripts.
 `;
 }
 const workspaces = createWorkspaces({ stateDir: STATE_DIR, rootDir: join(homedir(), 'workspaces'), agentNotes: workspaceAgentNotes });
+const skills = createSkills({ home: homedir(), stateDir: STATE_DIR, workspaces });
 // A workspace repo's branch, changed from the sidebar (branches.mjs); refused while a session there is working.
 const branches = createBranches({
   workspaces,
@@ -583,6 +585,18 @@ async function handlePanelRequest(req, res) {
       try { const { key, value } = JSON.parse(await readBody(req) || '{}'); return send(res, 200, await fxSettings.set(key, value)); }
       catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
     }
+    if (p === '/api/skills' || p === '/api/skills/preview' || p === '/api/skills/install' || p === '/api/skills/read' || p === '/api/skills/remove') {
+      try {
+        if (p === '/api/skills' && req.method === 'GET') return send(res, 200, await skills.list());
+        if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
+        const body = JSON.parse(await readBody(req) || '{}');
+        const result = p === '/api/skills/preview' ? await skills.preview(body)
+          : p === '/api/skills/install' ? await skills.install(body.token)
+          : p === '/api/skills/read' ? await skills.read(body.id)
+          : p === '/api/skills/remove' ? await skills.remove(body.id) : null;
+        return result ? send(res, 200, result) : send(res, 404, { error: 'not found' });
+      } catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
+    }
     if (p === '/api/tools' && req.method === 'GET') return send(res, 200, await listTools());
     // Sign-in progress for a remote tool (see startSignIn).
     if (req.method === 'GET' && (m = p.match(/^\/api\/tools\/([a-z0-9-]+)\/signin$/))) {
@@ -707,7 +721,10 @@ async function handlePanelRequest(req, res) {
     }
     if (p === '/api/workspaces' && req.method === 'GET') return send(res, 200, await listWorkspaces(true));
     if (p === '/api/companion-repos' && req.method === 'GET') return send(res, 200, await workspaces.companions(url.searchParams.get('cwd') ?? ''));
-    if (p === '/api/skills' && req.method === 'GET') return send(res, 200, await listSkills(url.searchParams.get('cwd'), homedir()));
+    if (p === '/api/skill-shelf' && req.method === 'GET') {
+      try { return send(res, 200, await listSkills(url.searchParams.get('cwd'), homedir())); }
+      catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
+    }
     if (p === '/api/workspaces' && req.method === 'POST') {
       try { const ws = await workspaces.create(JSON.parse(await readBody(req) || '{}')); return send(res, 200, ws); }
       catch (err) { return send(res, err.status ?? 500, { error: err.message }); }

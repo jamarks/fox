@@ -20,12 +20,12 @@ fx is the coding agent from Vercel Labs. fox runs it on a VPS or a computer at h
 ## What's new
 
 <!-- changelog:start -->
-- **2026-10-21** Waking a session hides the terminal behind the notice ([#30](https://github.com/jamarks/fox/pull/30))
-- **2026-10-21** Opening a sleeping session shows at once ([#29](https://github.com/jamarks/fox/pull/29))
-- **2026-10-21** Right column steps aside on Jobs, Pull requests, Settings and the mosaic ([#28](https://github.com/jamarks/fox/pull/28))
-- **2026-10-21** Expose new fx settings as opt-in controls ([#27](https://github.com/jamarks/fox/pull/27))
-- **2026-10-21** Check provider headroom before launching a swarm ([#26](https://github.com/jamarks/fox/pull/26))
-- **2026-10-20** Choose model effort and speed without changing defaults ([#25](https://github.com/jamarks/fox/pull/25))
+- **2026-10-22** Branch menu: solid over the sky theme, long names on one line ([#40](https://github.com/jamarks/fox/pull/40))
+- **2026-10-22** Switch a workspace repo's branch from the sidebar, and get back to main safely ([#37](https://github.com/jamarks/fox/pull/37))
+- **2026-10-22** Expose new fx settings as opt-in controls ([#38](https://github.com/jamarks/fox/pull/38))
+- **2026-10-22** The fox winks at a new reply and yawns when all is quiet ([#36](https://github.com/jamarks/fox/pull/36))
+- **2026-10-21** Pull requests: Later pauses a PR without losing it, Resume brings it back ([#34](https://github.com/jamarks/fox/pull/34))
+- **2026-10-21** Choose explicit companion repos for a new fx session ([#31](https://github.com/jamarks/fox/pull/31))
 
 All of it: [CHANGELOG.md](CHANGELOG.md).
 <!-- changelog:end -->
@@ -40,7 +40,7 @@ All of it: [CHANGELOG.md](CHANGELOG.md).
 - **Jobs**: scripts on a schedule, each with its model, log, summary and links. A job can have fx make a change and open a pull request it checked itself. [docs/jobs.md](docs/jobs.md)
 - **Pull requests** of your workspaces' repos in one list: what each does, its files, the review job's verdict; merge or close it from fox.
 - **Tools** from Settings, for fx and Claude Code: a browser, Chrome DevTools, library docs, Vercel, Linear.
-- **Skills**: click ✳ in the terminal bar to search installed fx skills for that folder and insert an unsent draft. fx loads the skill when you send it.
+- **Skills for fx** in Settings: read discovered skills, preview and install GitHub skills globally or per workspace, and remove fox-installed skills. Click ✳ in the terminal bar to find skills for that folder and insert an unsent draft.
 - **Search** across every session (⌥Space), **metrics** for the last 7 and 30 days, seven **themes** (one is a real star map).
 - **On a server**: open it from any device, see the dev servers fx starts, publish them as named apps. [docs/server.md](docs/server.md)
 
