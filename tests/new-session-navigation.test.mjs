@@ -7,7 +7,7 @@ const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8')
 const openTerminal = app.slice(app.indexOf('async function openTerminal('), app.indexOf('\nfunction terminalFontFamily()'));
 
 for (const [kind, terminal, expected] of [
-  ['new', { name: 'new-terminal' }, ['refresh', 'settings', 'prs', 'jobs', 'attach']],
+  ['new', { name: 'new-terminal' }, ['refresh', 'settings', 'prs', 'skills', 'jobs', 'attach']],
   ['resume', { name: 'existing', resume: 'session-1' }, ['refresh', 'attach', 'select']],
   ['error', { error: 'failed' }, ['alert']],
 ]) {
@@ -19,6 +19,7 @@ for (const [kind, terminal, expected] of [
       refresh: async () => calls.push('refresh'),
       closeSettings: () => calls.push('settings'),
       closePrs: () => calls.push('prs'),
+      closeSkills: () => calls.push('skills'),
       closeJob: () => calls.push('jobs'),
       attachTab: () => calls.push('attach'),
       selectSession: () => calls.push('select'),

@@ -38,6 +38,7 @@
     <div id="session-groups"></div>
     <button type="button" id="jobs-entry" title="Jobs: scripts on a schedule"></button>
     <button type="button" id="prs-entry" title="Open pull requests of your workspaces"></button>
+    <button type="button" id="skills-entry" title="Skills: instructions fx loads when needed"></button>
     <footer class="sidebar-footer">
       <a id="footer-version" class="footer-version" target="_blank" rel="noopener"></a>
       <div id="mem" class="hidden"><span id="mem-text"></span><span class="mem-bar"><i id="mem-fill"></i></span></div>
@@ -157,16 +158,6 @@
           <h3 class="set-sec">Tools <span class="set-note">every session</span></h3>
           <div id="settings-tools"></div>
           <div id="settings-tools-note" class="set-foot"></div>
-          <h3 class="set-sec">Skills for fx <span class="set-note">new and resumed sessions</span></h3>
-          <div class="set-foot">Loaded when needed. Use <code>$name</code> or <code>/skills</code> to pick one.</div>
-          <div id="settings-skills"></div>
-          <form id="skill-form" class="skill-form">
-            <label>From GitHub <input id="skill-source" placeholder="owner/repo" required spellcheck="false" autocomplete="off"></label>
-            <label>Skill (optional) <input id="skill-name" placeholder="all skills" spellcheck="false" autocomplete="off"></label>
-            <label>Install for <select id="skill-scope"><option value="global">Every workspace</option></select></label>
-            <button class="set-act" type="submit">Preview install</button>
-          </form>
-          <div id="skill-preview"></div><div id="skill-note" class="set-foot" role="status"></div>
           <h3 class="set-sec" id="set-devices">Devices</h3>
           <button type="button" id="pair-phone" class="set-row"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><path d="M7 12.5h2"/></svg><span>Pair phone</span><span class="set-go">›</span></button>
           <h3 class="set-sec set-keys">Keyboard</h3>
@@ -193,6 +184,23 @@
         <div id="pr-filters" class="pr-filters" aria-label="Pull request status"><button type="button" data-pr-filter="open" class="on">Open</button><button type="button" data-pr-filter="merged">Merged</button><button type="button" data-pr-filter="all">All</button></div>
         <div id="pr-list" role="list"></div>
         <button type="button" id="pr-more" class="hidden">Load more</button>
+      </section>
+      <section id="skill-view" class="hidden" aria-label="Skills">
+        <header class="job-head">
+          <div class="job-title"><span>Skills</span><span id="skill-count" class="job-chip"></span></div>
+          <div class="job-actions"><button type="button" id="skill-add" aria-expanded="false">Install</button><button type="button" id="skill-close" class="icon" aria-label="Close">×</button></div>
+        </header>
+        <div class="set-body">
+          <form id="skill-form" class="skill-form hidden">
+            <label>From GitHub <input id="skill-source" placeholder="owner/repo" required spellcheck="false" autocomplete="off"></label>
+            <label>Skill (optional) <input id="skill-name" placeholder="all skills" spellcheck="false" autocomplete="off"></label>
+            <label>Install for <select id="skill-scope"><option value="global">Every workspace</option></select></label>
+            <button class="set-act" type="submit">Preview install</button>
+          </form>
+          <div id="skill-preview"></div><div id="skill-note" class="set-foot" role="status"></div>
+          <div class="set-foot">Loaded when needed in new and resumed sessions. Use <code>$name</code> or <code>/skills</code> to pick one.</div>
+          <div id="skill-list"></div>
+        </div>
       </section>
       <div id="term-loading" class="hidden" role="status" aria-live="polite"><span class="term-spinner" aria-hidden="true"></span><div><div id="term-loading-title"></div><div id="term-loading-hint"></div></div></div>
       <div id="empty-state">

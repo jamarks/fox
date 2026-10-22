@@ -395,6 +395,7 @@ $('#session-groups').addEventListener('click', async (e) => {
 async function openSession(id) {
   if (state.jobView) closeJob();
   if (state.prView) closePrs();
+  closeSkills();
   closeSettings();
   if (state.waking?.id !== id) state.waking = null; // the person moved on: the other session keeps waking, unseen
   const s = sessionById(id);
@@ -695,6 +696,7 @@ async function openTerminal({ cwd, resume, harness, provider, model, effort, spe
   if (!resume) {
     closeSettings({ sync: false });
     closePrs({ sync: false });
+    closeSkills({ sync: false });
     if (state.jobView) closeJob({ sync: false });
   }
   attachTab(t);
@@ -1055,6 +1057,7 @@ function syncUrl(push = false) {
   const q = new URLSearchParams();
   if (settingsOpen()) q.set('view', 'settings');
   else if (state.prView) { q.set('view', 'prs'); if (state.prOpen) q.set('pr', state.prOpen); }
+  else if (skillsOpen()) q.set('view', 'skills');
   else if (state.jobView === 'list') q.set('view', 'jobs');
   else if (state.jobView) { q.set('job', state.jobView); if (state.openRun) q.set('run', state.openRun); }
   if (state.jobDialog) q.set('edit', state.jobDialog);
@@ -1072,6 +1075,7 @@ async function applyUrl() {
     const view = q.get('view'), job = q.get('job'), edit = q.get('edit');
     if (view === 'settings') openSettings(); else closeSettings();
     if (view === 'prs') { state.prOpen = q.get('pr'); openPrs(); } else if (state.prView) closePrs();
+    if (view === 'skills') openSkills(); else closeSkills();
     if (job) { openJob(job); state.openRun = q.get('run'); renderJobView(); }
     else if (view === 'jobs') openJobs();
     else if (state.jobView) closeJob();
@@ -1921,13 +1925,13 @@ $('#theme').addEventListener('change', renderThemeDots);
 function openSettings() {
   if (state.jobView) closeJob({ sync: false });
   if (state.prView) closePrs({ sync: false });
+  closeSkills({ sync: false });
   dictation.cancel();
   $('#settings-view').classList.remove('hidden');
   $('#settings').classList.add('active'); $('#settings').setAttribute('aria-expanded', 'true');
   if (mobileLayout.matches) showMobileView('terminal');
   renderThemeDots();
   loadTools();
-  loadSkills();
   loadFxSettings();
   loadDeploy();
   syncUrl(true);
@@ -2060,24 +2064,58 @@ $('#settings-tools').addEventListener('click', async (e) => {
     if (st.status === 'failed') { btn.disabled = false; btn.textContent = 'Sign in'; note.textContent = st.error || 'The sign-in did not finish.'; return; }
   }
 });
+// ---------- skills: a page of its own, like Jobs and Pull requests ----------
 // Skills are instructions, not programs. Always show SKILL.md and the full file list before copying any files.
-let skillPreview = null;
+let skillPreview = null, skillCount = null;
 async function skillApi(action, body) {
   const r = await fetch(`/api/skills/${action}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const j = await r.json(); if (!r.ok) throw new Error(j.error || 'That did not work.'); return j;
+}
+function renderSkillsEntry() {
+  const btn = $('#skills-entry');
+  btn.classList.toggle('active', skillsOpen());
+  btn.innerHTML = `<span class="jdot none"></span><span class="jtitle">Skills</span><span>${skillCount || ''}</span><span class="jnext">${skillCount === 0 ? 'none yet' : ''}</span>`;
 }
 async function loadSkills() {
   try {
     const r = await fetch('/api/skills'); if (!r.ok) throw new Error('Could not load skills.');
     const { items, sources, scopes } = await r.json();
+    skillCount = items.length; renderSkillsEntry();
+    $('#skill-count').textContent = items.length || '';
     $('#skill-scope').innerHTML = '<option value="global">Every workspace</option>' + scopes.map((s) => `<option value="${esc(s.id)}">${esc(s.name)} workspace</option>`).join('');
     $('#skill-source').setAttribute('list', 'skill-sources');
     const groups = new Map();
     for (const item of items) { if (!groups.has(item.group)) groups.set(item.group, []); groups.get(item.group).push(item); }
-    $('#settings-skills').innerHTML = `<datalist id="skill-sources">${sources.map((s) => `<option value="${esc(s)}">`).join('')}</datalist>` +
-      (items.length ? [...groups].map(([group, skills]) => `<div class="skill-group">${esc(group === 'fx' ? 'fx' : group.includes(' · ') ? group : 'from ' + group)}</div>` + skills.map((s) => `<div class="set-row skill-row"><span class="set-main">${esc(s.name)}<span class="set-sub">${esc(s.description || 'No description')}${s.source ? ' · ' + esc(s.source) : ''}</span></span><button type="button" class="set-act" data-skill-read="${esc(s.id)}">Read</button>${s.owned ? `<button type="button" class="set-act" data-skill-remove="${esc(s.id)}">Remove</button>` : ''}</div>`).join('')).join('') : '<div class="set-foot">No skills found yet.</div>');
+    $('#skill-list').innerHTML = `<datalist id="skill-sources">${sources.map((s) => `<option value="${esc(s)}">`).join('')}</datalist>` +
+      (items.length ? [...groups].map(([group, skills]) => `<div class="skill-group">${esc(group === 'fx' ? 'fx' : group.includes(' · ') ? group : 'from ' + group)}</div>` + skills.map((s) => `<div class="set-row skill-row"><span class="set-main">${esc(s.name)}<span class="set-sub">${esc(s.description || 'No description')}${s.source ? ' · ' + esc(s.source) : ''}</span></span><button type="button" class="set-act" data-skill-read="${esc(s.id)}">Read</button>${s.owned ? `<button type="button" class="set-act" data-skill-remove="${esc(s.id)}">Remove</button>` : ''}</div>`).join('')).join('') : '<div class="set-foot">No skills yet. Install adds them from a GitHub repository.</div>');
   } catch (err) { $('#skill-note').textContent = err.message; }
 }
+function skillsOpen() { return !$('#skill-view').classList.contains('hidden'); }
+function openSkills() {
+  if (skillsOpen()) return;
+  closeSettings({ sync: false });
+  if (state.jobView) closeJob({ sync: false });
+  if (state.prView) closePrs({ sync: false });
+  dictation.cancel();
+  $('#skill-view').classList.remove('hidden');
+  if (mobileLayout.matches) showMobileView('terminal');
+  renderSkillsEntry(); loadSkills();
+  syncUrl(true);
+}
+function closeSkills({ sync = true } = {}) {
+  if (!skillsOpen()) return;
+  $('#skill-view').classList.add('hidden');
+  renderSkillsEntry(); requestAnimationFrame(fitActive);
+  if (sync) syncUrl(true);
+}
+$('#skills-entry').addEventListener('click', () => (skillsOpen() ? closeSkills() : openSkills()));
+$('#skill-close').addEventListener('click', () => closeSkills());
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && skillsOpen() && !e.defaultPrevented && !e.target.closest?.('input, select')) closeSkills(); });
+$('#skill-add').addEventListener('click', () => {
+  const form = $('#skill-form'), show = form.classList.toggle('hidden') === false;
+  $('#skill-add').setAttribute('aria-expanded', String(show)); $('#skill-add').classList.toggle('active', show);
+  if (show) $('#skill-source').focus();
+});
 $('#skill-form').addEventListener('submit', async (e) => {
   e.preventDefault(); const btn = e.target.querySelector('button'); btn.disabled = true; skillPreview = null;
   $('#skill-preview').innerHTML = ''; $('#skill-note').textContent = 'Checking repository…';
@@ -2094,21 +2132,25 @@ $('#skill-preview').addEventListener('click', async (e) => {
   try { const j = await skillApi('install', { token }); $('#skill-preview').innerHTML = ''; $('#skill-note').textContent = `${j.installed.join(', ')} installed. New and resumed sessions see it.`; await loadSkills(); }
   catch (err) { $('#skill-note').textContent = err.message; }
 });
-$('#settings-skills').addEventListener('click', async (e) => {
+// Read opens the skill under its row; a second click closes it.
+$('#skill-list').addEventListener('click', async (e) => {
   const read = e.target.closest('[data-skill-read]'), remove = e.target.closest('[data-skill-remove]');
   if (!read && !remove) return;
-  const btn = read || remove; btn.disabled = true;
+  const btn = read || remove, row = btn.closest('.skill-row');
+  if (read && row.nextElementSibling?.classList.contains('skill-review')) { row.nextElementSibling.remove(); read.classList.remove('active'); return; }
+  btn.disabled = true;
   try {
     if (read) {
       const j = await skillApi('read', { id: read.dataset.skillRead });
-      const prev = $('#skill-preview'); prev.innerHTML = `<div class="skill-review"><strong>${esc(j.name)} · ${esc(j.group)}</strong><span class="set-sub">${esc(shortPath(j.path))}${j.source ? ' · ' + esc(j.source) : ''}</span><div class="md skill-text">${renderMarkdown(j.text)}</div></div>`;
-      prev.scrollIntoView({ block: 'nearest' });
+      row.insertAdjacentHTML('afterend', `<div class="skill-review"><span class="set-sub">${esc(j.group)} · ${esc(shortPath(j.path))}${j.source ? ' · ' + esc(j.source) : ''}</span><div class="md skill-text">${renderMarkdown(j.text)}</div></div>`);
+      read.classList.add('active');
     } else if (confirm('Remove this fox-installed skill? Any changes to its files will prevent removal.')) {
       await skillApi('remove', { id: remove.dataset.skillRemove });
       $('#skill-note').textContent = 'Removed. New and resumed sessions see the change.'; await loadSkills();
     }
   } catch (err) { $('#skill-note').textContent = err.message; } finally { btn.disabled = false; }
 });
+renderSkillsEntry(); loadSkills();
 $('#sign-out').addEventListener('click', async () => {
   const response = await fetch('/api/auth/logout', { method: 'POST' });
   if (response.ok) location.replace('/');
@@ -2562,6 +2604,7 @@ $('#job-list').addEventListener('click', (e) => { if (e.target.closest('[data-li
 function showJobView(mode) {
   closeSettings({ sync: false });
   if (state.prView) closePrs({ sync: false });
+  closeSkills({ sync: false });
   dictation.cancel();
   $('#job-view').classList.remove('hidden');
   $('#job-view').dataset.mode = mode;
@@ -2724,6 +2767,7 @@ async function loadPrFiles(key) {
 }
 function openPrs() {
   closeSettings({ sync: false });
+  closeSkills({ sync: false });
   if (state.jobView) closeJob({ sync: false });
   dictation.cancel();
   state.prView = true;
