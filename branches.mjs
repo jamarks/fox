@@ -30,8 +30,9 @@ export function createBranches({
     if (!ws || !repo) throw fail('Repo not found in this workspace.', 404);
     const path = resolve(join(ws.dir, repo.dir));
     if (!path.startsWith(resolve(ws.dir) + sep) || !existsSync(join(path, '.git'))) throw fail('That repo is not cloned yet.', 409);
-    // A repo folder replaced with a link must not let the workspace API operate on another checkout.
-    if (realpathSync(path) !== path) throw fail('That repo is outside this workspace.', 409);
+    // A repo folder replaced with a link must not let the workspace API operate on another checkout. Compare real paths
+    // on both sides: the workspace folder itself may sit under a link (macOS's /var is /private/var), and that is fine.
+    if (realpathSync(path) !== join(realpathSync(ws.dir), repo.dir)) throw fail('That repo is outside this workspace.', 409);
     const run = (args, opts) => git(['-C', path, ...SAFE_GIT, ...args], opts);
     return { ws, repo, path, run };
   }
