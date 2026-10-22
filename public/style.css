@@ -17,7 +17,22 @@ aside, section { background: var(--panel); border-right: 1px solid var(--border)
 .side-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--border); font-weight: 600; }
 .brand { display: inline-flex; align-items: center; flex: none; gap: 7px; color: var(--text); }
 .brand svg { display: block; flex: none; }
-.brand .fox { width: 22px; height: 22px; color: #f0883e; }
+.brand .fox { width: 22px; height: 22px; color: #f0883e; overflow: visible; }
+/* The fox's two gestures (app.js, foxGesture): a wink at a new reply, a yawn when all has been quiet for a while. The
+   mouth is closed until a gesture opens it. Nothing moves otherwise, and nothing at all for reduced motion. */
+.fox :is(.fox-eye, .fox-mouth, .fox-head) { transform-box: fill-box; }
+.fox .fox-eye { transform-origin: center; }
+.fox .fox-head { transform-origin: 50% 100%; }
+.fox .fox-mouth { transform-origin: 50% 0; transform: scaleY(0); fill: color-mix(in srgb, currentColor 45%, #000); }
+.fox.wink .fox-eye-r { animation: fox-wink .7s ease-in-out; }
+.fox.yawn .fox-eye { animation: fox-yawn-eyes 2.6s ease-in-out; }
+.fox.yawn .fox-mouth { animation: fox-yawn-mouth 2.6s ease-in-out; }
+.fox.yawn .fox-head { animation: fox-yawn-head 2.6s ease-in-out; }
+@keyframes fox-wink { 0%, 100% { transform: scaleY(1); } 30%, 60% { transform: scaleY(.08); } }
+@keyframes fox-yawn-eyes { 0%, 100% { transform: scaleY(1); } 15%, 80% { transform: scaleY(.08); } }
+@keyframes fox-yawn-mouth { 0%, 10%, 100% { transform: scaleY(0); } 45%, 70% { transform: scaleY(1.9); } 88% { transform: scaleY(0); } }
+@keyframes fox-yawn-head { 0%, 100% { transform: rotate(0) translateY(0); } 45%, 70% { transform: rotate(-5deg) translateY(-.6px); } }
+@media (prefers-reduced-motion: reduce) { .fox, .fox * { animation: none !important; } }
 button { background: transparent; color: var(--muted); border: 0; border-radius: 4px; padding: 2px 6px; cursor: pointer; font: inherit; line-height: 1; }
 button:hover { color: var(--text); background: var(--panel-2); }
 button.icon { width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; }
