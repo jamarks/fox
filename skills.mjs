@@ -59,6 +59,13 @@ export function createSkills({ home, stateDir, workspaces, gh = (args) => exec('
     }
   }
   async function scan(root, group, scope, owned) {
+    // Discovery must not follow linked workspace, repo, or skill roots into arbitrary private folders.
+    let parent = resolve(home);
+    for (const part of resolve(root).slice(parent.length + 1).split(sep)) {
+      if (!part) return [];
+      parent = join(parent, part);
+      if (!(await lstat(parent).catch(() => null))?.isDirectory()) return [];
+    }
     const out = [];
     for (const e of await readdir(root, { withFileTypes: true }).catch(() => [])) {
       if (!e.isDirectory() || !NAME.test(e.name)) continue;
@@ -104,7 +111,7 @@ export function createSkills({ home, stateDir, workspaces, gh = (args) => exec('
     const tree = JSON.parse(await gh([`repos/${source}/git/trees/HEAD?recursive=1`]));
     if (tree.truncated || !Array.isArray(tree.tree) || tree.tree.length > 10000) fail('Repository tree is too large or incomplete.');
     const entries = tree.tree;
-    const skillDirs = entries.filter((x) => x.type === 'blob' && x.path.endsWith('/SKILL.md') && x.path.startsWith('skills/') && x.path.split('/').length >= 3).map((x) => posix.dirname(x.path));
+    const skillDirs = entries.filter((x) => x.type === 'blob' && /^skills\/[^/]+\/SKILL\.md$/.test(x.path)).map((x) => posix.dirname(x.path));
     if (entries.some((x) => x.path === 'SKILL.md')) skillDirs.push('');
     const dirs = [...new Set(skillDirs)].filter((p) => !skill || posix.basename(p) === skill || (!p && source.split('/')[1] === skill));
     if (!dirs.length) fail('No matching SKILL.md in this repository.', 404);

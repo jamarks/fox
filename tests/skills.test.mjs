@@ -23,6 +23,10 @@ test('discovers user, workspace and repo skills without following linked folders
     await mkdir(dir, { recursive: true }); await writeFile(join(dir, 'SKILL.md'), '---\nname: custom\ndescription: Shared.\n---\n# Instructions');
   }
   await symlink(join(f.home, '.claude/skills/borrowed'), join(f.home, '.claude/skills/linked'));
+  await mkdir(join(f.home, 'private/skills/secret'), { recursive: true });
+  await writeFile(join(f.home, 'private/skills/secret/SKILL.md'), '---\nname: secret\n---\nPrivate data');
+  await symlink(join(f.home, 'private'), join(f.home, '.agents'));
+  await symlink(join(f.home, 'private'), join(f.ws.dir, 'repo/.claude'));
   const api = f.api(); const list = await api.list();
   assert.equal(list.items.length, 3);
   assert.deepEqual(list.items.map((s) => s.group), ['Claude Code', 'project · workspace', 'project/repo · workspace']);
@@ -54,6 +58,8 @@ test('preview shows files and markdown before writing; install is confirmed and 
 test('only publishes top-level skill folders, not repository internal skill-data', async (t) => {
   const f = await fixture(t);
   f.tree.push({ path: 'skill-data/internal/SKILL.md', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 50 });
+  f.files['skills/example/docs/internal/SKILL.md'] = 'nested resource';
+  f.tree.push({ path: 'skills/example/docs/internal/SKILL.md', type: 'blob', mode: '100644', sha: 'c'.repeat(40), size: 15 });
   const p = await f.api().preview({ source: 'x/y', scope: 'global' });
   assert.deepEqual(p.skills.map((s) => s.name), ['example']);
 });
