@@ -2,8 +2,18 @@
 
 What changed in fox, newest first: one line per merged pull request. Written by a job from the pull requests; edit the PR title to change a line.
 
+## 2026-10-22
+
+- Branch menu: solid over the sky theme, long names on one line ([#40](https://github.com/jamarks/fox/pull/40))
+- Switch a workspace repo's branch from the sidebar, and get back to main safely ([#37](https://github.com/jamarks/fox/pull/37))
+- Expose new fx settings as opt-in controls ([#38](https://github.com/jamarks/fox/pull/38))
+- The fox winks at a new reply and yawns when all is quiet ([#36](https://github.com/jamarks/fox/pull/36))
+
 ## 2026-10-21
 
+- Pull requests: Later pauses a PR without losing it, Resume brings it back ([#34](https://github.com/jamarks/fox/pull/34))
+- Choose explicit companion repos for a new fx session ([#31](https://github.com/jamarks/fox/pull/31))
+- Right column steps aside when nothing is open ([#33](https://github.com/jamarks/fox/pull/33))
 - Waking a session hides the terminal behind the notice ([#30](https://github.com/jamarks/fox/pull/30))
 - Opening a sleeping session shows at once ([#29](https://github.com/jamarks/fox/pull/29))
 - Right column steps aside on Jobs, Pull requests, Settings and the mosaic ([#28](https://github.com/jamarks/fox/pull/28))
