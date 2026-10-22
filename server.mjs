@@ -23,6 +23,7 @@ import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
 import { createAppRegistry, createAppRouter } from './apps.mjs';
 import { createFxSettings } from './fxsettings.mjs';
+import { listSkills } from './skill-shelf.mjs';
 import { fastForward, SAFE_GIT } from './gitsync.mjs';
 import { sleepCandidates, idleSleepMs, memoryFromMeminfo } from './idle.mjs';
 import { createJobStore, createRunner, updateJobRepo } from './jobs.mjs';
@@ -722,6 +723,10 @@ async function handlePanelRequest(req, res) {
     }
     if (p === '/api/workspaces' && req.method === 'GET') return send(res, 200, await listWorkspaces(true));
     if (p === '/api/companion-repos' && req.method === 'GET') return send(res, 200, await workspaces.companions(url.searchParams.get('cwd') ?? ''));
+    if (p === '/api/skill-shelf' && req.method === 'GET') {
+      try { return send(res, 200, await listSkills(url.searchParams.get('cwd'), homedir())); }
+      catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
+    }
     if (p === '/api/workspaces' && req.method === 'POST') {
       try { const ws = await workspaces.create(JSON.parse(await readBody(req) || '{}')); return send(res, 200, ws); }
       catch (err) { return send(res, err.status ?? 500, { error: err.message }); }

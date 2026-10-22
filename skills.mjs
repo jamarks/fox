@@ -13,7 +13,7 @@ const NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 const REPO = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
 const fail = (message, status = 400) => { throw Object.assign(new Error(message), { status }); };
 const hash = (b) => createHash('sha256').update(b).digest('hex');
-const header = (text) => {
+export const header = (text) => {
   const yaml = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text)?.[1] ?? '';
   const field = (key) => {
     const lines = yaml.split(/\r?\n/);
