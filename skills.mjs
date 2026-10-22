@@ -44,6 +44,23 @@ function skillDirs(entries) {
   if (entries.some((x) => x.path === 'SKILL.md' && x.type === 'blob')) dirs.unshift('');
   return dirs;
 }
+// skills.sh names a skill by its id, which is its folder's name; it may sit outside skills/ (say .claude/skills/x).
+function findDir(entries, id) {
+  const listed = skillDirs(entries);
+  if (listed.includes(id)) return id;
+  const all = entries.filter((x) => x.type === 'blob' && /(?:^|\/)SKILL\.md$/.test(x.path)).map((x) => x.path.includes('/') ? posix.dirname(x.path) : '');
+  const tops = all.filter((d) => !all.some((o) => o !== d && (o === '' ? false : d.startsWith(o + '/'))));
+  const hits = tops.filter((d) => d && posix.basename(d) === id);
+  if (hits.length === 1) return hits[0];
+  if (!hits.length && tops.includes('') && NAME.test(id)) return '';
+  fail(hits.length ? `More than one ${id} in this repository.` : 'That skill is not in this repository.', hits.length ? 409 : 404);
+}
+const SKILLS_SH = 'https://skills.sh';
+async function fetchText(url) {
+  const r = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { accept: 'text/html,application/json' } });
+  if (!r.ok) throw Object.assign(new Error('skills.sh did not answer.'), { status: 502 });
+  return r.text();
+}
 const filesOf = (entries, dir) => entries.filter((x) => x.type !== 'tree' && (dir ? x.path.startsWith(`${dir}/`) : !x.path.includes('/')));
 async function pool(items, n, fn) {
   const out = []; let i = 0;
@@ -51,7 +68,7 @@ async function pool(items, n, fn) {
   return out;
 }
 
-export function createSkills({ home, stateDir, workspaces, gh = (args) => exec('gh', ['api', ...args], { timeout: 30000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GH_PROMPT_DISABLED: '1' } }).then((r) => r.stdout) }) {
+export function createSkills({ home, stateDir, workspaces, web = fetchText, gh = (args) => exec('gh', ['api', ...args], { timeout: 30000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GH_PROMPT_DISABLED: '1' } }).then((r) => r.stdout) }) {
   const record = join(stateDir, 'skills.json');
   const previews = new Map(), trees = new Map();
   let writing = Promise.resolve();
@@ -144,11 +161,26 @@ export function createSkills({ home, stateDir, workspaces, gh = (args) => exec('
     if (files.reduce((a, f) => a + f.size, 0) > MAX_TOTAL) return 'over 4 MB in all';
     return null;
   }
-  // The suggested repos with how many skills each has (from their trees only), for the cards.
-  async function catalog() {
-    return { repos: await Promise.all(SOURCES.map(async (source) => {
-      try { return { source, count: skillDirs(await repoTree(source)).length }; } catch { return { source, count: null }; }
-    })) };
+  // skills.sh, the open skills directory: its search API (the one `npx skills find` uses) and, for Popular, the
+  // ranking its home page carries (there is no API for it). Only repo and skill names come from there; what gets
+  // installed is still read from GitHub and reviewed file by file.
+  const shSkill = (x) => x && REPO.test(x.source) && NAME.test(x.skillId) ? { source: x.source, skill: x.skillId, name: String(x.name || x.skillId).slice(0, 100), installs: Number(x.installs) || 0 } : null;
+  let popularCache = null;
+  async function popular() {
+    if (popularCache && popularCache.until > Date.now()) return popularCache.value;
+    const html = (await web(`${SKILLS_SH}/`)).replace(/\\"/g, '"'), seen = new Map();
+    for (const m of html.matchAll(/"source":"([^"]+)","skillId":"([^"]+)","name":"([^"]*)","installs":(\d+)/g)) {
+      const s = shSkill({ source: m[1], skillId: m[2], name: m[3], installs: m[4] });
+      if (s && !seen.has(`${s.source}/${s.skill}`)) seen.set(`${s.source}/${s.skill}`, s);
+    }
+    if (!seen.size) fail('Could not read skills.sh. Pick a repo instead.', 502);
+    popularCache = { until: Date.now() + 60 * 60_000, value: { skills: [...seen.values()].sort((a, b) => b.installs - a.installs).slice(0, 60) } };
+    return popularCache.value;
+  }
+  async function search({ q }) {
+    if (typeof q !== 'string' || q.trim().length < 2 || q.length > 100) fail('Type at least 2 characters.');
+    const j = JSON.parse(await web(`${SKILLS_SH}/api/search?${new URLSearchParams({ q: q.trim(), limit: '50' })}`));
+    return { skills: (Array.isArray(j.skills) ? j.skills : []).map(shSkill).filter(Boolean).slice(0, 50) };
   }
   // A repo's skills with the name and description from each SKILL.md: only those files are downloaded here.
   async function browse({ source }) {
@@ -165,14 +197,24 @@ export function createSkills({ home, stateDir, workspaces, gh = (args) => exec('
     });
     return { source, skills };
   }
+  // One skill from a repo's list, to read before ticking it: its SKILL.md and the files that would come with it.
+  async function peek({ source, dir }) {
+    const entries = await repoTree(source);
+    if (typeof dir !== 'string') fail('That skill is not in this repository.', 404);
+    dir = findDir(entries, dir);
+    const files = filesOf(entries, dir), md = files.find((f) => f.path === (dir ? `${dir}/SKILL.md` : 'SKILL.md'));
+    if (md.size > MAX_FILE) fail('SKILL.md is too large to show.');
+    const prefix = dir ? `${dir}/` : '';
+    return { source, dir, text: (await blob(source, md)).toString('utf8'), files: files.map((f) => ({ name: f.path.slice(prefix.length), size: f.size })) };
+  }
   async function preview({ source, dirs, scope }) {
     await target(scope);
-    const entries = await repoTree(source, true), known = skillDirs(entries);
+    const entries = await repoTree(source, true);
     if (!Array.isArray(dirs) || !dirs.length) fail('Choose at least one skill.');
     if (dirs.length > 40) fail('Choose 40 skills or fewer.');
-    if (dirs.some((d) => typeof d !== 'string' || !known.includes(d))) fail('That skill is not in this repository.', 404);
+    if (dirs.some((d) => typeof d !== 'string')) fail('That skill is not in this repository.', 404);
     const skills = [];
-    for (const dir of new Set(dirs)) {
+    for (const dir of new Set(dirs.map((d) => findDir(entries, d)))) {
       const files = filesOf(entries, dir), prefix = dir ? `${dir}/` : '', why = problem(files);
       if (why) fail(`${posix.basename(dir) || source}: ${why}.`);
       const data = await pool(files, 8, async (f) => ({ name: f.path.slice(prefix.length), data: await blob(source, f) }));
@@ -232,5 +274,5 @@ export function createSkills({ home, stateDir, workspaces, gh = (args) => exec('
       return { removed: true };
     });
   }
-  return { list, read, catalog, browse, preview, install, remove };
+  return { list, read, popular, search, browse, peek, preview, install, remove };
 }

@@ -68,11 +68,30 @@ test('browse lists skills under skills/, grouped folders too, not a skill\'s own
     ['skills/engineering/tdd', 'tdd', 'Small steps.', 'has a file over 1 MB'],
     ['skills/example', 'example', 'Test the preview.', null],
   ]);
-  assert.deepEqual(await api.catalog().then((c) => c.repos.map((r) => r.count)), [2, 2, 2, 2]);
+  const peek = await api.peek({ source: 'x/y', dir: 'skills/example' });
+  assert.match(peek.text, /Do not run scripts/);
+  assert.deepEqual(peek.files.map((f) => f.name).sort(), ['SKILL.md', 'docs/internal/SKILL.md', 'docs/notes.md']);
+  await assert.rejects(() => api.peek({ source: 'x/y', dir: 'skills/example/docs/internal' }), /not in this repository/);
   await assert.rejects(() => api.preview({ source: 'x/y', scope: 'global', dirs: ['skills/engineering/tdd'] }), /tdd: has a file over 1 MB/);
   await assert.rejects(() => api.preview({ source: 'x/y', scope: 'global', dirs: ['skills/example/docs/internal'] }), /not in this repository/);
   await assert.rejects(() => api.preview({ source: 'x/y', scope: 'global', dirs: [] }), /at least one/);
   assert.deepEqual((await api.preview({ source: 'x/y', scope: 'global', dirs: ['skills/example'] })).skills.map((s) => s.name), ['example']);
+});
+test('skills.sh gives names to pick; the skill is found in its repo by id, also outside skills/', async (t) => {
+  const f = await fixture(t), urls = [];
+  const page = 'self.__next_f.push([1,"{\\"source\\":\\"x/y\\",\\"skillId\\":\\"example\\",\\"name\\":\\"example\\",\\"installs\\":5},{\\"source\\":\\"a/b\\",\\"skillId\\":\\"top\\",\\"name\\":\\"top\\",\\"installs\\":90},{\\"source\\":\\"../x\\",\\"skillId\\":\\"bad\\",\\"name\\":\\"bad\\",\\"installs\\":99}"])';
+  const web = async (url) => { urls.push(url); return url.includes('/api/search') ? JSON.stringify({ skills: [{ source: 'x/y', skillId: 'helper', name: 'helper', installs: 3 }, { source: 'x/y', skillId: '../etc' }] }) : page; };
+  const api = f.api({ web });
+  assert.deepEqual((await api.popular()).skills.map((s) => `${s.source}/${s.skill}`), ['a/b/top', 'x/y/example']);
+  await api.popular(); assert.equal(urls.length, 1, 'the ranking is held for an hour');
+  assert.deepEqual((await api.search({ q: 'help' })).skills.map((s) => s.skill), ['helper']);
+  assert.match(urls[1], /api\/search\?q=help/);
+  await assert.rejects(() => api.search({ q: 'h' }), /2 characters/);
+  f.files['.claude/skills/helper/SKILL.md'] = '---\nname: helper\ndescription: Helps.\n---\n# Helper';
+  f.tree.push({ path: '.claude/skills/helper/SKILL.md', type: 'blob', mode: '100644', sha: 'f'.repeat(40), size: Buffer.byteLength(f.files['.claude/skills/helper/SKILL.md']) });
+  assert.match((await api.peek({ source: 'x/y', dir: 'example' })).text, /Do not run scripts/);
+  assert.deepEqual((await api.preview({ source: 'x/y', scope: 'global', dirs: ['example', 'helper'] })).skills.map((s) => s.name), ['example', 'helper']);
+  await assert.rejects(() => api.preview({ source: 'x/y', scope: 'global', dirs: ['missing'] }), /not in this repository/);
 });
 test('accepts folded YAML descriptions and rejects empty descriptions', async (t) => {
   const f = await fixture(t);

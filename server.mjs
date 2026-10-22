@@ -588,10 +588,12 @@ async function handlePanelRequest(req, res) {
     if (p === '/api/skills' || p.startsWith('/api/skills/')) {
       try {
         if (p === '/api/skills' && req.method === 'GET') return send(res, 200, await skills.list());
-        if (p === '/api/skills/catalog' && req.method === 'GET') return send(res, 200, await skills.catalog());
+        if (p === '/api/skills/popular' && req.method === 'GET') return send(res, 200, await skills.popular());
         if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
         const body = JSON.parse(await readBody(req) || '{}');
         const result = p === '/api/skills/browse' ? await skills.browse(body)
+          : p === '/api/skills/peek' ? await skills.peek(body)
+          : p === '/api/skills/search' ? await skills.search(body)
           : p === '/api/skills/preview' ? await skills.preview(body)
           : p === '/api/skills/install' ? await skills.install(body.token)
           : p === '/api/skills/read' ? await skills.read(body.id)

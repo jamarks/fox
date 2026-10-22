@@ -188,19 +188,23 @@
       </section>
       <section id="skill-view" class="hidden" aria-label="Skills">
         <header class="job-head">
-          <div class="job-title"><span>Skills</span><span id="skill-count" class="job-chip"></span></div>
-          <div class="job-actions"><button type="button" id="skill-add" aria-expanded="false">Install</button><button type="button" id="skill-close" class="icon" aria-label="Close">×</button></div>
+          <div class="job-title"><span>Skills</span><div class="seg skill-tabs" id="skill-tabs"><button type="button" data-skill-tab="installed">Installed <span id="skill-count"></span></button><button type="button" data-skill-tab="browse">Browse</button></div></div>
+          <div class="job-actions"><button type="button" id="skill-close" class="icon" aria-label="Close">×</button></div>
         </header>
         <div class="set-body">
-          <div id="skill-install" class="hidden">
-            <div id="skill-repos" class="skill-repos"></div>
+          <div id="skill-installed">
+            <div class="set-foot">Loaded when needed in new and resumed sessions. Use <code>$name</code> or <code>/skills</code> to pick one.</div>
+            <div id="skills-list"></div>
+          </div>
+          <div id="skill-browse" class="hidden">
+            <input id="skills-search" class="skill-search" type="search" placeholder="Search skills.sh" spellcheck="false" autocomplete="off">
+            <div id="skill-repos" class="skill-chips"></div>
             <form id="skill-other" class="skill-other hidden"><input id="skill-source" placeholder="owner/repo" required spellcheck="false" autocomplete="off"><button class="set-act" type="submit">Open</button></form>
             <div id="skill-pick"></div>
-            <div id="skill-pick-foot" class="skill-pick-foot hidden"><label>Install for <select id="skill-scope"><option value="global">Every workspace</option></select></label><button type="button" class="set-act" id="skill-review">Review</button></div>
+            <div id="skill-pick-foot" class="skill-pick-foot"><label>Install for <select id="skill-scope"><option value="global">Every workspace</option></select></label><button type="button" class="set-act" id="skill-review">Review</button></div>
+            <div id="skill-preview"></div>
           </div>
-          <div id="skill-preview"></div><div id="skill-note" class="set-foot" role="status"></div>
-          <div class="set-foot">Loaded when needed in new and resumed sessions. Use <code>$name</code> or <code>/skills</code> to pick one.</div>
-          <div id="skill-list"></div>
+          <div id="skill-note" class="set-foot" role="status"></div>
         </div>
       </section>
       <div id="term-loading" class="hidden" role="status" aria-live="polite"><span class="term-spinner" aria-hidden="true"></span><div><div id="term-loading-title"></div><div id="term-loading-hint"></div></div></div>
