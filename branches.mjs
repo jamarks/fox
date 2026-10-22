@@ -5,7 +5,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join, resolve, sep } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { SAFE_GIT } from './gitsync.mjs';
 const execFileP = promisify(execFile);
 
@@ -30,6 +30,8 @@ export function createBranches({
     if (!ws || !repo) throw fail('Repo not found in this workspace.', 404);
     const path = resolve(join(ws.dir, repo.dir));
     if (!path.startsWith(resolve(ws.dir) + sep) || !existsSync(join(path, '.git'))) throw fail('That repo is not cloned yet.', 409);
+    // A repo folder replaced with a link must not let the workspace API operate on another checkout.
+    if (realpathSync(path) !== path) throw fail('That repo is outside this workspace.', 409);
     const run = (args, opts) => git(['-C', path, ...SAFE_GIT, ...args], opts);
     return { ws, repo, path, run };
   }
@@ -56,8 +58,9 @@ export function createBranches({
     await run(['add', '-A']);
     const who = await run(['config', 'user.name']).catch(() => '');
     await run([...(who ? [] : ['-c', 'user.name=fox', '-c', 'user.email=fox@localhost']), 'commit', '--quiet', '--no-verify', '-m', `WIP kept by fox before switching to ${target}`]);
-    const pushed = await run(['push', '--quiet', '-u', 'origin', name], { timeout: 120_000 }).then(() => true, () => false);
-    return { name, pushed };
+    try { await run(['push', '--quiet', '-u', 'origin', name], { timeout: 120_000 }); }
+    catch { throw fail(`Work was committed on ${name}, but could not be pushed. Still on ${name}; nothing was switched.`, 409); }
+    return { name, pushed: true };
   }
   return {
     // The branches to offer, newest first (local and origin's, once each), and what the copy is on now.
@@ -100,7 +103,9 @@ export function createBranches({
     async update(id, dir) {
       const { ws, run } = await repoOf(id, dir);
       await refuseIfBusy(ws);
+      if (await run(['status', '--porcelain'])) throw fail('Commit or keep uncommitted work before updating.', 409);
       await run(['fetch', '--quiet', 'origin'], { timeout: 60_000 });
+      await refuseIfBusy(ws);
       return { update: await fastForward(run) };
     },
     // A new branch from where the copy is now (uncommitted work comes along, as git does).
@@ -109,7 +114,7 @@ export function createBranches({
       const { ws, run } = await repoOf(id, dir);
       await refuseIfBusy(ws);
       await run(['check-ref-format', '--branch', name]).catch(() => { throw fail('git does not accept that branch name.'); });
-      await run(['switch', '--quiet', '-c', name]).catch((err) => { throw fail(String(err.stderr || err.message).trim().split('\n')[0], 409); });
+      await run(['switch', '--quiet', '-c', name]).catch(() => { throw fail('Could not create that branch. It may already exist.', 409); });
       return { branch: name };
     },
   };

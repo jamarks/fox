@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, symlink, rename } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -58,6 +58,30 @@ test('uncommitted work is never dropped: refused, or kept in a pushed wip branch
   assert.equal(sh(copy, 'rev-parse', '--abbrev-ref', 'HEAD'), 'main');
   assert.equal(sh(copy, 'status', '--porcelain'), '', 'main is clean');
   assert.equal(sh(origin, 'show', 'wip/feature-old-20261022-0930:b.txt'), 'half done', 'the work is on GitHub');
+});
+
+test('a failed WIP push leaves the committed work on its branch and does not switch', async () => {
+  const { copy, branches } = await setup();
+  await writeFile(join(copy, 'b.txt'), 'draft\n');
+  sh(copy, 'remote', 'set-url', '--push', 'origin', '/nonexistent/fox-origin.git');
+  await assert.rejects(branches.switch('w1', 'fox', 'main', { keep: true }), (e) => e.status === 409 && /could not be pushed/.test(e.message));
+  assert.equal(sh(copy, 'rev-parse', '--abbrev-ref', 'HEAD'), 'wip/feature-old-20261022-0930');
+  assert.equal(sh(copy, 'show', 'HEAD:b.txt'), 'draft');
+});
+
+test('a linked repo cannot redirect branch actions outside the workspace', async () => {
+  const { copy, seed, branches } = await setup();
+  await rename(copy, `${copy}-old`);
+  await symlink(seed, copy);
+  await assert.rejects(branches.list('w1', 'fox'), (e) => e.status === 409 && /outside/.test(e.message));
+  await assert.rejects(branches.switch('w1', 'fox', 'main'), (e) => e.status === 409);
+});
+
+test('update refuses uncommitted work', async () => {
+  const { copy, branches } = await setup();
+  await writeFile(join(copy, 'b.txt'), 'draft\n');
+  await assert.rejects(branches.update('w1', 'fox'), (e) => e.status === 409 && /uncommitted/.test(e.message));
+  assert.equal(sh(copy, 'rev-parse', '--abbrev-ref', 'HEAD'), 'feature/old');
 });
 
 test('a working session in the workspace stops any change', async () => {

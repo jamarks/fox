@@ -814,7 +814,7 @@ async function handlePanelRequest(req, res) {
           : action === 'update' ? await branches.update(id, dir) : await branches.create(id, dir, body.name);
         await listWorkspaces(true);
         return send(res, 200, out);
-      } catch (err) { return send(res, err.status ?? 500, { error: String(err.stderr || err.message).trim().split('\n')[0], dirty: err.dirty, busy: err.busy }); }
+      } catch (err) { return send(res, err.status ?? 500, { error: err.status ? err.message : 'Git operation failed. Check the repo on this machine.', dirty: err.dirty, busy: err.busy }); }
     }
     if ((m = p.match(/^\/api\/workspaces\/([0-9a-f-]{36})(?:\/(fetch|retry))?$/))) {
       const [, id, action] = m;
