@@ -2035,6 +2035,7 @@ function fxSettingRow(o) {
   const badge = o.introduced && !fxSettingsSeen.has(id) ? ` <span class="set-note" data-fx-badge>New · <button type="button" class="set-act" data-fx-seen="${esc(id)}">Mark as seen</button></span>` : '';
   const main = `<span class="set-main">${esc(o.label)}${badge}<span class="set-sub">${esc(o.description)}</span></span>`;
   if (o.type === 'integer') return `<div class="set-row set-optional">${main}<div class="set-override"><input type="number" min="${o.min}" max="${o.max}" step="1" value="${esc(o.value)}" aria-label="${esc(o.label)}" data-fx-input="${o.key}" style="width:8em"><button type="button" class="set-act" data-fx-key="${o.key}" data-fx-save>Save</button><button type="button" class="switch-btn ${o.applied ? 'on' : ''}" data-fx-key="${o.key}" data-fx-apply role="switch" aria-checked="${o.applied}" aria-label="Apply setting: ${esc(o.label)}"><span class="switch"></span></button><span>Apply setting</span><span class="set-sub">${o.applied ? 'Saved override' : 'No fox override; fx uses its own defaults or other configuration'}. Upstream default: ${esc(o.upstreamDefault)}. <a href="${esc(o.documentation)}" target="_blank" rel="noopener noreferrer">Documentation</a></span></div></div>`;
+  if (o.type === 'bool' && o.introduced) return `<div class="set-row set-optional">${main}<div class="set-override"><label style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap"><input type="checkbox" ${o.value ? 'checked' : ''} aria-label="${esc(o.label)}" data-fx-input="${o.key}" style="width:auto;margin:0"> Enabled</label><button type="button" class="set-act" data-fx-key="${o.key}" data-fx-save>Save</button><button type="button" class="switch-btn ${o.applied ? 'on' : ''}" data-fx-key="${o.key}" data-fx-apply role="switch" aria-checked="${o.applied}" aria-label="Apply setting: ${esc(o.label)}"><span class="switch"></span></button><span>Apply setting</span><span class="set-sub">${o.applied ? 'Saved override' : 'No fox override; fx uses its own defaults or other configuration'}. Upstream default: ${esc(o.upstreamDefault)}. <a href="${esc(o.documentation)}" target="_blank" rel="noopener noreferrer">Documentation</a></span></div></div>`;
   if (o.type === 'bool') return `<div class="set-row">${main}<button type="button" class="switch-btn ${o.value ? 'on' : ''}" data-fx-key="${o.key}" role="switch" aria-checked="${o.value}" aria-label="${esc(o.label)}"><span class="switch"></span></button></div>`;
   return `<div class="set-row">${main}<div class="seg">${o.choices.map((c) => `<button type="button" class="${c === o.value ? 'on' : ''}" data-fx-key="${o.key}" data-fx-value="${c}">${c}</button>`).join('')}</div></div>`;
 }
@@ -2056,8 +2057,11 @@ $('#settings-fx').addEventListener('click', async (e) => {
   if (input) {
     if ('fxApply' in btn.dataset && btn.classList.contains('on')) value = null;
     else {
-      if (!input.value.trim() || !input.reportValidity()) { $('#settings-fx-note').textContent = 'Enter a valid whole number.'; return; }
-      value = Number(input.value);
+      if (input.type === 'checkbox') value = input.checked;
+      else {
+        if (!input.value.trim() || !input.reportValidity()) { $('#settings-fx-note').textContent = 'Enter a valid whole number.'; return; }
+        value = Number(input.value);
+      }
       // Editing a draft does not opt in. The switch is the explicit application action.
       if ('fxSave' in btn.dataset && !btn.closest('.set-row').querySelector('[data-fx-apply]').classList.contains('on')) {
         $('#settings-fx-note').textContent = 'Turn on Apply setting to save this override.'; return;
