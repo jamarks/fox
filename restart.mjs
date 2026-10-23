@@ -4,7 +4,8 @@
 // without anyone there. A deploy restarts fox, not tmux, so it never sets this off; nor does a session you stop
 // yourself (fox forgets it at once), and one that waited for you is left to resume when you open it.
 
-export const CONTINUE_TEXT = 'The server restarted while you were working and cut your last turn off. Continue where you left off.';
+// Says what was lost, not only "continue": told just that, a model took a command cut off midway for finished.
+export const CONTINUE_TEXT = 'The server restarted in the middle of your last turn. Whatever was running then (commands, tools, subagents) was stopped and may not have finished, so check what actually got done, then continue where you left off.';
 export const RESUME_ONCE_MS = 60 * 60_000;
 
 // The sessions to resume: working under a tmux server that is not the one running now, and not back already.
