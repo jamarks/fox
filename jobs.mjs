@@ -12,13 +12,14 @@
 // fox's page (`pendingApproval`): until then nothing runs it, and the terminal cannot resume or run it.
 import { readFile, writeFile, mkdir, rename, readdir, rm, stat, lstat, open } from 'node:fs/promises';
 import { existsSync, createWriteStream } from 'node:fs';
-import { fastForward } from './gitsync.mjs';
+import { fastForward, SAFE_GIT } from './gitsync.mjs';
 import { fileURLToPath } from 'node:url';
 // Helpers jobs share (lib/python/foxjob.py): on every job's PYTHONPATH, so a script only needs `import foxjob`.
 export const FOXJOB_LIB = fileURLToPath(new URL('./lib/python', import.meta.url));
 import { join, resolve, sep, extname, isAbsolute, basename } from 'node:path';
-import { spawn as nodeSpawn } from 'node:child_process';
-import { randomUUID, randomBytes } from 'node:crypto';
+import { spawn as nodeSpawn, execFile } from 'node:child_process';
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
+import { promisify } from 'node:util';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
 
 export const JOB_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
@@ -26,6 +27,61 @@ const KEEP_RUNS = 50;
 const LOG_LIMIT = 5 * 1024 * 1024;
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const APPROVE_FIRST = 'This job waits for the user to approve it on fox\'s Jobs page.';
+const exec = promisify(execFile);
+const probe = (cmd, args) => exec(cmd, args, { timeout: 3000, maxBuffer: 128 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }).then(({ stdout }) => stdout.trim()).catch(() => null);
+const gitAt = (dir, args) => probe('git', ['-C', dir, ...SAFE_GIT, ...args]);
+
+async function scriptHash(cwd, script) {
+  try {
+    const path = resolve(cwd, script);
+    if (path !== cwd && !path.startsWith(resolve(cwd) + sep)) return null;
+    const size = await stat(path);
+    // An unusually large script must not hold the single runner or exhaust its memory.
+    if (!size.isFile() || size.size > 5 * 1024 * 1024) return null;
+    return createHash('sha256').update(await readFile(path, { signal: AbortSignal.timeout(3000) })).digest('hex');
+  } catch { return null; }
+}
+
+async function repoHeads(cwd) {
+  const dirs = [{ path: '.', dir: cwd }];
+  // A workspace can contain multiple sibling checkouts; never walk deeper or follow linked folders.
+  for (const name of (await readdir(cwd).catch(() => [])).sort().slice(0, 256)) {
+    const dir = join(cwd, name);
+    if ((await lstat(dir).catch(() => null))?.isDirectory() && (await lstat(join(dir, '.git')).catch(() => null))) {
+      dirs.push({ path: name, dir });
+      if (dirs.length >= 17) break;
+    }
+  }
+  const found = await Promise.all(dirs.map(async ({ path, dir }) => {
+    const head = await gitAt(dir, ['rev-parse', '--verify', 'HEAD']);
+    if (!head || !/^[0-9a-f]{40,64}$/.test(head)) return null;
+    const status = await gitAt(dir, ['status', '--porcelain', '--untracked-files=normal']);
+    return { path, head, dirty: status === null ? null : Boolean(status) };
+  }));
+  return found.filter(Boolean);
+}
+
+// No spelling-based filter can identify arbitrary credentials in positional args. Save option names only.
+function safeArgs(args = []) {
+  return args.map((arg) => {
+    if (/^--?[a-z][\w-]*$/i.test(arg)) return arg;
+    if (/^--?[a-z][\w-]*=/i.test(arg)) return `${arg.slice(0, arg.indexOf('='))}=[redacted]`;
+    return '[redacted]';
+  });
+}
+
+async function captureProvenance(job, item) {
+  const [sha256, repos, fxVersion] = await Promise.all([
+    scriptHash(job.cwd, job.script), repoHeads(job.cwd), probe('fx', ['--version']),
+  ]);
+  const s = job.schedule;
+  const days = s.days ? { days: s.days } : {};
+  const schedule = s.kind === 'hours' ? { kind: s.kind, every: s.every, from: s.from, to: s.to, ...days }
+    : s.kind === 'once' ? { kind: s.kind, date: s.date, at: s.at } : { kind: s.kind, at: s.at, ...days };
+  return { cwd: job.cwd, script: job.script, sha256, args: safeArgs(job.args), trigger: item.reason,
+    schedule, tz: job.tz, scheduledAt: item.scheduledAt ?? null,
+    model: job.model ?? null, effort: job.effort ?? null, fxVersion: fxVersion?.match(/^v?\d+\.\d+\.\d+(?:[-+][\w.-]+)?/)?.[0] ?? null, repos };
+}
 
 export function createJobStore({ stateDir }) {
   const file = join(stateDir, 'jobs.json');
@@ -174,6 +230,21 @@ export function createJobStore({ stateDir }) {
         return (start ? '…\n' : '') + buf.toString('utf8');
       } finally { await fh.close(); }
     },
+    // Compare only when a run is opened; historical bytes in run.json are never rewritten.
+    async provenance(id, runId) {
+      const run = (await store.runs(id)).find((r) => r.id === runId);
+      if (!run) throw fail('Run not found.', 404);
+      if (!run.provenance) return { provenance: null }; // runs from before snapshots existed
+      const job = await store.get(id), old = run.provenance;
+      if (!job) return { provenance: old, scriptChanged: null, reposChanged: null };
+      const [sha, repos] = await Promise.all([scriptHash(job.cwd, job.script), repoHeads(job.cwd)]);
+      return { provenance: old,
+        scriptChanged: job.cwd !== old.cwd || job.script !== old.script ? true : sha === null || old.sha256 === null ? null : sha !== old.sha256,
+        reposChanged: old.repos.map((r) => {
+          const current = repos.find((x) => x.path === r.path);
+          return { path: r.path, changed: current ? job.cwd !== old.cwd || current.head !== r.head : null };
+        }) };
+    },
     // A file the run left in its output folder (only names listed in run.json).
     async outputPath(id, runId, name) {
       if (!/^[0-9A-Za-z_-]+$/.test(runId)) return null;
@@ -287,6 +358,8 @@ export function createRunner({ store, now = () => Date.now(), spawn = nodeSpawn,
     log(`fox-jobs: ${job.name} started (${item.reason}), run ${id}`);
     // For example, bring the job's repo up to date (see gitsync.mjs); what it says goes at the top of the log.
     if (beforeRun) await Promise.resolve(beforeRun(job)).then((note) => { if (note) logStream.write(`[fox] ${note}\n`); }, () => {});
+    run.provenance = await captureProvenance(job, item).catch(() => null);
+    await write();
     const [cmd, args] = commandFor(job.script, job.args ?? []);
     const result = await new Promise((done) => {
       let child;

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { createJobStore, createRunner, commandFor } from '../jobs.mjs';
 
@@ -66,6 +67,54 @@ test('a due job runs once, with its log, summary and output files', async () => 
   assert.match(log, /a warning/);
   assert.equal(await readFile(await store.outputPath(job.id, runs[0].id, 'report.md'), 'utf8'), '# hi\n');
   assert.equal(await store.outputPath(job.id, runs[0].id, '../../jobs.json'), null);
+});
+
+test('provenance captures post-sync bytes and checkout, and compares later changes without rewriting the run', async () => {
+  const { store, work } = await setup({ 'report.sh': 'echo old\n' });
+  const git = (...args) => execFileSync('git', ['-C', work, ...args], { encoding: 'utf8' }).trim();
+  git('init', '-q'); git('config', 'user.email', 'test@example.com'); git('config', 'user.name', 'Test');
+  git('add', '.'); git('commit', '-qm', 'initial');
+  const job = await store.create({ name: 'report', cwd: work, script: 'jobs/report.sh', args: ['--token=private-value', '--password', 'hidden', 'safe', '--endpoint=https://alice:private@host', 'sk-private'], schedule: daily('03:00'), tz, model: 'gpt-test', effort: 'low' });
+  const updated = 'echo FOX_SUMMARY: updated\n';
+  const runner = createRunner({ store, log: quiet, beforeRun: async () => { await writeFile(join(work, 'jobs/report.sh'), updated); } });
+  await store.trigger(job.id); await runner.tick(); await runner.idle();
+  const [run] = await store.runs(job.id);
+  const p = run.provenance;
+  assert.equal(run.summary, 'updated');
+  assert.equal(p.script, 'jobs/report.sh');
+  assert.equal(p.sha256, createHash('sha256').update(updated).digest('hex'));
+  assert.deepEqual(p.args, ['--token=[redacted]', '--password', '[redacted]', '[redacted]', '--endpoint=[redacted]', '[redacted]']);
+  assert.doesNotMatch(JSON.stringify(run), /private-value|hidden|sk-private|alice|FOX_JOB_OUTPUT/);
+  assert.equal(p.trigger, 'manual'); assert.deepEqual(p.schedule, daily('03:00'));
+  assert.equal(p.model, 'gpt-test'); assert.equal(p.effort, 'low');
+  assert.ok(p.fxVersion === null || typeof p.fxVersion === 'string');
+  assert.deepEqual(p.repos, [{ path: '.', head: git('rev-parse', 'HEAD'), dirty: true }]);
+  assert.equal((await store.provenance(job.id, run.id)).scriptChanged, false);
+  await writeFile(join(work, 'jobs/report.sh'), 'echo changed again\n');
+  git('add', '.'); git('commit', '-qm', 'changed');
+  const compared = await store.provenance(job.id, run.id);
+  assert.equal(compared.scriptChanged, true);
+  assert.deepEqual(compared.reposChanged, [{ path: '.', changed: true }]);
+  assert.deepEqual((await store.runs(job.id))[0].provenance, p, 'run.json stays immutable');
+});
+
+test('workspace sibling checkouts are captured; older runs have no provenance', async () => {
+  const { store, work } = await setup({ 'report.sh': 'echo done\n' });
+  const sibling = join(work, 'other'); await mkdir(sibling);
+  const git = (...args) => execFileSync('git', ['-C', sibling, ...args], { encoding: 'utf8' }).trim();
+  git('init', '-q'); git('config', 'user.email', 'test@example.com'); git('config', 'user.name', 'Test');
+  await writeFile(join(sibling, 'file'), 'a'); git('add', '.'); git('commit', '-qm', 'initial');
+  const job = await store.create({ name: 'report', cwd: work, script: 'jobs/report.sh', schedule: daily('03:00'), tz });
+  const runner = createRunner({ store, log: quiet });
+  await store.trigger(job.id); await runner.tick(); await runner.idle();
+  const [run] = await store.runs(job.id);
+  assert.deepEqual(run.provenance.repos, [{ path: 'other', head: git('rev-parse', 'HEAD'), dirty: false }]);
+  await writeFile(join(sibling, 'file'), 'b');
+  assert.deepEqual((await store.provenance(job.id, run.id)).reposChanged, [{ path: 'other', changed: false }], 'dirty is not a HEAD change');
+  const oldId = '20261017-100000-abc123';
+  await mkdir(join(store.runsDir(job.id), oldId));
+  await writeFile(join(store.runsDir(job.id), oldId, 'run.json'), JSON.stringify({ id: oldId, status: 'ok' }));
+  assert.deepEqual(await store.provenance(job.id, oldId), { provenance: null });
 });
 
 test('Run now starts a job that is not due; a failing script is recorded as failed', async () => {

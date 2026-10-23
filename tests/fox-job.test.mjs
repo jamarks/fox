@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { parseDays, parseAdd, defaultTz } from '../bin/fox-job.mjs';
 import { withFoxBlock, ensureFoxNotes, foxNotes } from '../notes.mjs';
-import { createJobStore } from '../jobs.mjs';
+import { createJobStore, createRunner } from '../jobs.mjs';
 const run = promisify(execFile);
 const cli = new URL('../bin/fox-job.mjs', import.meta.url).pathname;
 
@@ -52,6 +52,14 @@ test('fox-job manages jobs end to end, sharing the panel\'s store', async () => 
   const [job] = JSON.parse(await readFile(join(base, 'state', 'jobs.json'), 'utf8'));
   await createJobStore({ stateDir: join(base, 'state') }).update(job.id, { enabled: true });
   assert.match(await fox('list'), /report\tMon–Fri 08:00\tnext .*\tlast never/);
+  const store = createJobStore({ stateDir: join(base, 'state') });
+  const runner = createRunner({ store, log: () => {} });
+  await store.trigger(job.id); await runner.tick(); await runner.idle();
+  const [recorded] = await store.runs(job.id);
+  assert.equal(recorded.provenance.script, 'jobs/report.py');
+  assert.deepEqual(recorded.provenance.args, []);
+  assert.equal(recorded.provenance.trigger, 'manual');
+  assert.deepEqual((await store.provenance(job.id, recorded.id)).provenance, recorded.provenance);
   await fox('pause', 'report');
   assert.match(await fox('list'), /report\tpaused/);
   assert.match(await fox('run', 'report'), /will start/);
