@@ -57,11 +57,12 @@ test('first load baselines history, polling adds unread, selection clears only t
   assert.equal(elements['reply-inbox'].classList.contains('hidden'), true);
   assert.equal(JSON.parse(storage.get('fox.inbox.seen')).abcd, 2);
   assert.equal(ctx.globalMessage.index, 3);
-  assert.deepEqual(ctx.opened, [], 'on a computer the reply opens in Read');
-  // On a phone it opens the session's terminal instead.
-  ctx.mobileLayout.matches = true;
+  assert.deepEqual(ctx.opened, ['abcd'], 'on a computer the reply opens in Read and its terminal comes to the center');
+  // On a phone it opens the session's terminal only.
+  ctx.mobileLayout.matches = true; ctx.opened = []; ctx.globalMessage = null;
   handlers['reply-inbox-list:click']({ target: { closest: () => ({ dataset: { reply: 'abcd' } }) } });
   assert.deepEqual(ctx.opened, ['abcd']);
+  assert.equal(ctx.globalMessage, null);
 });
 
 test('the model of a session is the one that answered last, not fx\'s default in session.json', () => {

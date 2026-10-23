@@ -191,11 +191,14 @@ $('#reply-inbox-list').addEventListener('click', (e) => {
   if (!s?.latestReply) return;
   // On a phone the answer is read where you reply: straight to the session's terminal.
   if (mobileLayout.matches) return openSession(s.id);
+  // On a computer: the answer in the right column, scrolled to, and the session's terminal in the center
+  // (woken up if it was asleep), the same as clicking the session. Selecting marks the reply read.
   globalMessage = { id: s.id, index: s.latestReply.messageIndex };
   convoShown.add(s.id);
   closePages(); // the answer shows in the right column, which an open page hides
   setTranscript(true);
-  selectSession(s.id); // selecting the result marks it read, without starting fx
+  selectSession(s.id);
+  openSession(s.id);
 });
 
 // ---------- sidebar ----------
