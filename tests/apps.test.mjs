@@ -60,3 +60,83 @@ test('the router keeps Cloudflare Access proof from the app, and never reaches a
     assert.equal((await get(guarded.address().port, {})).status, 404, 'apps.json pointing at fox is not followed');
   } finally { router.close(); guarded.close(); app.close(); }
 });
+
+test('an app can be a folder or a command; folders and working dirs stay inside home and out of hidden ones', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'fox-home-'));
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(join(home, 'site'));
+  await mkdir(join(home, '.ssh'));
+  const reg = createAppRegistry({ stateDir: join(home, 'state'), home });
+  assert.deepEqual(Object.keys(await reg.set('site', { dir: join(home, 'site') })).sort(), ['createdAt', 'dir', 'name']);
+  await assert.rejects(reg.set('keys', { dir: join(home, '.ssh') }), /hidden/);
+  await assert.rejects(reg.set('root', { dir: '/etc' }), /inside your home/);
+  await assert.rejects(reg.set('home', { dir: home }), /inside your home/);
+  await assert.rejects(reg.set('nope', { dir: join(home, 'missing') }), /not a folder/);
+  const app = await reg.set('board', { cmd: 'npm start', cwd: join(home, 'site'), port: 3002 });
+  assert.equal(app.port, 3002);
+  await assert.rejects(reg.set('two', { cmd: 'a\nb', cwd: join(home, 'site'), port: 3003 }), /one line/);
+  assert.equal((await reg.setPaused('board', true)).paused, true);
+  assert.equal((await reg.setPaused('board', false)).paused, undefined);
+});
+
+test('a folder app serves its files, index.html for a folder, and never hidden files or a way out', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'fox-home-'));
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  await mkdir(join(home, 'site', 'docs'), { recursive: true });
+  await writeFile(join(home, 'site', 'index.html'), '<h1>hi</h1>');
+  await writeFile(join(home, 'site', 'docs', 'index.html'), 'docs');
+  await writeFile(join(home, 'site', '.env'), 'SECRET=1');
+  await writeFile(join(home, 'secret.txt'), 'outside');
+  const reg = createAppRegistry({ stateDir: join(home, 'state'), home });
+  await reg.set('site', { dir: join(home, 'site') });
+  await reg.set('off', { dir: join(home, 'site') });
+  await reg.setPaused('off', true);
+  const router = createAppRouter({ registry: reg, domain: 'jwass.xyz' });
+  await new Promise((r) => router.listen(0, '127.0.0.1', r));
+  const get = (host, path = '/') => new Promise((resolve, reject) => http.get({ host: '127.0.0.1', port: router.address().port, path, headers: { host } }, (res) => {
+    let body = ''; res.on('data', (c) => (body += c)); res.on('end', () => resolve({ status: res.statusCode, body, type: res.headers['content-type'] }));
+  }).on('error', reject));
+  try {
+    assert.deepEqual(await get('site.jwass.xyz'), { status: 200, body: '<h1>hi</h1>', type: 'text/html; charset=utf-8' });
+    assert.equal((await get('site.jwass.xyz', '/docs/')).body, 'docs');
+    assert.equal((await get('site.jwass.xyz', '/.env')).status, 404);
+    assert.equal((await get('site.jwass.xyz', '/../secret.txt')).status, 404);
+    assert.equal((await get('site.jwass.xyz', '/%2e%2e/secret.txt')).status, 404);
+    assert.equal((await get('off.jwass.xyz')).status, 503);
+  } finally { router.close(); }
+});
+
+test('reconcile keeps tmux matching the list: starts, restarts what changed, stops paused and removed', async () => {
+  const { reconcileApps, appSpecHash } = await import('../apps.mjs');
+  const home = await mkdtemp(join(tmpdir(), 'fox-home-'));
+  const { mkdir, readFile } = await import('node:fs/promises');
+  await mkdir(join(home, 'board'));
+  const reg = createAppRegistry({ stateDir: join(home, 'state'), home });
+  const sessions = new Map(); // name -> spec
+  const calls = [];
+  const tmux = async (...args) => {
+    calls.push(args.join(' '));
+    if (args[0] === 'list-sessions') return [...sessions.keys()].join('\n');
+    if (args[0] === 'show-options') return sessions.get(args[2]) ?? '';
+    if (args[0] === 'new-session') sessions.set(args[3], '');
+    if (args[0] === 'set-option' && args[3] === '@fox_app_spec') sessions.set(args[2], args[4]);
+    if (args[0] === 'kill-session') sessions.delete(args[2]);
+    return '';
+  };
+  const logDir = join(home, 'state', 'apps');
+  const board = await reg.set('board', { cmd: 'node server.js', cwd: join(home, 'board'), port: 3005 });
+  sessions.set('app-stale', 'x'); // an app removed while fox was down
+  await reconcileApps({ registry: reg, tmux, logDir });
+  assert.deepEqual([...sessions.keys()], ['app-board']);
+  assert.equal(sessions.get('app-board'), appSpecHash(board));
+  assert.match(await readFile(join(logDir, 'board.sh'), 'utf8'), /export PORT=3005[\s\S]*while :; do[\s\S]*'node server\.js'/);
+  calls.length = 0;
+  await reconcileApps({ registry: reg, tmux, logDir });
+  assert.ok(!calls.some((c) => c.startsWith('new-session') || c.startsWith('kill-session')), 'nothing to do when it already runs');
+  await reg.set('board', { cmd: 'node server.js --watch', cwd: join(home, 'board'), port: 3005 });
+  await reconcileApps({ registry: reg, tmux, logDir });
+  assert.ok(calls.some((c) => c.startsWith('kill-session -t app-board')) && sessions.has('app-board'), 'a changed command restarts');
+  await reg.setPaused('board', true);
+  await reconcileApps({ registry: reg, tmux, logDir });
+  assert.equal(sessions.size, 0);
+});

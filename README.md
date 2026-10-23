@@ -42,7 +42,7 @@ All of it: [CHANGELOG.md](CHANGELOG.md).
 - **Tools** from Settings, for fx and Claude Code: a browser, Chrome DevTools, library docs, Vercel, Linear.
 - **Skills for fx** in Settings: read discovered skills, preview and install GitHub skills globally or per workspace, and remove fox-installed skills. Click ✳ in the terminal bar to find skills for that folder and insert an unsent draft.
 - **Search** across every session (⌥Space), **metrics** for the last 7 and 30 days, seven **themes** (one is a real star map).
-- **On a server**: open it from any device, see the dev servers fx starts, publish them as named apps. [docs/server.md](docs/server.md)
+- **On a server**: open it from any device, see the dev servers fx starts, and publish pages and tools as named apps (`https://<name>.<your domain>`, private to you) that stay up after the session: a folder fox serves or a command fox keeps running. [docs/server.md](docs/server.md)
 
 ## What you need
 

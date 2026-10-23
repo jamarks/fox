@@ -2,6 +2,7 @@
 // Lee ~/.fx/sessions (solo lectura) y abre `fx` en pseudo-terminales vía WebSocket.
 
 import http from 'node:http';
+import net from 'node:net';
 import { readFile, readdir, stat, mkdir, writeFile, rename } from 'node:fs/promises';
 import { existsSync, realpathSync } from 'node:fs';
 import { createReadStream } from 'node:fs';
@@ -21,7 +22,7 @@ import { TOOLS, isInstalled, isEnabled, withEnabled, addArgs, findServer } from 
 import { createSkills } from './skills.mjs';
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
-import { createAppRegistry, createAppRouter } from './apps.mjs';
+import { createAppRegistry, createAppRouter, reconcileApps, appKind, appUrl, APP_SESSION } from './apps.mjs';
 import { createFxSettings } from './fxsettings.mjs';
 import { listSkills } from './skill-shelf.mjs';
 import { fastForward, SAFE_GIT } from './gitsync.mjs';
@@ -142,9 +143,10 @@ const branches = createBranches({
 // never kills a job mid-run; on a laptop it runs inside fox.
 const jobStore = createJobStore({ stateDir: STATE_DIR });
 const fxSettings = createFxSettings(join(homedir(), '.fx', 'settings.json'));
+const appRegistry = APPS ? createAppRegistry({ stateDir: STATE_DIR, denyPorts: [PORT, APPS.port, 4849] }) : null;
+const APP_LOGS = join(STATE_DIR, 'apps');
 if (APPS) {
-  const registry = createAppRegistry({ stateDir: STATE_DIR, denyPorts: [PORT, APPS.port, 4849] });
-  createAppRouter({ registry, domain: APPS.domain, denyPorts: [PORT, APPS.port, 4849] }).listen(APPS.port, '127.0.0.1', () => console.log(`fox: named apps at ${APPS.url} (router on 127.0.0.1:${APPS.port})`));
+  createAppRouter({ registry: appRegistry, domain: APPS.domain, denyPorts: [PORT, APPS.port, 4849] }).listen(APPS.port, '127.0.0.1', () => console.log(`fox: named apps at ${APPS.url} (router on 127.0.0.1:${APPS.port})`));
 }
 // On a server, fx learns about previews and jobs (the fox-job command) from a block fox keeps in ~/.fx/AGENTS.md.
 // On a laptop fox leaves your fx instructions alone; FOX_FX_NOTES=1 or 0 overrides either way.
@@ -155,6 +157,31 @@ if ((process.env.FOX_FX_NOTES ?? (process.env.FOX_PUBLIC_ORIGIN ? '1' : '0')) ==
 }
 const inlineRunner = process.env.FOX_JOBS_RUNNER === 'external' ? null : createRunner({ store: jobStore, beforeRun: updateJobRepo });
 inlineRunner?.start().catch((err) => console.error(`fox: jobs runner failed: ${err.message}`));
+// Apps that run a command (see apps.mjs): tmux keeps them up across fox deploys; this check starts them after a
+// reboot, restarts what changed and stops what is paused, every few seconds.
+const syncApps = () => reconcileApps({ registry: appRegistry, tmux, logDir: APP_LOGS }).catch((err) => console.error(`fox: apps: ${err.message}`));
+if (APPS) { syncApps(); setInterval(syncApps, 10000).unref(); }
+// Is something answering on a port? For the Apps page; half a second at most.
+const portAnswers = (port) => new Promise((ok) => {
+  const sock = net.connect(port, '127.0.0.1');
+  const done = (v) => { sock.destroy(); ok(v); };
+  sock.setTimeout(500, () => done(false)); sock.once('connect', () => done(true)); sock.once('error', () => done(false));
+});
+async function appsOverview() {
+  if (!APPS) return { enabled: false, apps: [] };
+  const apps = await appRegistry.list();
+  return {
+    enabled: true,
+    apps: await Promise.all(apps.map(async (a) => {
+      const kind = appKind(a);
+      const log = kind === 'cmd' ? await readFile(join(APP_LOGS, `${a.name}.log`), 'utf8').catch(() => '') : '';
+      const restarts = (log.match(/^\[fox\] exited/gm) ?? []).length;
+      const up = a.paused ? false : kind === 'dir' ? Boolean((await stat(a.dir).catch(() => null))?.isDirectory()) : await portAnswers(a.port);
+      return { name: a.name, url: appUrl(APPS.url, a.name), kind, port: a.port ?? null, dir: a.dir ?? null, cmd: a.cmd ?? null, cwd: a.cwd ?? null,
+        paused: Boolean(a.paused), status: a.paused ? 'paused' : up ? 'up' : 'down', restarts, createdAt: a.createdAt ?? null };
+    })),
+  };
+}
 // Scripts a job can run in a folder: .py, .mjs, .js, .sh up to three levels deep, skipping dependencies and dot folders.
 async function jobScripts(cwd) {
   const out = [];
@@ -667,6 +694,22 @@ async function handlePanelRequest(req, res) {
         if (action === 'close' && req.method === 'POST') return send(res, 200, await prs.close(`${owner}/${name}`, num, JSON.parse(await readBody(req) || '{}').reason));
         return send(res, 405, { error: 'method not allowed' });
       } catch (err) { return send(res, err.status ?? 500, { error: String(err.stderr || err.message).trim().split('\n')[0] }); }
+    }
+    // ---------- apps (see apps.mjs) ----------
+    if (p === '/api/apps' && req.method === 'GET') return send(res, 200, await appsOverview());
+    if (APPS && (m = p.match(/^\/api\/apps\/([a-z0-9-]{1,40})(?:\/(pause|resume|restart|log))?$/))) {
+      const app = await appRegistry.get(m[1]);
+      if (!app) return send(res, 404, { error: 'No app with that name' });
+      if (m[2] === 'log' && req.method === 'GET') {
+        const text = await readFile(join(APP_LOGS, `${m[1]}.log`), 'utf8').catch(() => '');
+        return send(res, 200, { text: text.split('\n').slice(-200).join('\n') });
+      }
+      if (req.method === 'DELETE' && !m[2]) await appRegistry.remove(m[1]);
+      else if (req.method === 'POST' && (m[2] === 'pause' || m[2] === 'resume')) await appRegistry.setPaused(m[1], m[2] === 'pause');
+      else if (req.method === 'POST' && m[2] === 'restart' && app.cmd) await tmux('kill-session', '-t', APP_SESSION + m[1]).catch(() => {});
+      else return send(res, 405, { error: 'not allowed' });
+      await syncApps();
+      return send(res, 200, await appsOverview());
     }
     // ---------- jobs ----------
     if (p === '/api/jobs' && req.method === 'GET') return send(res, 200, await jobStore.overview());
