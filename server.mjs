@@ -735,6 +735,7 @@ async function handlePanelRequest(req, res) {
         if (!sub && req.method === 'DELETE') { await jobStore.remove(id); return send(res, 200, { ok: true }); }
         if (sub === 'run' && !runId && req.method === 'POST') { await jobStore.trigger(id); inlineRunner?.tick().catch(() => {}); return send(res, 200, { ok: true }); }
         if (sub === 'runs' && !runId && req.method === 'GET') return send(res, 200, prStates.decorate(await jobStore.runs(id)));
+        if (sub === 'runs' && runId && !part && req.method === 'GET') return send(res, 200, await jobStore.provenance(id, runId));
         if (sub === 'runs' && part === 'log' && req.method === 'GET') return send(res, 200, await jobStore.readLog(id, runId), 'text/plain; charset=utf-8');
         if (sub === 'runs' && part === 'files' && file && req.method === 'GET') {
           const path = await jobStore.outputPath(id, runId, decodeURIComponent(file));
