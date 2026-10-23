@@ -1352,9 +1352,9 @@ function familyUsageLine(parent) {
   const total = usage.tokens;
   const stale = usage.rows.some((r) => r.pending);
   const hint = [usage.missing ? `${usage.missing} without snapshot` : '', stale ? 'saved data may lag live work' : ''].filter(Boolean).join(' · ');
-  return `<details class="family-usage" ${familyUsageOpen ? 'open' : ''}><summary data-toggle-family-usage>local estimate · ${fmtTokens(total)} tokens${hint ? ` <span class="family-usage-hint">· ${hint}</span>` : ''}</summary>
-    <div class="family-usage-rows">${usage.rows.map((r) => `<div class="family-usage-row"><span title="${esc(r.model ?? 'unknown model')}">${r.id === parent.id ? 'parent' : 'child'} · ${esc(r.model ? modelShort(r.model) : 'unknown model')}</span><span>${fmtTokens(r.tokens)} · ${total ? Math.round(r.tokens / total * 100) + '%' : '—'}${r.pending ? ' · saved' : ''}</span></div>`).join('')}
-    <div class="family-usage-note">Saved session snapshots · input + output + cache read${usage.missing ? ` · ${usage.missing} missing` : ''}. Not provider spend or remaining quota.</div></div></details>`;
+  return `<details class="family-usage" ${familyUsageOpen ? 'open' : ''}><summary data-toggle-family-usage>local ${usage.missing ? 'partial ' : ''}estimate · ${fmtTokens(total)} tokens${hint ? ` <span class="family-usage-hint">· ${hint}</span>` : ''}</summary>
+    <div class="family-usage-rows">${usage.rows.map((r) => `<div class="family-usage-row"><span title="${esc(r.model ?? 'unknown model')}">${r.id === parent.id ? 'parent' : `child ${parent.children.findIndex((c) => c.id === r.id) + 1}`} · ${esc(r.model ? modelShort(r.model) : 'unknown model')}</span><span>${fmtTokens(r.tokens)} · ${total ? Math.round(r.tokens / total * 100) + '%' : '—'}${r.pending ? ' · saved' : ''}</span></div>`).join('')}
+    <div class="family-usage-note">Saved session snapshots · input + output + cache read${usage.missing ? ' · shares of saved total' : ''}. Not provider spend or remaining quota.</div></div></details>`;
 }
 let lastChildShown = null;
 const fmtDur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + 's' : s < 3600 ? Math.round(s / 60) + 'm' : Math.floor(s / 3600) + 'h ' + Math.round((s % 3600) / 60) + 'm'; };

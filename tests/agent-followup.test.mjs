@@ -69,11 +69,14 @@ test('board shows saved family usage as a compact expandable estimate only when 
     { id: f.child.id, model: 'vendor/child', tokens: 20, pending: true },
   ] };
   const html = f.run('agentsBoard(parent)');
-  assert.match(html, /local estimate · 120 tokens/);
+  assert.match(html, /local partial estimate · 120 tokens/);
+  assert.match(html, /shares of saved total/);
   assert.match(html, /parent · vendor\/parent.*100 · 83%/s);
-  assert.match(html, /child · vendor\/child.*20 · 17% · saved/s);
+  assert.match(html, /child 1 · vendor\/child.*20 · 17% · saved/s);
   assert.match(html, /1 without snapshot/);
   assert.match(html, /Not provider spend or remaining quota/);
+  f.parent.familyUsage.missing = 0;
+  assert.match(f.run('agentsBoard(parent)'), /local estimate · 120 tokens/);
 });
 
 test('draft keeps the exact escaped name and only an excerpt from this row’s answer', () => {

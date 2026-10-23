@@ -54,6 +54,10 @@ test('a Claude Code transcript becomes fox events: turns, tools with their effec
   assert.equal(info.lastKind, 'interrupted');
   assert.deepEqual(info.latestReply, { text: 'Second part', messageIndex: 5, turn: 2, at: Date.parse(at(11)) });
   assert.deepEqual(info.usage, { input: 75, output: 35, cacheRead: 500, cost: 0, wallMs: 0 }); // usage once per message
+  assert.equal(info.usageRecorded, true);
+  const empty = assistant('empty', { type: 'text', text: 'Hi' }, 'end_turn', 2);
+  empty.message.usage = {};
+  assert.equal(parseTranscript(lines(user('Hello', 1), empty)).info.usageRecorded, false);
   assert.deepEqual(info.subagentCalls.map((c) => [c.prompt, c.type, c.done.ok]), [['Look around', 'Explore', true]]);
   assert.ok(!events.some((e) => e.text === 'No response requested.'));
 });
@@ -76,6 +80,7 @@ test('fox lists only the Claude Code sessions it launched, finds their transcrip
   // Before its first message there is no transcript: listed as new, and reopened with the same id.
   let [row] = await claude.listSessions();
   assert.deepEqual([row.id, row.title, row.model, row.workspace, row.turns], [first.id, '(untitled)', 'sonnet', cwd, 0]);
+  assert.equal(row.usage.savedAt, null);
   assert.deepEqual((await claude.launch({ cwd, resume: first.id })).argv, ['/bin/claude', '--session-id', first.id]);
 
   const dir = join(projectsDir, cwd.replace(/[^A-Za-z0-9]/g, '-'));
@@ -88,9 +93,11 @@ test('fox lists only the Claude Code sessions it launched, finds their transcrip
   const rows = await claude.listSessions();
   row = rows.find((r) => r.id === first.id);
   assert.deepEqual([row.title, row.model, row.turns, row.latestReply.text], ['Pages', 'claude-opus-5-5', 4, 'Second part']);
+  assert.ok(row.usage.savedAt > 0);
   assert.deepEqual(row.children.map((c) => [c.id, c.kind, c.name, c.phase, c.task, c.outcome, c.answer]), [[`${first.id}-a1b2c3d4e5f6a7b8c`, 'Explore', null, 'finished', 'Explore', 'completed', 'found it']]);
   const child = rows.find((r) => r.parentId === first.id);
   assert.equal(child.subagentChild, true);
+  assert.ok(child.usage.savedAt > 0);
   assert.ok(claude.has(child.id) && claude.has(first.id) && !claude.has('11111111-1111-4111-8111-111111111111'));
   assert.deepEqual((await claude.events(child.id)).map((e) => e.kind), ['user', 'assistant', 'turn_completed']); // a subagent's own records
   assert.deepEqual((await claude.launch({ cwd, resume: first.id })).argv, ['/bin/claude', '--resume', first.id]);
