@@ -61,17 +61,12 @@ async function repoHeads(cwd) {
   return found.filter(Boolean);
 }
 
-// Arguments may contain credentials even though definitions should not. Keep positions, not credential values.
+// No spelling-based filter can identify arbitrary credentials in positional args. Save option names only.
 function safeArgs(args = []) {
-  let hideNext = false;
   return args.map((arg) => {
-    if (hideNext) { hideNext = false; return '[redacted]'; }
-    if (/^(?:--?[^=]*(?:token|secret|password|passwd|api[-_]?key|credential|auth)[^=]*)(?:=|$)/i.test(arg)) {
-      hideNext = !arg.includes('=');
-      return arg.includes('=') ? `${arg.split('=')[0]}=[redacted]` : arg;
-    }
-    if (/\S+:\/\/[^\s/@]+:[^\s/@]+@/.test(arg) || /^(?:gh[pousr]_|sk-|Bearer\s)/i.test(arg)) return '[redacted]';
-    return arg;
+    if (/^--?[a-z][\w-]*$/i.test(arg)) return arg;
+    if (/^--?[a-z][\w-]*=/i.test(arg)) return `${arg.slice(0, arg.indexOf('='))}=[redacted]`;
+    return '[redacted]';
   });
 }
 

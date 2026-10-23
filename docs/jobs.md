@@ -10,7 +10,7 @@ A job is a script fox runs on a schedule. fox shows each run (status, a one-line
   - `FOX_SUMMARY: <one line>`: what this run did. Shown in the list and on the run.
   - `FOX_LINK: <label> <url>`: a button on the run (up to 5, http(s) only), for what you should open: a pull request to review, a report, a deploy.
 - **Files for you.** Write them to `$FOX_JOB_OUTPUT`; they are kept with the run.
-- **Run inputs.** Expanding a run shows the script path and SHA-256, arguments (credential-like values redacted), trigger and schedule, selected model and effort, fx version when available, and each checkout's HEAD and dirty flag captured after the pre-run sync and before the script starts. It flags script or HEAD changes since that run; old runs have no snapshot. It does not archive the script or restore a checkout.
+- **Run inputs.** Expanding a run shows the script path and SHA-256, argument positions and option names (values redacted), trigger and schedule, selected model and effort, fx version when available, and each checkout's HEAD and dirty flag captured after the pre-run sync and before the script starts. It flags script or HEAD changes since that run; old runs have no snapshot. It does not archive the script or restore a checkout.
 - **Limits.** One job runs at a time, each with a time limit (30 minutes by default); past it fox stops the script and everything it started. The last 50 runs of each job are kept.
 - **Environment.** `FOX_JOB_ID`, `FOX_JOB_NAME`, `FOX_JOB_RUN_ID`, `FOX_JOB_OUTPUT`, and `PYTHONPATH` with fox's helpers (below). Nothing of fox's own settings is meant for the job.
 

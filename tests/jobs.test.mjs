@@ -74,7 +74,7 @@ test('provenance captures post-sync bytes and checkout, and compares later chang
   const git = (...args) => execFileSync('git', ['-C', work, ...args], { encoding: 'utf8' }).trim();
   git('init', '-q'); git('config', 'user.email', 'test@example.com'); git('config', 'user.name', 'Test');
   git('add', '.'); git('commit', '-qm', 'initial');
-  const job = await store.create({ name: 'report', cwd: work, script: 'jobs/report.sh', args: ['--token=private-value', '--password', 'hidden', 'safe'], schedule: daily('03:00'), tz, model: 'gpt-test', effort: 'low' });
+  const job = await store.create({ name: 'report', cwd: work, script: 'jobs/report.sh', args: ['--token=private-value', '--password', 'hidden', 'safe', '--endpoint=https://alice:private@host', 'sk-private'], schedule: daily('03:00'), tz, model: 'gpt-test', effort: 'low' });
   const updated = 'echo FOX_SUMMARY: updated\n';
   const runner = createRunner({ store, log: quiet, beforeRun: async () => { await writeFile(join(work, 'jobs/report.sh'), updated); } });
   await store.trigger(job.id); await runner.tick(); await runner.idle();
@@ -83,8 +83,8 @@ test('provenance captures post-sync bytes and checkout, and compares later chang
   assert.equal(run.summary, 'updated');
   assert.equal(p.script, 'jobs/report.sh');
   assert.equal(p.sha256, createHash('sha256').update(updated).digest('hex'));
-  assert.deepEqual(p.args, ['--token=[redacted]', '--password', '[redacted]', 'safe']);
-  assert.doesNotMatch(JSON.stringify(run), /private-value|hidden|FOX_JOB_OUTPUT/);
+  assert.deepEqual(p.args, ['--token=[redacted]', '--password', '[redacted]', '[redacted]', '--endpoint=[redacted]', '[redacted]']);
+  assert.doesNotMatch(JSON.stringify(run), /private-value|hidden|sk-private|alice|FOX_JOB_OUTPUT/);
   assert.equal(p.trigger, 'manual'); assert.deepEqual(p.schedule, daily('03:00'));
   assert.equal(p.model, 'gpt-test'); assert.equal(p.effort, 'low');
   assert.ok(p.fxVersion === null || typeof p.fxVersion === 'string');
