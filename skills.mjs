@@ -56,10 +56,22 @@ function findDir(entries, id) {
   fail(hits.length ? `More than one ${id} in this repository.` : 'That skill is not in this repository.', hits.length ? 409 : 404);
 }
 const SKILLS_SH = 'https://skills.sh';
-async function fetchText(url) {
-  const r = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { accept: 'text/html,application/json' } });
-  if (!r.ok) throw Object.assign(new Error('skills.sh did not answer.'), { status: 502 });
+async function fetchText(url, headers = {}) {
+  const r = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { accept: 'application/json', ...headers } });
+  if (!r.ok) throw Object.assign(new Error('skills.sh did not answer.'), { status: r.status === 404 ? 404 : 502 });
   return r.text();
+}
+export function parseSkillSource(input) {
+  if (typeof input !== 'string') fail('Enter a GitHub owner/repo or skills.sh URL.');
+  const value = input.trim();
+  if (REPO.test(value) && !value.includes('..')) return { source: value, skill: null };
+  try {
+    const u = new URL(value);
+    if (u.protocol !== 'https:' || !['skills.sh', 'www.skills.sh'].includes(u.hostname) || u.port || u.search || u.hash) throw Error();
+    const parts = u.pathname.split('/').filter(Boolean);
+    if (parts.length !== 3 || !parts.every((p) => NAME.test(p) && !p.includes('..'))) throw Error();
+    return { source: `${parts[0]}/${parts[1]}`, skill: parts[2] };
+  } catch { fail('Enter a GitHub owner/repo or skills.sh URL.'); }
 }
 const filesOf = (entries, dir) => entries.filter((x) => x.type !== 'tree' && (dir ? x.path.startsWith(`${dir}/`) : !x.path.includes('/')));
 async function pool(items, n, fn) {
@@ -68,9 +80,37 @@ async function pool(items, n, fn) {
   return out;
 }
 
-export function createSkills({ home, stateDir, workspaces, web = fetchText, gh = (args) => exec('gh', ['api', ...args], { timeout: 30000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GH_PROMPT_DISABLED: '1' } }).then((r) => r.stdout) }) {
+export function createSkills({ home, stateDir, workspaces, web = fetchText, tokenFile = process.env.FOX_SKILLS_SH_TOKEN_FILE || join(home, '.config/fox/skills-sh/token.env'), gh = (args) => exec('gh', ['api', ...args], { timeout: 30000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GH_PROMPT_DISABLED: '1' } }).then((r) => r.stdout) }) {
   const record = join(stateDir, 'skills.json');
-  const previews = new Map(), trees = new Map();
+  const previews = new Map(), trees = new Map(), audits = new Map();
+  // Read on each request: the token job replaces this file while fox is running.
+  async function token() {
+    const text = await readFile(tokenFile, 'utf8').catch((e) => { if (e.code === 'ENOENT') return ''; throw e; });
+    return /^VERCEL_OIDC_TOKEN="([^"\r\n]+)"\s*$/m.exec(text)?.[1] || null;
+  }
+  async function catalog(url) {
+    const secret = await token();
+    if (!secret) fail('Search and trending need a server token. Browse a repo instead.', 503);
+    try { return JSON.parse(await web(`${SKILLS_SH}${url}`, { Authorization: `Bearer ${secret}` })); }
+    catch { fail('skills.sh catalog is unavailable. Browse a repo instead.', 502); }
+  }
+  const shSkill = (x) => x?.sourceType === 'github' && REPO.test(x.source) && !x.source.includes('..') && NAME.test(x.slug)
+    ? { source: x.source, skill: x.slug, name: String(x.name || x.slug).slice(0, 100), installs: Number(x.installs) || 0 } : null;
+  const shSkills = (data) => ({ skills: (Array.isArray(data) ? data : []).map(shSkill).filter(Boolean).slice(0, 50) });
+  async function audit(source, id, fresh = false) {
+    if (!REPO.test(source) || source.includes('..') || !NAME.test(id) || id.includes('..')) fail('Invalid skill for audit.');
+    const key = `${source}/${id}`, cached = audits.get(key);
+    if (!fresh && cached?.until > Date.now()) return cached.value;
+    let value;
+    try {
+      const j = JSON.parse(await web(`${SKILLS_SH}/api/v1/skills/audit/${key}`));
+      if (!Array.isArray(j.audits)) throw Error('Invalid audit');
+      const entries = j.audits.map((a) => ({ provider: String(a.provider || '').slice(0, 80), status: ['pass', 'warn', 'fail'].includes(a.status) ? a.status : 'warn', riskLevel: String(a.riskLevel || '').toUpperCase().slice(0, 20), summary: String(a.summary || '').slice(0, 300) }));
+      value = { status: entries.some((a) => a.status === 'fail' || ['HIGH', 'CRITICAL'].includes(a.riskLevel)) ? 'fail' : entries.some((a) => a.status === 'warn') ? 'warn' : entries.length ? 'pass' : 'unavailable', entries };
+    } catch (err) { value = { status: 'unavailable', entries: [], reason: err.status === 404 ? 'Not audited yet' : 'Audit unavailable' }; }
+    audits.set(key, { value, until: Date.now() + (value.status === 'unavailable' ? 60_000 : 5 * 60_000) });
+    return value;
+  }
   let writing = Promise.resolve();
   const locked = (fn) => { const p = writing.then(fn); writing = p.catch(() => {}); return p; };
   const records = async () => { try { return JSON.parse(await readFile(record, 'utf8')); } catch { return {}; } };
@@ -128,7 +168,8 @@ export function createSkills({ home, stateDir, workspaces, web = fetchText, gh =
       // can carry dozens) still reach fx in sessions there, but they belong to that repo, not to this page.
       for (const [root, group] of PROJECT_ROOTS) items.push(...await scan(join(ws.dir, root), `${ws.name} · ${group}`, `workspace:${ws.id}`, owned));
     }
-    return { items, sources: SOURCES, scopes: (await workspaces.list()).map((w) => ({ id: `workspace:${w.id}`, name: w.name })) };
+    await pool(items.filter((item) => item.source), 8, async (item) => { item.audit = await audit(item.source, owned[`${item.scope}|${posix.basename(item.path)}`]?.skill || posix.basename(item.path)); });
+    return { items, sources: SOURCES, catalog: Boolean(await token()), scopes: (await workspaces.list()).map((w) => ({ id: `workspace:${w.id}`, name: w.name })) };
   }
   async function read(id) {
     const item = (await list()).items.find((x) => x.id === id);
@@ -165,29 +206,21 @@ export function createSkills({ home, stateDir, workspaces, web = fetchText, gh =
     if (files.reduce((a, f) => a + f.size, 0) > MAX_TOTAL) return 'over 4 MB in all';
     return null;
   }
-  // skills.sh, the open skills directory: its search API (the one `npx skills find` uses) and, for Popular, the
-  // ranking its home page carries (there is no API for it). Only repo and skill names come from there; what gets
-  // installed is still read from GitHub and reviewed file by file.
-  const shSkill = (x) => x && REPO.test(x.source) && NAME.test(x.skillId) ? { source: x.source, skill: x.skillId, name: String(x.name || x.skillId).slice(0, 100), installs: Number(x.installs) || 0 } : null;
-  let popularCache = null;
-  async function popular() {
-    if (popularCache && popularCache.until > Date.now()) return popularCache.value;
-    const html = (await web(`${SKILLS_SH}/`)).replace(/\\"/g, '"'), seen = new Map();
-    for (const m of html.matchAll(/"source":"([^"]+)","skillId":"([^"]+)","name":"([^"]*)","installs":(\d+)/g)) {
-      const s = shSkill({ source: m[1], skillId: m[2], name: m[3], installs: m[4] });
-      if (s && !seen.has(`${s.source}/${s.skill}`)) seen.set(`${s.source}/${s.skill}`, s);
-    }
-    if (!seen.size) fail('Could not read skills.sh. Pick a repo instead.', 502);
-    popularCache = { until: Date.now() + 60 * 60_000, value: { skills: [...seen.values()].sort((a, b) => b.installs - a.installs).slice(0, 60) } };
-    return popularCache.value;
-  }
+  // Catalog results are names only; previews still fetch files from GitHub for review.
+  async function popular() { return shSkills((await catalog('/api/v1/skills?view=trending&per_page=50')).data); }
   async function search({ q }) {
     if (typeof q !== 'string' || q.trim().length < 2 || q.length > 100) fail('Type at least 2 characters.');
-    const j = JSON.parse(await web(`${SKILLS_SH}/api/search?${new URLSearchParams({ q: q.trim(), limit: '50' })}`));
-    return { skills: (Array.isArray(j.skills) ? j.skills : []).map(shSkill).filter(Boolean).slice(0, 50) };
+    return shSkills((await catalog(`/api/v1/skills/search?${new URLSearchParams({ q: q.trim(), limit: '50' })}`)).data);
   }
+  async function curated() { return shSkills((await catalog('/api/v1/skills/curated')).data?.flatMap((owner) => owner.skills || [])); }
   // A repo's skills with the name and description from each SKILL.md: only those files are downloaded here.
   async function browse({ source }) {
+    const requested = parseSkillSource(source);
+    source = requested.source;
+    if (requested.skill) {
+      const found = await peek({ source, dir: requested.skill }), meta = header(found.text);
+      return { source, skills: [{ dir: requested.skill, name: meta.name || requested.skill, description: meta.description, problem: !NAME.test(meta.name) || !meta.description ? 'SKILL.md needs a name and a description' : null, audit: found.audit }] };
+    }
     const entries = await repoTree(source), dirs = skillDirs(entries);
     if (!dirs.length) fail('No SKILL.md in this repository.', 404);
     if (dirs.length > 300) fail('Too many skills in this repository.');
@@ -209,7 +242,7 @@ export function createSkills({ home, stateDir, workspaces, web = fetchText, gh =
     const files = filesOf(entries, dir), md = files.find((f) => f.path === (dir ? `${dir}/SKILL.md` : 'SKILL.md'));
     if (md.size > MAX_FILE) fail('SKILL.md is too large to show.');
     const prefix = dir ? `${dir}/` : '';
-    return { source, dir, text: (await blob(source, md)).toString('utf8'), files: files.map((f) => ({ name: f.path.slice(prefix.length), size: f.size })) };
+    return { source, dir, audit: await audit(source, posix.basename(dir) || source.split('/')[1]), text: (await blob(source, md)).toString('utf8'), files: files.map((f) => ({ name: f.path.slice(prefix.length), size: f.size })) };
   }
   async function preview({ source, dirs, scope }) {
     await target(scope);
@@ -225,17 +258,20 @@ export function createSkills({ home, stateDir, workspaces, web = fetchText, gh =
       const meta = header(data.find((f) => f.name === 'SKILL.md').data.toString('utf8'));
       if (!NAME.test(meta.name) || !meta.description || meta.description.length > 4000) fail('SKILL.md needs a valid name and description.');
       if (skills.some((s) => s.name === meta.name)) fail('Duplicate skill names.');
-      skills.push({ ...meta, files: data });
+      const id = posix.basename(dir) || source.split('/')[1];
+      skills.push({ ...meta, id, audit: await audit(source, id, true), files: data });
     }
     const token = randomUUID();
     for (const [k, v] of previews) if (v.until < Date.now()) previews.delete(k);
     previews.set(token, { until: Date.now() + 10 * 60_000, scope, source, skills });
-    return { token, source, scope, skills: skills.map((s) => ({ name: s.name, description: s.description, files: s.files.map((f) => ({ name: f.name, size: f.data.length })), text: s.files.find((f) => f.name === 'SKILL.md').data.toString('utf8') })) };
+    return { token, source, scope, skills: skills.map((s) => ({ name: s.name, description: s.description, audit: s.audit, files: s.files.map((f) => ({ name: f.name, size: f.data.length })), text: s.files.find((f) => f.name === 'SKILL.md').data.toString('utf8') })) };
   }
-  async function install(token) {
+  async function install(token, confirmRisk = false) {
     return locked(async () => {
-      const p = previews.get(token); previews.delete(token);
+      const p = previews.get(token);
       if (!p || p.until < Date.now()) fail('Preview expired. Preview again.', 409);
+      if (p.skills.some((s) => s.audit.status === 'fail') && confirmRisk !== true) fail('High-risk or failed audit: explicitly confirm before installing.', 409);
+      previews.delete(token);
       const root = await target(p.scope), owned = await records();
       await ensureParents(root);
       for (const s of p.skills) for (const r of await roots(p.scope)) if (await lstat(join(r, s.name)).catch(() => null)) fail(`${s.name} already exists; nothing was replaced.`, 409);
@@ -249,7 +285,7 @@ export function createSkills({ home, stateDir, workspaces, web = fetchText, gh =
             await mkdir(resolve(path, '..'), { recursive: true, mode: 0o700 });
             await writeFile(path, f.data, { flag: 'wx', mode: 0o600 });
           }
-          owned[`${p.scope}|${s.name}`] = { path: dir, source: p.source, files: Object.fromEntries(s.files.map((f) => [f.name, hash(f.data)])) };
+          owned[`${p.scope}|${s.name}`] = { path: dir, source: p.source, skill: s.id, files: Object.fromEntries(s.files.map((f) => [f.name, hash(f.data)])) };
         }
         await save(owned);
       } catch (err) { for (const dir of installed) await rm(dir, { recursive: true, force: true }); throw err; }
@@ -277,5 +313,5 @@ export function createSkills({ home, stateDir, workspaces, web = fetchText, gh =
       return { removed: true };
     });
   }
-  return { list, read, popular, search, browse, peek, preview, install, remove };
+  return { list, read, popular, search, curated, audit, browse, peek, preview, install, remove };
 }
