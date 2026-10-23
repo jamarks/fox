@@ -127,6 +127,18 @@ body:has(.page-view:not(.hidden)) #toggle-mosaic { display: none; }
 #empty-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--muted); }
 #empty-state h2 { font-weight: 500; margin: 0 0 6px; color: var(--text); }
 #transcript-meta { padding: 8px 16px 10px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11px; display: flex; gap: 12px; flex-wrap: wrap; }
+/* A draft stays in session context, outside the refreshed transcript body so typing survives polling. */
+#next-draft { flex: none; border-bottom: 1px solid var(--border); }
+#next-draft.hidden { display: none; }
+#next-draft summary { cursor: pointer; padding: 9px 16px; color: var(--muted); font-size: 11px; list-style-position: inside; }
+#next-draft summary:hover, #next-draft[open] summary { color: var(--text); }
+#next-draft-mark { color: var(--accent); }
+.next-draft-body { padding: 0 16px 12px; }
+.next-draft-body label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 5px; }
+#next-draft-text { display: block; width: 100%; resize: vertical; min-height: 72px; max-height: 35vh; padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+.next-draft-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+#next-draft-hint { flex: 1; color: var(--muted); font-size: 10px; }
+#next-draft-insert { color: var(--accent); padding: 5px 8px; }
 #transcript-body { overflow-y: auto; flex: 1; padding: 14px 16px 24px; }
 .muted { color: var(--muted); }
 .msg { margin-bottom: 14px; }

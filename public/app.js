@@ -100,6 +100,7 @@ async function refresh() {
   renderSummary();
   renderReplyInbox();
   syncTabsWithTerminals();
+  renderNextDraft();
   if (state.mosaic) renderMosaic();
 }
 
@@ -470,6 +471,7 @@ setInterval(updateTermLoading, 500);
 function syncNothingOpen() { document.body.classList.toggle('nothing-open', !state.tabs.size && !state.selected); }
 function selectSession(id) {
   state.selected = id;
+  renderNextDraft();
   syncNothingOpen();
   updatePageTitle();
   markReplyRead(id);
@@ -617,6 +619,67 @@ dictationButton.addEventListener('click', () => {
   else if (!dictationButton.disabled) dictation.start(state.activeTab);
 });
 updateDictationAvailability();
+// Local-only drafts belong to parent session IDs, never to whichever terminal happens to be in front.
+const DRAFT_LIMIT = 4000;
+const draftKey = (id) => `fox.nextDraft.${id}`;
+const draftBox = $('#next-draft'), draftText = $('#next-draft-text');
+let draftSession = null;
+function readNextDraft(id) {
+  try { return (localStorage.getItem(draftKey(id)) ?? '').slice(0, DRAFT_LIMIT); } catch { return ''; }
+}
+function nextDraftTarget() {
+  const s = sessionById(state.selected);
+  if (!s || s.parentId || s.archived || s.state === 'external') return null;
+  const terminal = state.terminals.find((t) => t.resume === s.id && t.name === s.terminal);
+  const tab = terminal && state.tabs.get(terminal.name);
+  return (s.state === 'ready' || s.state === 'needs_input') && state.activeTab === terminal?.name
+    && !state.waking && tab && !tab.closed && tab.ws?.readyState === WebSocket.OPEN ? tab : null;
+}
+function renderNextDraft() {
+  const s = sessionById(state.selected);
+  const id = s && !s.parentId && !s.archived ? s.id : null;
+  draftBox.classList.toggle('hidden', !id);
+  if (id !== draftSession) {
+    draftSession = id;
+    draftText.value = id ? readNextDraft(id) : '';
+    draftBox.open = Boolean(draftText.value);
+    $('#next-draft-hint').textContent = 'Saved in this browser · Enter sends after insertion';
+  }
+  $('#next-draft-mark').textContent = draftText.value ? '· saved' : '';
+  $('#next-draft-insert').disabled = !id || !draftText.value.trim() || !nextDraftTarget();
+}
+draftText.addEventListener('input', () => {
+  const id = draftSession;
+  if (!id) return;
+  draftText.value = draftText.value.slice(0, DRAFT_LIMIT);
+  try {
+    if (draftText.value) localStorage.setItem(draftKey(id), draftText.value);
+    else localStorage.removeItem(draftKey(id));
+    $('#next-draft-hint').textContent = 'Saved in this browser · Enter sends after insertion';
+  } catch { $('#next-draft-hint').textContent = 'Could not save in this browser'; }
+  renderNextDraft();
+});
+$('#next-draft-insert').addEventListener('click', () => {
+  const id = draftSession, s = sessionById(id), tab = nextDraftTarget();
+  if (!s || state.selected !== id || !tab || tab.name !== s.terminal) { renderNextDraft(); return; }
+  // Terminal controls (including Enter) cannot be smuggled in via a stored or pasted draft.
+  const text = draftText.value.replace(/[\x00-\x1f\x7f-\x9f]/g, ' ').slice(0, DRAFT_LIMIT);
+  if (!text.trim()) return;
+  tab.draftSent = false;
+  tab.pastingDraft = true;
+  let failed = false;
+  try { tab.term.paste(text); }
+  catch { failed = true; }
+  finally { tab.pastingDraft = false; }
+  if (failed || !tab.draftSent) { $('#next-draft-hint').textContent = 'Terminal not ready · draft kept'; renderNextDraft(); return; }
+  // Only clear after the terminal's input handler accepted the paste onto its open socket.
+  try { localStorage.removeItem(draftKey(id)); }
+  catch { $('#next-draft-hint').textContent = 'Inserted · could not clear saved draft'; return; }
+  draftText.value = '';
+  $('#next-draft-hint').textContent = 'Inserted · press Enter in the terminal to send';
+  renderNextDraft();
+  tab.term.focus();
+});
 // Paste on a phone (see #pastesheet). The text goes in as a paste, like ⌘V: it waits in fx's input, nothing is sent.
 function pasteIntoTerminal(text, target = state.activeTab) {
   const tab = state.tabs.get(target);
@@ -966,10 +1029,11 @@ function connectTab(tab) {
     term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data));
     if (!tab.ready) { clearTimeout(reveal); reveal = setTimeout(() => { tab.ready = true; wrap.classList.remove('warming'); updateTermLoading(); }, 120); }
   };
-  ws.onopen = () => { tab.attempts = 0; updateDictationAvailability(); };
+  ws.onopen = () => { tab.attempts = 0; updateDictationAvailability(); renderNextDraft(); };
   ws.onclose = (e) => {
     if (tab.ws !== ws) return; // replaced or closed by fox
     tab.ws = null;
+    renderNextDraft();
     if (tab.closed) return;
     const dropped = e.code === 1006 && (tab.attempts ?? 0) < RECONNECT_DELAYS.length && state.terminals.some((t) => t.name === tab.name);
     if (dropped) { const n = tab.attempts ?? 0; tab.attempts = n + 1; setTimeout(() => connectTab(tab), RECONNECT_DELAYS[n]); return; }
@@ -979,7 +1043,11 @@ function connectTab(tab) {
   // Input and resize follow whichever socket is current; registered once per terminal.
   if (!tab.wired) {
     tab.wired = true;
-    term.onData((data) => tab.ws?.readyState === 1 && tab.ws.send(JSON.stringify({ type: 'input', data })));
+    term.onData((data) => {
+      if (tab.ws?.readyState !== WebSocket.OPEN) return;
+      tab.ws.send(JSON.stringify({ type: 'input', data }));
+      if (tab.pastingDraft) tab.draftSent = true;
+    });
     term.onResize(() => tab.ws?.readyState === 1 && tab.ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows })));
   }
 }
@@ -1115,6 +1183,7 @@ function renderTabs() {
   $('#empty-state').style.display = state.tabs.size ? 'none' : 'flex';
   syncNothingOpen();
   updateDictationAvailability();
+  renderNextDraft();
 }
 
 // Keep the address bar in sync so a refresh (or a bookmark) lands on the same place: the session, and the page over
@@ -1803,7 +1872,7 @@ async function loadTranscript(id, quiet = false) {
   // brings back what you chose last. Within a session it never moves by itself.
   if (id !== columnSessionId && !mobileLayout.matches) {
     columnSessionId = id;
-    const empty = !html.join('').trim() && $('#artifact-slot').classList.contains('hidden');
+    const empty = !html.join('').trim() && $('#artifact-slot').classList.contains('hidden') && draftBox.classList.contains('hidden');
     let wanted = false;
     try { wanted = localStorage.getItem('fox.transcript') === '1'; } catch {}
     setTranscript(!empty && wanted, { save: false });
