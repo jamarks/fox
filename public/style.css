@@ -273,6 +273,9 @@ body.night #sky { display: block; }
 body.night { background: #070912; }
 body.night aside, body.night section, body.night main { position: relative; z-index: 1; }
 body.night #center { background: transparent; }
+/* Pages in the center (Jobs, Apps, Pull requests, Skills, Settings) cover the terminal: in sky its own background is
+   see-through, so they get the night panel with a blur instead, and the terminal never shows through. */
+body.night #job-view, body.night #app-view, body.night #pr-view, body.night #skill-view, body.night #settings-view { background: rgba(9, 11, 22, .93); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
 body.night .term-wrap .xterm, body.night .xterm-viewport { background: transparent !important; }
 .agent-answer.err { color: var(--err); }
 body.night aside, body.night section { backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
