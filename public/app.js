@@ -34,9 +34,9 @@ const briefArgs = (args) => {
 const sessionById = (id) => state.sessions.find((s) => s.id === id);
 const displayTitle = (s) => s.customName || (s.subagent ? (s.subagent.name ? s.subagent.name : (s.subagent.task ?? s.firstPrompt ?? '').slice(0, 60) || s.title) : s.title);
 // The browser tab names what is in front: a page (Skills, Jobs…) over the session it covers.
-const PAGE_TITLES = { 'settings-view': 'Settings', 'job-view': 'Jobs', 'pr-view': 'Pull requests', 'skill-view': 'Skills', 'app-view': 'Apps' };
+
 function updatePageTitle() {
-  const page = Object.entries(PAGE_TITLES).find(([id]) => document.getElementById(id)?.classList.contains('hidden') === false)?.[1];
+  const page = document.querySelector('.page-view:not(.hidden)')?.getAttribute('aria-label'); // each page names itself
   const viewingSession = !mobileLayout.matches || document.body.dataset.mobileView !== 'sessions';
   const name = page ?? (viewingSession && sessionById(state.selected) ? displayTitle(sessionById(state.selected))?.trim() : '');
   document.title = name ? `${name} · fox` : 'fox';
@@ -193,6 +193,7 @@ $('#reply-inbox-list').addEventListener('click', (e) => {
   if (mobileLayout.matches) return openSession(s.id);
   globalMessage = { id: s.id, index: s.latestReply.messageIndex };
   convoShown.add(s.id);
+  closePages(); // the answer shows in the right column, which an open page hides
   setTranscript(true);
   selectSession(s.id); // selecting the result marks it read, without starting fx
 });
@@ -395,13 +396,23 @@ $('#session-groups').addEventListener('click', async (e) => {
   if (card) openSession(card.dataset.id);
 });
 
+// Pages in the center (class page-view in index.html), each with how to close it. Going to a session, or opening
+// another page, closes them all through closePages: listing pages by hand in each place is how one got left open
+// (tests/pages.test.mjs checks every page-view has an entry here).
+const PAGE_CLOSERS = {
+  'settings-view': (o) => closeSettings(o),
+  'job-view': (o) => { if (state.jobView) closeJob(o); },
+  'pr-view': (o) => { if (state.prView) closePrs(o); },
+  'skill-view': (o) => closeSkills(o),
+  'app-view': (o) => closeApps(o),
+};
+function closePages({ except = null, sync = false } = {}) {
+  for (const [id, close] of Object.entries(PAGE_CLOSERS)) if (id !== except) close({ sync });
+}
+
 // Click on a session: focus its tab if open, attach to its tmux terminal if running, otherwise start one.
 async function openSession(id) {
-  if (state.jobView) closeJob();
-  if (state.prView) closePrs();
-  closeSkills();
-  closeSettings();
-  closeApps();
+  closePages();
   if (state.waking?.id !== id) state.waking = null; // the person moved on: the other session keeps waking, unseen
   const s = sessionById(id);
   if (!s) return;
@@ -754,11 +765,7 @@ async function openTerminal({ cwd, resume, harness, provider, model, effort, spe
   await refresh();
   if (!stillWanted()) return;
   if (!resume) {
-    closeSettings({ sync: false });
-    closePrs({ sync: false });
-    closeSkills({ sync: false });
-    closeApps({ sync: false });
-    if (state.jobView) closeJob({ sync: false });
+    closePages();
   }
   attachTab(t);
   if (t.resume) selectSession(t.resume);
@@ -1702,6 +1709,7 @@ function chooseGlobalHit(hit) {
     globalMessage = { id: hit.id, index: hit.messageIndex };
     convoShown.add(hit.id); // display transcript even when its terminal is open
   } else globalMessage = null;
+  closePages(); // the result shows in the right column, which an open page hides
   setTranscript(true);
   selectSession(hit.id); // do not resume archived/idle sessions
 }
@@ -1987,10 +1995,7 @@ $('#theme-dots').addEventListener('click', (e) => {
 $('#theme').addEventListener('change', renderThemeDots);
 // Settings: a page in the center, like Jobs (the gear opens and closes it).
 function openSettings() {
-  if (state.jobView) closeJob({ sync: false });
-  if (state.prView) closePrs({ sync: false });
-  closeSkills({ sync: false });
-  closeApps({ sync: false });
+  closePages({ except: 'settings-view' });
   dictation.cancel();
   $('#settings-view').classList.remove('hidden');
   $('#settings').classList.add('active'); $('#settings').setAttribute('aria-expanded', 'true');
@@ -2221,10 +2226,7 @@ function renderSkillPick() {
 function skillsOpen() { return !$('#skill-view').classList.contains('hidden'); }
 function openSkills() {
   if (skillsOpen()) return;
-  closeSettings({ sync: false });
-  if (state.jobView) closeJob({ sync: false });
-  if (state.prView) closePrs({ sync: false });
-  closeApps({ sync: false });
+  closePages({ except: 'skill-view' });
   dictation.cancel();
   $('#skill-view').classList.remove('hidden');
   if (mobileLayout.matches) showMobileView('terminal');
@@ -2773,10 +2775,7 @@ let jobListHtml = '';
 $('#jobs-entry').addEventListener('click', () => (state.jobView ? closeJob() : openJobs()));
 $('#job-list').addEventListener('click', (e) => { if (e.target.closest('[data-link]')) return; const row = e.target.closest('[data-job]'); if (row) openJob(row.dataset.job); });
 function showJobView(mode) {
-  closeSettings({ sync: false });
-  if (state.prView) closePrs({ sync: false });
-  closeSkills({ sync: false });
-  closeApps({ sync: false });
+  closePages({ except: 'job-view' });
   dictation.cancel();
   $('#job-view').classList.remove('hidden');
   $('#job-view').dataset.mode = mode;
@@ -2938,10 +2937,7 @@ async function loadPrFiles(key) {
   if (state.prView && state.prOpen === key) renderPrList();
 }
 function openPrs() {
-  closeSettings({ sync: false });
-  closeSkills({ sync: false });
-  closeApps({ sync: false });
-  if (state.jobView) closeJob({ sync: false });
+  closePages({ except: 'pr-view' });
   dictation.cancel();
   state.prView = true;
   $('#pr-view').classList.remove('hidden');
@@ -3066,10 +3062,7 @@ async function appAction(name, action) {
 }
 function openApps() {
   if (appsOpen()) return;
-  closeSettings({ sync: false });
-  closeSkills({ sync: false });
-  if (state.prView) closePrs({ sync: false });
-  if (state.jobView) closeJob({ sync: false });
+  closePages({ except: 'app-view' });
   dictation.cancel();
   $('#app-view').classList.remove('hidden');
   if (mobileLayout.matches) showMobileView('terminal');

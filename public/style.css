@@ -85,9 +85,8 @@ body.no-transcript #transcript { display: none; }
 /* Pages that are not about one session (Jobs, Pull requests, Settings, the mosaic) take the whole width: the right
    column only shows a session's files and subagents. It comes back as it was when you leave them; nothing is saved. */
 @media (min-width: 1101px) {
-  body:has(#job-view:not(.hidden)), body:has(#pr-view:not(.hidden)), body:has(#skill-view:not(.hidden)), body:has(#settings-view:not(.hidden)), body:has(#terminals.show-mosaic), body.nothing-open { grid-template-columns: var(--left) 1fr; }
-  body:has(#job-view:not(.hidden)) :is(#transcript, #rs-right), body:has(#pr-view:not(.hidden)) :is(#transcript, #rs-right),
-  body:has(#settings-view:not(.hidden)) :is(#transcript, #rs-right), body:has(#skill-view:not(.hidden)) :is(#transcript, #rs-right), body:has(#terminals.show-mosaic) :is(#transcript, #rs-right),
+  body:has(.page-view:not(.hidden)), body:has(#terminals.show-mosaic), body.nothing-open { grid-template-columns: var(--left) 1fr; }
+  body:has(.page-view:not(.hidden)) :is(#transcript, #rs-right), body:has(#terminals.show-mosaic) :is(#transcript, #rs-right),
   body.nothing-open :is(#transcript, #rs-right) { display: none; }
   body:has(#terminals.show-mosaic) #toggle-transcript { display: none; }
 }
@@ -100,10 +99,7 @@ body.no-transcript #transcript { display: none; }
 #toggle-mosaic { flex: none; width: 28px; height: 28px; margin-right: 6px; }
 #toggle-mosaic[aria-pressed="true"] { color: var(--accent); background: var(--panel-2); }
 /* These pages cover the terminal area; Mosaic cannot be opened while one is visible. */
-body:has(#job-view:not(.hidden)) #toggle-mosaic,
-body:has(#pr-view:not(.hidden)) #toggle-mosaic,
-body:has(#skill-view:not(.hidden)) #toggle-mosaic,
-body:has(#settings-view:not(.hidden)) #toggle-mosaic { display: none; }
+body:has(.page-view:not(.hidden)) #toggle-mosaic { display: none; }
 #terminals.show-mosaic > .term-wrap, #terminals.show-mosaic > #empty-state, #terminals.show-mosaic > #term-loading { display: none; }
 #mosaic { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 14px; gap: 8px; background: var(--bg); z-index: 5; }
 #mosaic-choices { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: none; max-height: 66px; overflow-y: auto; color: var(--muted); font-size: 11px; }
@@ -273,9 +269,8 @@ body.night #sky { display: block; }
 body.night { background: #070912; }
 body.night aside, body.night section, body.night main { position: relative; z-index: 1; }
 body.night #center { background: transparent; }
-/* Pages in the center (Jobs, Apps, Pull requests, Skills, Settings) cover the terminal: in sky its own background is
-   see-through, so they get the night panel with a blur instead, and the terminal never shows through. */
-body.night #job-view, body.night #app-view, body.night #pr-view, body.night #skill-view, body.night #settings-view { background: rgba(9, 11, 22, .93); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+/* Pages in the center cover the terminal: in sky its own background is see-through, so they get the night panel with a blur instead, and the terminal never shows through. */
+body.night .page-view { background: rgba(9, 11, 22, .93); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
 body.night .term-wrap .xterm, body.night .xterm-viewport { background: transparent !important; }
 .agent-answer.err { color: var(--err); }
 body.night aside, body.night section { backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
@@ -690,12 +685,6 @@ html, body { overscroll-behavior-y: none; }
 .jdot.ok { background: var(--ok); } .jdot.failed, .jdot.timeout, .jdot.interrupted { background: var(--err); } .jdot.running { background: var(--warn); animation: breathe 1.6s ease-in-out infinite; }
 .jdot.paused, .jdot.none { background: transparent; border: 1px solid var(--muted); box-sizing: border-box; }
 .jobs-empty { padding: 4px 14px; font-size: 11px; color: var(--muted); }
-#job-view { position: absolute; inset: 0; z-index: 6; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
-#job-view.hidden { display: none; }
-#pr-view { position: absolute; inset: 0; z-index: 6; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
-#pr-view.hidden { display: none; }
-#skill-view { position: absolute; inset: 0; z-index: 6; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
-#skill-view.hidden { display: none; }
 #pr-title { font-weight: 600; font-size: 14px; }
 .pr-filters { display: flex; gap: 6px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
 .pr-filters button { padding: 4px 10px; font-size: 12px; border: 1px solid var(--border); }
@@ -819,9 +808,7 @@ body.metrics-page { display: block; height: auto; min-height: 100%; }
 /* The running release, above the memory meter */
 .sidebar-footer { flex-wrap: nowrap; }
 /* With the sky theme the background is see-through: hide what is behind Jobs instead of covering the stars */
-#terminals:has(#job-view:not(.hidden)) > :not(#job-view) { visibility: hidden; }
-#terminals:has(#pr-view:not(.hidden)) > :not(#pr-view) { visibility: hidden; }
-#terminals:has(#skill-view:not(.hidden)) > :not(#skill-view) { visibility: hidden; }
+#terminals:has(> .page-view:not(.hidden)) > :not(.page-view:not(.hidden)) { visibility: hidden; }
 
 /* Dialogs: the action row wraps on a phone, and over the see-through sky theme the sheet is solid */
 .ns-actions { flex-wrap: wrap; }
@@ -850,9 +837,12 @@ body.night .branch-menu { background: #0d101c; } /* the branch menu too: solid o
 body.night #pastesheet { background: rgba(3, 5, 12, .7); }
 body.night #pastesheet .sheet { background: #0d101c; }
 /* Settings: a page in the center, like Jobs */
-#settings-view { position: absolute; inset: 0; z-index: 7; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
+/* A page in the center (Jobs, Apps, Pull requests, Skills, Settings): class page-view on its <section> gives it
+   the full center, its background and hides the terminals' bar; a new page needs only the class. */
+.page-view { position: absolute; inset: 0; z-index: 6; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
+.page-view.hidden { display: none; }
+#settings-view { z-index: 7; }
 #settings-view.hidden { display: none; }
-#terminals:has(#settings-view:not(.hidden)) > :not(#settings-view) { visibility: hidden; }
 .set-title { font-weight: 600; font-size: 14px; }
 .set-body { overflow-y: auto; flex: 1; padding: 4px 16px 32px; max-width: 640px; width: 100%; box-sizing: border-box; }
 .set-sec { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 22px 0 6px; }
@@ -917,9 +907,8 @@ a.set-val[href]:hover { color: var(--text); }
 .switch { display: block; }
 .set-main { flex: 1 1 auto; }
 .set-go { margin-left: auto; }
-/* Jobs, Pull requests, Skills and Settings are pages of their own: the terminals' bar (tabs, paste, mic) does not belong there */
-body:has(#job-view:not(.hidden)) #tabbar, body:has(#settings-view:not(.hidden)) #tabbar, body:has(#pr-view:not(.hidden)) #tabbar, body:has(#skill-view:not(.hidden)) #tabbar,
-body:has(#job-view:not(.hidden)) #dictation-pill, body:has(#settings-view:not(.hidden)) #dictation-pill, body:has(#pr-view:not(.hidden)) #dictation-pill, body:has(#skill-view:not(.hidden)) #dictation-pill { display: none; }
+/* A page of its own: the terminals' bar (tabs, paste, mic) and the dictation pill do not belong there */
+body:has(.page-view:not(.hidden)) #tabbar, body:has(.page-view:not(.hidden)) #dictation-pill { display: none; }
 /* fx's answers in Read, formatted (see markdown.js) */
 .msg .text.md { white-space: normal; line-height: 1.55; }
 .md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
@@ -968,8 +957,6 @@ body.night .global-search-box { background: #0d101c; }
 /* Apps: published pages and tools, a list like Jobs */
 #apps-entry.hidden { display: none; }
 #apps-entry .jnext.bad { color: var(--err); }
-#app-view { position: absolute; inset: 0; z-index: 6; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
-#app-view.hidden { display: none; }
 #app-list { overflow-y: auto; flex: 1; }
 #app-list code, .app-what code { font: 11.5px var(--mono); }
 .app-row { display: grid; grid-template-columns: 10px minmax(90px, max-content) minmax(0, 1fr) auto auto; gap: 6px 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }

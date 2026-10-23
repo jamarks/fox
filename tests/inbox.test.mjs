@@ -34,7 +34,7 @@ test('first load baselines history, polling adds unread, selection clears only t
   const state = { sessions: [{ id: 'abcd', archived: false, parentId: null, workspace: '/repo', title: 'Session' }], selected: null };
   const ctx = { state, $: (selector) => elements[selector.slice(1)], localStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
     sessionById: (id) => state.sessions.find((s) => s.id === id), displayTitle: (s) => s.title, shortPath: (s) => s, fmtTime: String, esc: String,
-    globalMessage: null, convoShown: new Set(), setTranscript() {}, renderSessions() {}, loadTranscript() {}, syncUrl() {}, updatePageTitle() {}, syncNothingOpen() {}, foxMotion: { activity: 0 }, gestures: [], foxGesture(name) { ctx.gestures.push(name); },
+    globalMessage: null, convoShown: new Set(), setTranscript() {}, closePages() {}, renderSessions() {}, loadTranscript() {}, syncUrl() {}, updatePageTitle() {}, syncNothingOpen() {}, foxMotion: { activity: 0 }, gestures: [], foxGesture(name) { ctx.gestures.push(name); },
     mobileLayout: { matches: false }, opened: [], openSession(id) { ctx.opened.push(id); },
   };
   vm.runInNewContext(source.slice(start, end) + selection, ctx);

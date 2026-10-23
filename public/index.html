@@ -141,7 +141,7 @@
     <div id="terminals">
       <div id="mosaic" class="hidden" aria-label="Session mosaic"><div id="mosaic-choices"></div><div id="mosaic-tiles"></div></div>
       <div id="dictation-pill" class="hidden" role="status" aria-live="polite"><span class="dict-text"><span class="dict-final"></span> <span class="dict-interim"></span></span><span class="dict-hint"></span></div>
-      <section id="settings-view" class="hidden" aria-label="Settings">
+      <section id="settings-view" class="page-view hidden" aria-label="Settings">
         <header class="job-head"><div class="job-title"><span class="set-title">Settings</span></div><button type="button" id="settings-close" class="icon" aria-label="Close">×</button></header>
         <div class="set-body">
           <h3 class="set-sec">Appearance</h3>
@@ -168,7 +168,7 @@
           <div class="set-row"><span>Running</span><a id="settings-version" class="set-val" target="_blank" rel="noopener"></a></div>
         </div>
       </section>
-      <section id="job-view" class="hidden" aria-label="Jobs" data-mode="list">
+      <section id="job-view" class="page-view hidden" aria-label="Jobs" data-mode="list">
         <header class="job-head">
           <button type="button" id="job-back" class="linkish">← Jobs</button>
           <div class="job-title"><span id="job-name"></span><span id="job-when" class="job-chip"></span></div>
@@ -178,14 +178,14 @@
         <div id="job-list" role="list"></div>
         <div id="job-runs" role="list"></div>
       </section>
-      <section id="app-view" class="hidden" aria-label="Apps">
+      <section id="app-view" class="page-view hidden" aria-label="Apps">
         <header class="job-head">
           <div class="job-title"><span>Apps</span><span id="app-count" class="job-chip"></span></div>
           <div class="job-actions"><button type="button" id="app-close" class="icon" aria-label="Close">×</button></div>
         </header>
         <div id="app-list" role="list"></div>
       </section>
-      <section id="pr-view" class="hidden" aria-label="Pull requests">
+      <section id="pr-view" class="page-view hidden" aria-label="Pull requests">
         <header class="job-head">
           <div class="job-title"><span id="pr-title">Pull requests</span><span id="pr-repos" class="job-chip"></span></div>
           <div class="job-actions"><button type="button" id="pr-refresh">Refresh</button><button type="button" id="pr-close" class="icon" aria-label="Close">×</button></div>
@@ -194,7 +194,7 @@
         <div id="pr-list" role="list"></div>
         <button type="button" id="pr-more" class="hidden">Load more</button>
       </section>
-      <section id="skill-view" class="hidden" aria-label="Skills">
+      <section id="skill-view" class="page-view hidden" aria-label="Skills">
         <header class="job-head">
           <div class="job-title"><span>Skills</span><div class="seg skill-tabs" id="skill-tabs"><button type="button" data-skill-tab="installed">Installed <span id="skill-count"></span></button><button type="button" data-skill-tab="browse">Browse</button></div></div>
           <div class="job-actions"><button type="button" id="skill-close" class="icon" aria-label="Close">×</button></div>
