@@ -38,6 +38,7 @@ import { createUsage } from './usage.mjs';
 import { turnTimeline } from './timeline.mjs';
 import { createFx } from './harnesses/fx.mjs';
 import { createClaude, claudeBin } from './harnesses/claude.mjs';
+import { toResume, splitOnce, nextWorking, CONTINUE_TEXT } from './restart.mjs';
 const execFileP = promisify(execFile);
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -85,7 +86,7 @@ if (process.env.FOX_AUTH_DISABLED === '1') console.warn('WARNING: Fox passkey au
 async function loadState() {
   const st = await readJson(STATE_FILE, {});
   const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
-  return { archived: Array.isArray(st.archived) ? st.archived : [], names: obj(st.names), toolsSignedIn: obj(st.toolsSignedIn), launchDirs: obj(st.launchDirs), pendingDirs: obj(st.pendingDirs) };
+  return { archived: Array.isArray(st.archived) ? st.archived : [], names: obj(st.names), toolsSignedIn: obj(st.toolsSignedIn), launchDirs: obj(st.launchDirs), pendingDirs: obj(st.pendingDirs), resumed: obj(st.resumed) };
 }
 async function saveState(st) {
   await mkdir(STATE_DIR, { recursive: true, mode: 0o700 });
@@ -242,6 +243,7 @@ async function listSessions() {
     for (const s of rows) sessions.push({ ...s, harness: h.id, harnessLabel: h.label,
       customName: Object.hasOwn(st.names, s.id) ? st.names[s.id] : null,
       archived: st.archived.includes(s.id),
+      resumedAfterRestart: Number(st.resumed[s.id]) || null,
       addDirs: Array.isArray(st.launchDirs[s.id]) ? st.launchDirs[s.id] : [] });
   }
   sessions.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
@@ -1091,9 +1093,54 @@ async function createTerminal({ harness = HARNESSES[0], cwd, resume, flags = [],
 
 async function killTerminal(name) {
   if (!name.startsWith(TMUX_PREFIX)) return false;
+  const id = await tmuxOption(name, '@fx_resume').catch(() => null);
   await tmux('kill-session', '-t', `=${name}`); // "=": exactly this session, never one whose name starts the same
+  if (id) await forgetWorking(id); // stopped on purpose: never "resume after a restart"
   return true;
 }
+
+// ---------- resuming after a restart (see restart.mjs) ----------
+const WORKING_FILE = join(STATE_DIR, 'working.json');
+let workingWrite = Promise.resolve();
+function writeWorking(change) {
+  const next = workingWrite.then(async () => {
+    const value = change(await readJson(WORKING_FILE, null));
+    if (!value) return;
+    await mkdir(STATE_DIR, { recursive: true, mode: 0o700 });
+    const tmp = `${WORKING_FILE}.${process.pid}`;
+    await writeFile(tmp, JSON.stringify(value), { mode: 0o600 });
+    await rename(tmp, WORKING_FILE);
+  });
+  workingWrite = next.catch(() => {});
+  return next;
+}
+const forgetWorking = (id) => writeWorking((saved) => saved && Array.isArray(saved.working) && saved.working.includes(id) ? { ...saved, working: saved.working.filter((x) => x !== id) } : null);
+// tmux's own start time tells a new tmux server (a reboot, a crash) from the one fox saw before.
+const tmuxStartTime = async () => (await tmux('list-sessions', '-F', '#{start_time}').catch(() => '')).split('\n')[0].trim();
+let watching = false;
+async function watchForRestart() {
+  if (watching) return;
+  watching = true;
+  try {
+    const tmuxStart = await tmuxStartTime();
+    if (!tmuxStart) return; // tmux not up yet after a boot: try again on the next round
+    const terminals = await listTerminals();
+    const ids = toResume(await readJson(WORKING_FILE, null), tmuxStart, new Set(terminals.map((t) => t.resume).filter(Boolean)));
+    const { resume, skip } = splitOnce(ids, (await loadState()).resumed);
+    await writeWorking(() => nextWorking(tmuxStart, terminals, resume));
+    for (const id of skip) console.warn(`fox: ${id} was cut off again within the hour after being resumed; left as it is`);
+    for (const id of resume) {
+      await updateLaunchState((st) => { st.resumed[id] = Date.now(); });
+      // One at a time, with time to start: several agents waking at once on a small server start slowly.
+      const result = await sendMobileMessage(id, CONTINUE_TEXT, { waitMs: 90_000 }).catch((err) => ({ status: 500, body: { error: err.message } }));
+      console.log(`fox: resumed ${id} after a restart: ${result.status === 202 ? 'told it to continue' : result.body?.error}`);
+    }
+  } catch (err) {
+    console.error(`fox: restart watch failed: ${err.message}`);
+  } finally { watching = false; }
+}
+setInterval(() => watchForRestart(), 10_000).unref();
+setTimeout(() => watchForRestart(), 3_000).unref();
 
 const wss = new WebSocketServer({ noServer: true });
 function upgrade(req, socket, head, deviceId = null, remoteSockets = null) {
@@ -1158,7 +1205,7 @@ wss.on('connection', (ws, req) => {
 });
 
 // Paste a mobile message into exactly one fx tmux session. No shell or terminal socket is exposed.
-async function sendMobileMessage(id, text) {
+async function sendMobileMessage(id, text, { waitMs = 10_000 } = {}) {
   const session = (await listSessions()).find((s) => s.id === id && !s.subagentChild);
   if (!session) return { status: 404, body: { error: 'Session not found' } };
   const harness = harnessById(session.harness) ?? HARNESSES[0];
@@ -1168,7 +1215,7 @@ async function sendMobileMessage(id, text) {
     try {
       terminal = await createTerminal({ harness, cwd: session.workspace, resume: id });
       let prompt = false;
-      for (let attempt = 0; attempt < 50; attempt++) {
+      for (let attempt = 0; attempt < waitMs / 200; attempt++) {
         const screen = await tmux('capture-pane', '-p', '-t', terminal.name);
         if (harness.ready(screen)) { prompt = true; break; }
         await new Promise((resolve) => setTimeout(resolve, 200));

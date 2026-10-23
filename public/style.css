@@ -836,6 +836,7 @@ body.night .branch-menu { background: #0d101c; } /* the branch menu too: solid o
 #pastesheet .sheet { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px 16px; width: min(560px, calc(100vw - 32px)); box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
 #paste-text { width: 100%; box-sizing: border-box; resize: vertical; font: 16px/1.4 var(--mono); color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
 #skills { flex: none; width: 28px; height: 28px; margin-right: 4px; font-size: 16px; }
+.session .sub .restarted { color: var(--warn); font-size: 11px; }
 #skill-shelf { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 #skill-list { max-height: min(42vh, 360px); overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
 #skill-list .skill-row { display: grid; grid-template-columns: 1fr auto; width: 100%; padding: 8px 10px; gap: 2px 10px; text-align: left; border-radius: 0; border-bottom: 1px solid var(--border); line-height: 1.4; }

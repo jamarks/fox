@@ -318,6 +318,7 @@ function sessionCard(s, index = null) {
       ${stateHtml}
       <span class="model mono" title="${esc(s.model ?? '')} via ${esc(providerLabel(s.provider))}">${esc(modelShort(s.model))}${providerTag(s.provider)}</span>
       <span>${fmtTime(s.updatedAt)}</span>
+      ${s.resumedAfterRestart && Date.now() - s.resumedAfterRestart < 6 * 3600_000 ? `<span class="restarted" title="The server went down mid-turn; fox resumed this session ${esc(fmtTime(s.resumedAfterRestart))} and told it to continue">resumed after restart</span>` : ''}
     </div>
     ${childrenHtml(s)}`;
   return el;

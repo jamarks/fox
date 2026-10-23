@@ -80,7 +80,7 @@ Then open the address on any device, sign in with the passkey and press **+**. W
 
 fox's code in `/opt/fox` belongs to root, so an agent cannot change the fox that controls it. `fox-update` itself is installed once by the setup script and never updates itself.
 
-A reboot stops the fx sessions; their conversations stay on disk, and opening one in fox resumes it.
+A reboot (or a crash) stops the sessions; their conversations stay on disk. The ones that were in the middle of a turn come back on their own: fox resumes them and tells them to continue (once; the sidebar says "resumed after restart"). The ones that were waiting for you resume when you open them.
 
 ## If you lose your passkey
 
