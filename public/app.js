@@ -34,7 +34,7 @@ const briefArgs = (args) => {
 const sessionById = (id) => state.sessions.find((s) => s.id === id);
 const displayTitle = (s) => s.customName || (s.subagent ? (s.subagent.name ? s.subagent.name : (s.subagent.task ?? s.firstPrompt ?? '').slice(0, 60) || s.title) : s.title);
 // The browser tab names what is in front: a page (Skills, Jobs…) over the session it covers.
-const PAGE_TITLES = { 'settings-view': 'Settings', 'job-view': 'Jobs', 'pr-view': 'Pull requests', 'skill-view': 'Skills' };
+const PAGE_TITLES = { 'settings-view': 'Settings', 'job-view': 'Jobs', 'pr-view': 'Pull requests', 'skill-view': 'Skills', 'app-view': 'Apps' };
 function updatePageTitle() {
   const page = Object.entries(PAGE_TITLES).find(([id]) => document.getElementById(id)?.classList.contains('hidden') === false)?.[1];
   const viewingSession = !mobileLayout.matches || document.body.dataset.mobileView !== 'sessions';
@@ -400,6 +400,7 @@ async function openSession(id) {
   if (state.prView) closePrs();
   closeSkills();
   closeSettings();
+  closeApps();
   if (state.waking?.id !== id) state.waking = null; // the person moved on: the other session keeps waking, unseen
   const s = sessionById(id);
   if (!s) return;
@@ -755,6 +756,7 @@ async function openTerminal({ cwd, resume, harness, provider, model, effort, spe
     closeSettings({ sync: false });
     closePrs({ sync: false });
     closeSkills({ sync: false });
+    closeApps({ sync: false });
     if (state.jobView) closeJob({ sync: false });
   }
   attachTab(t);
@@ -1117,6 +1119,7 @@ function syncUrl(push = false) {
   if (settingsOpen()) q.set('view', 'settings');
   else if (state.prView) { q.set('view', 'prs'); if (state.prOpen) q.set('pr', state.prOpen); }
   else if (skillsOpen()) q.set('view', 'skills');
+  else if (appsOpen()) q.set('view', 'apps');
   else if (state.jobView === 'list') q.set('view', 'jobs');
   else if (state.jobView) { q.set('job', state.jobView); if (state.openRun) q.set('run', state.openRun); }
   if (state.jobDialog) q.set('edit', state.jobDialog);
@@ -1135,6 +1138,7 @@ async function applyUrl() {
     if (view === 'settings') openSettings(); else closeSettings();
     if (view === 'prs') { state.prOpen = q.get('pr'); openPrs(); } else if (state.prView) closePrs();
     if (view === 'skills') openSkills(); else closeSkills();
+    if (view === 'apps') openApps(); else closeApps({ sync: false });
     if (job) { openJob(job); state.openRun = q.get('run'); renderJobView(); }
     else if (view === 'jobs') openJobs();
     else if (state.jobView) closeJob();
@@ -1985,6 +1989,7 @@ function openSettings() {
   if (state.jobView) closeJob({ sync: false });
   if (state.prView) closePrs({ sync: false });
   closeSkills({ sync: false });
+  closeApps({ sync: false });
   dictation.cancel();
   $('#settings-view').classList.remove('hidden');
   $('#settings').classList.add('active'); $('#settings').setAttribute('aria-expanded', 'true');
@@ -2214,6 +2219,7 @@ function openSkills() {
   closeSettings({ sync: false });
   if (state.jobView) closeJob({ sync: false });
   if (state.prView) closePrs({ sync: false });
+  closeApps({ sync: false });
   dictation.cancel();
   $('#skill-view').classList.remove('hidden');
   if (mobileLayout.matches) showMobileView('terminal');
@@ -2765,6 +2771,7 @@ function showJobView(mode) {
   closeSettings({ sync: false });
   if (state.prView) closePrs({ sync: false });
   closeSkills({ sync: false });
+  closeApps({ sync: false });
   dictation.cancel();
   $('#job-view').classList.remove('hidden');
   $('#job-view').dataset.mode = mode;
@@ -2928,6 +2935,7 @@ async function loadPrFiles(key) {
 function openPrs() {
   closeSettings({ sync: false });
   closeSkills({ sync: false });
+  closeApps({ sync: false });
   if (state.jobView) closeJob({ sync: false });
   dictation.cancel();
   state.prView = true;
@@ -2992,6 +3000,121 @@ $('#pr-list').addEventListener('click', async (e) => {
 });
 loadPrs();
 setInterval(() => loadPrs(), 60_000);
+
+// ---------- apps (named apps, see apps.mjs) ----------
+// What is published at https://<name>.<domain>: a list like Jobs. A command app opens to its log.
+let appOpen = null, appListHtml = '';
+function appsOpen() { return !$('#app-view').classList.contains('hidden'); }
+const APP_KIND = { dir: 'folder', cmd: 'command', port: 'port' };
+const appDot = (a) => (a.status === 'up' ? 'ok' : a.status === 'down' ? 'failed' : 'paused');
+async function loadApps() {
+  try { state.apps = await (await fetch('/api/apps')).json(); } catch { return; }
+  renderAppsEntry();
+  if (appsOpen()) renderAppList();
+}
+function renderAppsEntry() {
+  const d = state.apps, btn = $('#apps-entry');
+  btn.classList.toggle('hidden', !d?.enabled);
+  if (!d?.enabled) return;
+  const apps = d.apps, down = apps.filter((a) => a.status === 'down').length, paused = apps.filter((a) => a.paused).length;
+  btn.classList.toggle('active', appsOpen());
+  btn.innerHTML = `<span class="jdot ${down ? 'failed' : apps.some((a) => a.status === 'up') ? 'ok' : 'none'}"></span><span class="jtitle">Apps</span><span>${apps.length || ''}</span><span class="jnext${down ? ' bad' : ''}">${down ? `${down} down` : paused ? `${paused} paused` : apps.length ? '' : 'none yet'}</span>`;
+}
+function appDetail(a) {
+  return a.dir ? `serves the folder ${esc(shortPath(a.dir))}` : a.cmd ? `runs <code>${esc(a.cmd)}</code> in ${esc(shortPath(a.cwd))} on :${a.port}${a.restarts ? ` · started again ${a.restarts}×` : ''}` : `forwards to :${a.port}; something else keeps that server running`;
+}
+function renderAppList() {
+  const apps = state.apps?.apps ?? [];
+  $('#app-count').textContent = apps.length ? String(apps.length) : '';
+  const html = !apps.length ? '<div class="jobs-none">Nothing published yet. Ask fx or Claude to publish a page or a tool, or run <code>fox-expose</code> on the server. Every app is private to you.</div>' : apps.map((a) => {
+    const open = appOpen === a.name;
+    return `<div class="app-row ${a.paused ? 'paused' : ''} ${open ? 'open' : ''}" data-app="${esc(a.name)}" role="listitem">
+      <span class="jdot ${appDot(a)}" title="${esc(a.status)}"></span><span class="jname">${esc(a.name)}</span>
+      <a class="app-url" href="${esc(a.url)}" target="_blank" rel="noopener" data-link>${esc(a.url.replace(/^https:\/\//, ''))}</a>
+      <span class="app-kind">${APP_KIND[a.kind]}</span>
+      <span class="app-actions">${a.paused ? '' : `<a class="app-act" href="${esc(a.url)}" target="_blank" rel="noopener" data-link title="Open">↗</a>`}<button type="button" class="app-act" data-app-act="${a.paused ? 'resume' : 'pause'}">${a.paused ? 'resume' : 'pause'}</button><button type="button" class="app-act" data-app-menu aria-label="More">⋯</button></span>
+      ${open ? `<div class="app-detail"><div class="app-what">${a.status === 'down' ? '<b class="bad">Not answering.</b> ' : ''}${appDetail(a)}</div>${a.kind === 'cmd' ? '<pre class="app-log" id="app-log">loading…</pre>' : ''}</div>` : ''}
+    </div>`;
+  }).join('');
+  if (html === appListHtml) return; // polled: rebuild only when something changed, so an open log does not jump
+  appListHtml = html;
+  $('#app-list').innerHTML = html;
+  if (appOpen && apps.find((a) => a.name === appOpen)?.kind === 'cmd') loadAppLog(appOpen);
+}
+async function loadAppLog(name) {
+  const j = await (await fetch(`/api/apps/${encodeURIComponent(name)}/log`)).json().catch(() => ({}));
+  const box = $('#app-log');
+  if (!box || appOpen !== name) return;
+  const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 30;
+  box.textContent = j.text?.trim() || 'Nothing printed yet.';
+  if (atEnd) box.scrollTop = box.scrollHeight;
+}
+async function appAction(name, action) {
+  const a = state.apps?.apps.find((x) => x.name === name);
+  if (action === 'remove' && !confirm(`Remove ${name}? ${a?.url ?? ''} stops answering.${a?.kind === 'cmd' ? ' Its command stops.' : ''} The files stay where they are.`)) return;
+  const r = await fetch(`/api/apps/${encodeURIComponent(name)}${action === 'remove' ? '' : '/' + action}`, { method: action === 'remove' ? 'DELETE' : 'POST' });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) return toast(j.error || 'Could not do that');
+  if (action === 'remove' && appOpen === name) appOpen = null;
+  state.apps = j; renderAppsEntry(); renderAppList();
+  toast(action === 'pause' ? `${name} paused` : action === 'resume' ? `${name} is back` : action === 'restart' ? `${name} restarting` : `${name} removed`);
+}
+function openApps() {
+  if (appsOpen()) return;
+  closeSettings({ sync: false });
+  closeSkills({ sync: false });
+  if (state.prView) closePrs({ sync: false });
+  if (state.jobView) closeJob({ sync: false });
+  dictation.cancel();
+  $('#app-view').classList.remove('hidden');
+  if (mobileLayout.matches) showMobileView('terminal');
+  appListHtml = ''; renderAppsEntry(); renderAppList(); loadApps();
+  syncUrl(true);
+}
+function closeApps({ sync = true } = {}) {
+  if (!appsOpen()) return;
+  $('#app-view').classList.add('hidden');
+  renderAppsEntry(); requestAnimationFrame(fitActive);
+  if (sync) syncUrl(true);
+}
+$('#apps-entry').addEventListener('click', () => (appsOpen() ? closeApps() : openApps()));
+$('#app-close').addEventListener('click', () => closeApps());
+$('#app-list').addEventListener('click', (e) => {
+  if (e.target.closest('[data-link]')) return;
+  const row = e.target.closest('[data-app]');
+  if (!row) return;
+  const name = row.dataset.app, act = e.target.closest('[data-app-act]')?.dataset.appAct;
+  if (act) return appAction(name, act);
+  const menu = e.target.closest('[data-app-menu]');
+  if (menu) {
+    const a = state.apps.apps.find((x) => x.name === name);
+    const items = [...(a?.kind === 'cmd' && !a.paused ? [['restart', 'Restart']] : []), ['remove', 'Remove']];
+    return showAppMenu(menu, items, (choice) => appAction(name, choice));
+  }
+  appOpen = appOpen === name ? null : name;
+  appListHtml = ''; renderAppList();
+});
+// A small menu next to ⋯ (closes on any other click or Esc).
+function showAppMenu(anchor, items, pick) {
+  document.querySelector('.app-menu')?.remove();
+  const m = document.createElement('div');
+  m.className = 'app-menu';
+  m.innerHTML = items.map(([k, label]) => `<button type="button" data-k="${k}" class="${k === 'remove' ? 'bad' : ''}">${label}</button>`).join('');
+  const r = anchor.getBoundingClientRect();
+  m.style.top = `${r.bottom + 4}px`; m.style.left = `${Math.max(8, r.right - 140)}px`;
+  document.body.appendChild(m);
+  const close = () => { m.remove(); document.removeEventListener('click', away, true); };
+  const away = (ev) => { if (!m.contains(ev.target)) close(); };
+  m.addEventListener('click', (ev) => { const k = ev.target.closest('[data-k]')?.dataset.k; if (k) { close(); pick(k); } });
+  setTimeout(() => document.addEventListener('click', away, true));
+}
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (document.querySelector('.app-menu')) { document.querySelector('.app-menu').remove(); return; }
+  if (appsOpen() && !e.defaultPrevented && !e.target.closest?.('input')) closeApps();
+});
+loadApps();
+setInterval(() => { if (appsOpen() || document.visibilityState === 'visible') loadApps(); if (appsOpen() && appOpen) loadAppLog(appOpen); }, 8000);
 
 // The editor: the schedule is built with buttons and drawn on a 24-hour line, with the next runs written out.
 const jd = { id: null, kind: 'hours', days: new Set([1, 2, 3, 4, 5]) };

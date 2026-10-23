@@ -37,6 +37,7 @@
     </div>
     <div id="session-groups"></div>
     <button type="button" id="jobs-entry" title="Jobs: scripts on a schedule"></button>
+    <button type="button" id="apps-entry" class="hidden" title="Apps: pages and tools published at their own address, private to you"></button>
     <button type="button" id="prs-entry" title="Open pull requests of your workspaces"></button>
     <button type="button" id="skills-entry" title="Skills: instructions fx loads when needed"></button>
     <footer class="sidebar-footer">
@@ -176,6 +177,13 @@
         <div id="job-meta" class="muted"></div>
         <div id="job-list" role="list"></div>
         <div id="job-runs" role="list"></div>
+      </section>
+      <section id="app-view" class="hidden" aria-label="Apps">
+        <header class="job-head">
+          <div class="job-title"><span>Apps</span><span id="app-count" class="job-chip"></span></div>
+          <div class="job-actions"><button type="button" id="app-close" class="icon" aria-label="Close">×</button></div>
+        </header>
+        <div id="app-list" role="list"></div>
       </section>
       <section id="pr-view" class="hidden" aria-label="Pull requests">
         <header class="job-head">
