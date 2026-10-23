@@ -170,10 +170,11 @@ export function createFx({ sessionsDir, bin }) {
     // fx's id appears only after it starts, so a new terminal is matched to its session later (see listTerminals).
     launch: ({ resume, flags = [] }) => ({ argv: [bin, ...(resume ? ['session', 'resume', resume] : flags)], id: resume ?? null }),
     // Reading the screen: fx shows "• Thinking (4s)" or similar while it works, and goes back to its "┃" prompt.
+    // The "•" blinks (half the captures have none) and past a minute the time reads "(1m0s)": neither may decide.
     activity(screen) {
       const lines = screen.split('\n').filter((l) => l.trim()).slice(-8);
       if (lines.some((l) => /\[y\/n\]|\(y\/n\)|allow|approve|permission|confirm/i.test(l) && /\?/.test(l))) return 'needs_input';
-      if (lines.some((l) => /^\s*[•●◐◓◑◒◴◵◶◷⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s.*\(\d+s\)/.test(l) || /^\s*•\s+(Thinking|Working|Running)/i.test(l))) return 'working';
+      if (lines.some((l) => /^\s*(?:[•●◐◓◑◒◴◵◶◷⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+)?[A-Z][a-z]+(?: [a-z]+)*\s+\((?:\d+h)?(?:\d+m)?\d+s\)/.test(l) || /^\s*•\s+(Thinking|Working|Running)/i.test(l))) return 'working';
       return 'ready';
     },
     ready: (screen) => /^\s*┃\s*$/m.test(screen),

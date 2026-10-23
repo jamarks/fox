@@ -123,6 +123,12 @@ test('each harness reads its own screen: working, waiting for an answer, or read
   assert.equal(claude.screenModel('▝▜██████▀  Haiku 5.5 · Claude Max'), 'Haiku 5.5');
   const fx = createFx({ sessionsDir: tmpdir(), bin: 'fx' });
   assert.equal(fx.activity('• Thinking (4s)'), 'working');
+  // Captured on a server: the "•" blinks, and past a minute the time reads "1m0s".
+  for (const line of ['  Running (47s) (↑29 ↓90)', '• Running (49s) (↑29 ↓90)', '  Running (1m0s) (↑29 ↓90)', '• Running (1m2s) (↑29 ↓90)', '  Thinking (1h2m3s)']) {
+    assert.equal(fx.activity(`● 1 tool call · 1 command\n${line}\n┃\nauto · gpt-6.1-sol · 7k/500k 1%`), 'working', line);
+  }
+  assert.equal(fx.activity('● 1 tool call · 1 command\n  DONE-AFTER-SLEEP\n  2m 7s (↑38 ↓100)\n┃\nauto · gpt-6.1-sol'), 'ready', 'a finished turn');
+  assert.equal(fx.activity('  It should take a while (5s or so).\n┃'), 'ready', 'a reply that mentions seconds');
   assert.equal(fx.activity('┃\nauto · gpt · codex'), 'ready');
   assert.ok(fx.ready('┃'));
 });
