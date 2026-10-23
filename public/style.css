@@ -895,6 +895,14 @@ a.set-val[href]:hover { color: var(--text); }
 .skill-name { flex: 0 0 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .skill-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
 .skill-src { flex-shrink: 0; color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.skill-audit { flex-shrink: 0; font-size: 11px; color: var(--ok); border: 1px solid currentColor; border-radius: 999px; padding: 1px 6px; white-space: nowrap; }
+.skill-audit.warn, .skill-audit.unavailable { color: var(--warn); }
+.skill-audit.fail { color: var(--err); }
+.skill-risk { display: block; margin: 12px 0; color: var(--err); }
+.skill-risk input { vertical-align: middle; }
+#skill-browse .set-foot a { color: var(--accent); }
+#skill-browse .skill-other { padding-top: 8px; }
+#skill-browse .skill-other input { flex: 1; width: auto; min-width: 0; }
 #skill-view .skill-row .set-act { flex-shrink: 0; padding: 2px 9px; }
 .skill-group { margin: 18px 0 2px; color: var(--muted); font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }
 .skill-group span { margin-left: 4px; font-family: var(--mono); font-weight: 400; }

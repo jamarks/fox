@@ -40,7 +40,7 @@ All of it: [CHANGELOG.md](CHANGELOG.md).
 - **Jobs**: scripts on a schedule, each with its model, log, summary and links. A job can have fx make a change and open a pull request it checked itself. [docs/jobs.md](docs/jobs.md)
 - **Pull requests** of your workspaces' repos in one list: what each does, its files, the review job's verdict; merge or close it from fox.
 - **Tools** from Settings, for fx and Claude Code: a browser, Chrome DevTools, library docs, Vercel, Linear.
-- **Skills for fx** in Settings: read discovered skills, preview and install GitHub skills globally or per workspace, and remove fox-installed skills. Click ✳ in the terminal bar to find skills for that folder and insert an unsent draft.
+- **Skills** in the sidebar: read installed skills, browse suggested GitHub repos or skills.sh (search and trending when the server has a token), check security audits, review files before installing globally or per workspace, and remove fox-installed skills. The optional token file is `~/.config/fox/skills-sh/token.env` (`VERCEL_OIDC_TOKEN="…"`), overridable with `FOX_SKILLS_SH_TOKEN_FILE`; without it, browsing repos and audits still work. Click ✳ in the terminal bar to find skills for that folder and insert an unsent draft.
 - **Search** across every session (⌥Space), **metrics** for the last 7 and 30 days, seven **themes** (one is a real star map).
 - **On a server**: open it from any device, see the dev servers fx starts, publish them as named apps. [docs/server.md](docs/server.md)
 

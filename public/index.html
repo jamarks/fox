@@ -197,9 +197,10 @@
             <div id="skills-list"></div>
           </div>
           <div id="skill-browse" class="hidden">
-            <input id="skills-search" class="skill-search" type="search" placeholder="Search skills.sh" spellcheck="false" autocomplete="off">
+            <input id="skills-search" class="skill-search hidden" type="search" placeholder="Search skills.sh" spellcheck="false" autocomplete="off">
             <div id="skill-repos" class="skill-chips"></div>
-            <form id="skill-other" class="skill-other hidden"><input id="skill-source" placeholder="owner/repo" required spellcheck="false" autocomplete="off"><button class="set-act" type="submit">Open</button></form>
+            <div class="set-foot">Browse more on <a href="https://skills.sh" target="_blank" rel="noopener noreferrer">skills.sh ↗</a>, then paste a skill link here.</div>
+            <form id="skill-other" class="skill-other"><input id="skill-source" placeholder="owner/repo or https://skills.sh/owner/repo/skill" required spellcheck="false" autocomplete="off"><button class="set-act" type="submit">Open</button></form>
             <div id="skill-pick"></div>
             <div id="skill-pick-foot" class="skill-pick-foot"><label>Install for <select id="skill-scope"><option value="global">Every workspace</option></select></label><button type="button" class="set-act" id="skill-review">Review</button></div>
             <div id="skill-preview"></div>

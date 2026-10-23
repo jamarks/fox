@@ -2127,8 +2127,13 @@ $('#settings-tools').addEventListener('click', async (e) => {
 // Two tabs: Installed (what fx loads) and Browse (what can be installed). Browse lists Popular from skills.sh, a
 // skills.sh search, or one repo; ticked skills, from any of them, are reviewed file by file before installing.
 // Skills are instructions, not programs: nothing is copied before that review.
-let skillCount = null, skillItems = [], skillSources = [], skillTab = null;
-let skillView = 'popular', skillRows = null, skillViewMsg = '', skillPreviews = null;
+let skillCount = null, skillItems = [], skillSources = [], skillCatalog = false, skillTab = null;
+let skillView = 'vercel-labs/skills', skillRows = null, skillViewMsg = '', skillPreviews = null, skillRisk = false;
+function skillAudit(a) {
+  if (!a) return '';
+  const label = a.status === 'unavailable' ? a.reason || 'Not audited yet' : `${a.status}${a.entries.some((e) => ['HIGH', 'CRITICAL'].includes(e.riskLevel)) ? ' · HIGH/CRITICAL' : ''}`;
+  return `<span class="skill-audit ${esc(a.status)}" title="${esc(a.entries.map((e) => `${e.provider}: ${e.summary} (${e.riskLevel || e.status})`).join(' · ') || label)}">${esc(label)}</span>`;
+}
 const skillChecked = new Map(), skillCache = new Map();
 async function skillApi(action, body) {
   const r = await fetch(`/api/skills/${action}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -2142,8 +2147,9 @@ function renderSkillsEntry() {
 async function loadSkills() {
   try {
     const r = await fetch('/api/skills'); if (!r.ok) throw new Error('Could not load skills.');
-    const { items, sources, scopes } = await r.json();
-    skillItems = items; skillSources = sources; skillCount = items.length; renderSkillsEntry();
+    const { items, sources, scopes, catalog } = await r.json();
+    skillItems = items; skillSources = sources; skillCatalog = catalog; skillCount = items.length; renderSkillsEntry();
+    $('#skills-search').classList.toggle('hidden', !catalog); renderSkillChips();
     $('#skill-count').textContent = items.length;
     const scope = $('#skill-scope').value;
     $('#skill-scope').innerHTML = '<option value="global">Every workspace</option>' + scopes.map((s) => `<option value="${esc(s.id)}">${esc(s.name)} workspace</option>`).join('');
@@ -2155,7 +2161,7 @@ async function loadSkills() {
       const place = item.scope === 'global' ? 'Every workspace' : `${item.group.split(' · ')[0]} workspace`;
       if (!groups.has(place)) groups.set(place, []); groups.get(place).push(item);
     }
-    $('#skills-list').innerHTML = items.length ? [...groups].map(([place, skills]) => `<div class="skill-group">${esc(place)} <span>${skills.length}</span></div>` + skills.map((s) => `<div class="skill-row" title="${esc(shortPath(s.path))}"><span class="skill-name">${esc(s.name)}</span><span class="skill-desc" title="${esc(s.description || '')}">${esc(s.description || 'No description')}</span>${s.source ? `<span class="skill-src">${esc(s.source)}</span>` : ''}<button type="button" class="set-act" data-skill-read="${esc(s.id)}">Read</button>${s.owned ? `<button type="button" class="set-act" data-skill-remove="${esc(s.id)}">Remove</button>` : ''}</div>`).join('')).join('') : '<div class="skill-empty">No skills installed. <button type="button" class="linkish" data-skill-tab="browse">Browse</button> to add some.</div>';
+    $('#skills-list').innerHTML = items.length ? [...groups].map(([place, skills]) => `<div class="skill-group">${esc(place)} <span>${skills.length}</span></div>` + skills.map((s) => `<div class="skill-row" title="${esc(shortPath(s.path))}"><span class="skill-name">${esc(s.name)}</span><span class="skill-desc" title="${esc(s.description || '')}">${esc(s.description || 'No description')}</span>${s.source ? `<span class="skill-src">${esc(s.source)}</span>${skillAudit(s.audit)}` : ''}<button type="button" class="set-act" data-skill-read="${esc(s.id)}">Read</button>${s.owned ? `<button type="button" class="set-act" data-skill-remove="${esc(s.id)}">Remove</button>` : ''}</div>`).join('')).join('') : '<div class="skill-empty">No skills installed. <button type="button" class="linkish" data-skill-tab="browse">Browse</button> to add some.</div>';
     if (!skillTab && skillsOpen()) showSkillTab(items.length ? 'installed' : 'browse');
     renderSkillChips(); if (skillRows) renderSkillPick();
   } catch (err) { $('#skill-note').textContent = err.message; }
@@ -2166,29 +2172,29 @@ function showSkillTab(tab) {
   $('#skill-installed').classList.toggle('hidden', tab !== 'installed');
   $('#skill-browse').classList.toggle('hidden', tab !== 'browse');
   $('#skill-note').textContent = '';
-  if (tab === 'browse' && !skillRows && !skillViewMsg) openSkillView('popular');
+  if (tab === 'browse' && !skillRows && !skillViewMsg) openSkillView(skillSources[0] || 'vercel-labs/skills');
 }
 // The chips say where the list comes from: Popular on skills.sh, a known repo, or one you type.
 function renderSkillChips() {
-  const other = !['popular', 'search', ...skillSources].includes(skillView);
-  $('#skill-repos').innerHTML = `<button type="button" class="skill-chip${skillView === 'popular' ? ' on' : ''}" data-skill-view="popular">Popular</button>` +
+  const other = !['popular', 'curated', 'search', ...skillSources].includes(skillView);
+  $('#skill-repos').innerHTML = (skillCatalog ? `<button type="button" class="skill-chip${skillView === 'popular' ? ' on' : ''}" data-skill-view="popular">Trending</button><button type="button" class="skill-chip${skillView === 'curated' ? ' on' : ''}" data-skill-view="curated">Official</button>` : '') +
     skillSources.map((src) => `<button type="button" class="skill-chip${skillView === src ? ' on' : ''}" data-skill-view="${esc(src)}">${esc(src)}</button>`).join('') +
-    `<button type="button" class="skill-chip${other || !$('#skill-other').classList.contains('hidden') ? ' on' : ''}" data-skill-other>${other ? esc(skillView) : 'owner/repo…'}</button>`;
+    (other ? `<span class="skill-chip on">${esc(skillView)}</span>` : '');
 }
 // Rows are { source, id, name, desc, installs, problem }: id is a folder from a repo's list or a skills.sh id.
 async function openSkillView(view, q) {
-  skillView = view; skillRows = null; skillViewMsg = view === 'search' ? 'Searching skills.sh…' : view === 'popular' ? 'Loading popular skills…' : 'Reading the repository…';
+  skillView = view; skillRows = null; skillViewMsg = view === 'search' ? 'Searching skills.sh…' : ['popular', 'curated'].includes(view) ? 'Loading skills.sh…' : 'Reading the repository…';
   if (view !== 'search') $('#skills-search').value = '';
-  if (view === 'popular' || view === 'search' || skillSources.includes(view)) $('#skill-other').classList.add('hidden');
+  $('#skill-preview').innerHTML = ''; skillPreviews = null;
   renderSkillChips(); renderSkillPick();
   const key = view === 'search' ? `search:${q}` : view;
   try {
     let rows = skillCache.get(key);
     if (!rows) {
       const fromSh = (j) => j.skills.map((s) => ({ source: s.source, id: s.skill, name: s.name, desc: s.source, installs: s.installs }));
-      rows = view === 'popular' ? fromSh(await (await fetch('/api/skills/popular')).json().then((j) => { if (j.error) throw new Error(j.error); return j; }))
+      rows = view === 'popular' || view === 'curated' ? fromSh(await (await fetch(`/api/skills/${view}`)).json().then((j) => { if (j.error) throw new Error(j.error); return j; }))
         : view === 'search' ? fromSh(await skillApi('search', { q }))
-        : (await skillApi('browse', { source: view })).skills.map((s) => ({ source: view, id: s.dir, name: s.name, desc: s.description, problem: s.problem }));
+        : await skillApi('browse', { source: view }).then((j) => j.skills.map((s) => ({ source: j.source, id: s.dir, name: s.name, desc: s.description, problem: s.problem, audit: s.audit })));
       skillCache.set(key, rows);
     }
     if (skillView !== view || (view === 'search' && $('#skills-search').value.trim() !== q)) return;
@@ -2204,7 +2210,7 @@ function renderSkillPick() {
     const key = `${s.source}|${s.id}`, installed = skillItems.some((i) => i.name === s.name && i.scope === scope), off = Boolean(s.problem) || installed;
     if (off) skillChecked.delete(key);
     const meta = installed ? 'installed' : s.installs ? fmtInstalls(s.installs) : '';
-    return `<label class="skill-row skill-pickrow${off ? ' off' : ''}"><input type="checkbox" value="${esc(key)}"${off ? ' disabled' : ''}${skillChecked.has(key) ? ' checked' : ''}><span class="skill-name">${esc(s.name)}</span><span class="skill-desc${s.problem ? ' bad' : s.installs != null ? ' mono' : ''}" title="${esc(s.problem || s.desc || '')}">${esc(s.problem ? `Can't install: ${s.problem}` : s.desc || 'No description')}</span>${meta ? `<span class="skill-src">${esc(meta)}</span>` : ''}<button type="button" class="set-act" data-skill-peek="${esc(key)}">Read</button></label>`;
+    return `<label class="skill-row skill-pickrow${off ? ' off' : ''}"><input type="checkbox" value="${esc(key)}"${off ? ' disabled' : ''}${skillChecked.has(key) ? ' checked' : ''}><span class="skill-name">${esc(s.name)}</span><span class="skill-desc${s.problem ? ' bad' : s.installs != null ? ' mono' : ''}" title="${esc(s.problem || s.desc || '')}">${esc(s.problem ? `Can't install: ${s.problem}` : s.desc || 'No description')}</span>${meta ? `<span class="skill-src">${esc(meta)}</span>` : ''}${skillAudit(s.audit)}<button type="button" class="set-act" data-skill-peek="${esc(key)}">Read</button></label>`;
   }).join('');
   $('#skill-review').textContent = skillChecked.size ? `Review ${skillChecked.size}` : 'Review';
 }
@@ -2234,15 +2240,14 @@ $('#skill-view').addEventListener('click', (e) => { const t = e.target.closest('
 $('#skill-repos').addEventListener('click', (e) => {
   const chip = e.target.closest('[data-skill-view]');
   if (chip) return openSkillView(chip.dataset.skillView);
-  if (!e.target.closest('[data-skill-other]')) return;
-  $('#skill-other').classList.remove('hidden'); renderSkillChips(); $('#skill-source').focus();
+  if (e.target.closest('[data-skill-other]')) $('#skill-source').focus();
 });
 $('#skill-other').addEventListener('submit', (e) => { e.preventDefault(); const src = $('#skill-source').value.trim(); if (src) openSkillView(src); });
 let skillSearchTimer = 0;
 $('#skills-search').addEventListener('input', () => {
   clearTimeout(skillSearchTimer);
   const q = $('#skills-search').value.trim();
-  skillSearchTimer = setTimeout(() => (q.length >= 2 ? openSkillView('search', q) : !q && skillView === 'search' && openSkillView('popular')), 300);
+  skillSearchTimer = setTimeout(() => (q.length >= 2 ? openSkillView('search', q) : !q && skillView === 'search' && openSkillView(skillSources[0])), 300);
 });
 // Read in the list: the skill's SKILL.md and its files under the row, nothing ticked or downloaded beyond that.
 $('#skill-pick').addEventListener('click', async (e) => {
@@ -2254,7 +2259,7 @@ $('#skill-pick').addEventListener('click', async (e) => {
   try {
     const j = await skillApi('peek', { source, dir: rest.join('|') });
     if (!row.isConnected) return;
-    row.insertAdjacentHTML('afterend', `<div class="skill-review"><span class="set-sub">${esc(source)} · ${j.files.length} file${j.files.length === 1 ? '' : 's'} · ${Math.ceil(j.files.reduce((a, f) => a + f.size, 0) / 1024)} KB · ${j.files.slice(0, 12).map((f) => esc(f.name)).join(', ')}${j.files.length > 12 ? '…' : ''}</span><div class="md skill-text">${renderMarkdown(j.text)}</div></div>`);
+    row.insertAdjacentHTML('afterend', `<div class="skill-review"><span class="set-sub">${esc(source)} · ${j.files.length} file${j.files.length === 1 ? '' : 's'} · ${Math.ceil(j.files.reduce((a, f) => a + f.size, 0) / 1024)} KB · ${j.files.slice(0, 12).map((f) => esc(f.name)).join(', ')}${j.files.length > 12 ? '…' : ''}</span>${skillAudit(j.audit)}<div class="md skill-text">${renderMarkdown(j.text)}</div></div>`);
     btn.classList.add('active');
   } catch (err) { $('#skill-note').textContent = err.message; } finally { btn.disabled = false; }
 });
@@ -2274,19 +2279,20 @@ $('#skill-review').addEventListener('click', async () => {
   $('#skill-preview').innerHTML = ''; $('#skill-note').textContent = 'Downloading for review…';
   try {
     const list = await Promise.all([...bySource].map(([source, dirs]) => skillApi('preview', { source, dirs, scope })));
-    skillPreviews = list.map((j) => j.token);
+    skillPreviews = list.map((j) => j.token); skillRisk = list.some((j) => j.skills.some((s) => s.audit.status === 'fail'));
     const skills = list.flatMap((j) => j.skills.map((s) => ({ ...s, source: j.source })));
-    $('#skill-preview').innerHTML = `<div class="skill-review"><strong>Review ${skills.length} skill${skills.length === 1 ? '' : 's'}</strong><span class="set-sub">${esc($('#skill-scope').selectedOptions[0].textContent)}</span>${skills.map((s) => `<details ${skills.length === 1 ? 'open' : ''}><summary>${esc(s.name)} · ${esc(s.source)} · ${s.files.length} files · ${Math.ceil(s.files.reduce((a, f) => a + f.size, 0) / 1024)} KB</summary><p>${esc(s.description)}</p><div class="set-sub">${s.files.map((f) => `${esc(f.name)} (${f.size} B)`).join('<br>')}</div><div class="md skill-text">${renderMarkdown(s.text)}</div></details>`).join('')}<button type="button" class="set-act" id="skill-confirm">Install ${skills.length === 1 ? 'this skill' : `these ${skills.length} skills`}</button></div>`;
+    $('#skill-preview').innerHTML = `<div class="skill-review"><strong>Review ${skills.length} skill${skills.length === 1 ? '' : 's'}</strong><span class="set-sub">${esc($('#skill-scope').selectedOptions[0].textContent)}</span>${skills.map((s) => `<details ${skills.length === 1 ? 'open' : ''}><summary>${esc(s.name)} · ${esc(s.source)} · ${s.files.length} files · ${Math.ceil(s.files.reduce((a, f) => a + f.size, 0) / 1024)} KB</summary><p>${esc(s.description)} ${skillAudit(s.audit)}</p>${s.audit.entries.map((a) => `<div class="set-sub">${esc(a.provider)}: ${esc(a.status)}${a.riskLevel ? ` · ${esc(a.riskLevel)}` : ''} · ${esc(a.summary)}</div>`).join('')}<div class="set-sub">${s.files.map((f) => `${esc(f.name)} (${f.size} B)`).join('<br>')}</div><div class="md skill-text">${renderMarkdown(s.text)}</div></details>`).join('')}${skillRisk ? '<label class="skill-risk"><input type="checkbox" id="skill-risk-confirm"> I reviewed the failed or high-risk audit and still want to install.</label>' : ''}<button type="button" class="set-act" id="skill-confirm"${skillRisk ? ' disabled' : ''}>Install ${skills.length === 1 ? 'this skill' : `these ${skills.length} skills`}</button></div>`;
     $('#skill-note').textContent = 'These are untrusted instructions. Review before installing.';
     $('#skill-preview').scrollIntoView({ block: 'nearest' });
   } catch (err) { $('#skill-note').textContent = err.message; } finally { btn.disabled = false; }
 });
+$('#skill-preview').addEventListener('change', (e) => { if (e.target.id === 'skill-risk-confirm') $('#skill-confirm').disabled = !e.target.checked; });
 $('#skill-preview').addEventListener('click', async (e) => {
-  if (e.target.id !== 'skill-confirm' || !skillPreviews) return;
+  if (e.target.id !== 'skill-confirm' || !skillPreviews || (skillRisk && !$('#skill-risk-confirm')?.checked)) return;
   const tokens = skillPreviews; skillPreviews = null; e.target.disabled = true;
   const installed = [];
   try {
-    for (const token of tokens) installed.push(...(await skillApi('install', { token })).installed);
+    for (const token of tokens) installed.push(...(await skillApi('install', { token, confirmRisk: skillRisk })).installed);
     $('#skill-preview').innerHTML = ''; skillChecked.clear();
     $('#skill-note').textContent = `${installed.join(', ')} installed. New and resumed sessions see ${installed.length === 1 ? 'it' : 'them'}.`;
   } catch (err) { $('#skill-note').textContent = (installed.length ? `${installed.join(', ')} installed; ` : '') + err.message; }

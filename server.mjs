@@ -589,13 +589,14 @@ async function handlePanelRequest(req, res) {
       try {
         if (p === '/api/skills' && req.method === 'GET') return send(res, 200, await skills.list());
         if (p === '/api/skills/popular' && req.method === 'GET') return send(res, 200, await skills.popular());
+        if (p === '/api/skills/curated' && req.method === 'GET') return send(res, 200, await skills.curated());
         if (req.method !== 'POST') return send(res, 405, { error: 'method not allowed' });
         const body = JSON.parse(await readBody(req) || '{}');
         const result = p === '/api/skills/browse' ? await skills.browse(body)
           : p === '/api/skills/peek' ? await skills.peek(body)
           : p === '/api/skills/search' ? await skills.search(body)
           : p === '/api/skills/preview' ? await skills.preview(body)
-          : p === '/api/skills/install' ? await skills.install(body.token)
+          : p === '/api/skills/install' ? await skills.install(body.token, body.confirmRisk)
           : p === '/api/skills/read' ? await skills.read(body.id)
           : p === '/api/skills/remove' ? await skills.remove(body.id) : null;
         return result ? send(res, 200, result) : send(res, 404, { error: 'not found' });

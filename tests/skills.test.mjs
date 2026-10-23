@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, symlink, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createSkills, SOURCES } from '../skills.mjs';
+import { createSkills, SOURCES, parseSkillSource } from '../skills.mjs';
 
 async function fixture(t) {
   const home = await mkdtemp(join(tmpdir(), 'fox-skills-'));
@@ -13,7 +13,7 @@ async function fixture(t) {
   const files = { 'skills/example/SKILL.md': '---\nname: example\ndescription: Test the preview.\n---\n# Sample\nDo not run scripts.', 'skills/example/docs/notes.md': 'Notes' };
   const tree = Object.entries(files).map(([path, text], i) => ({ path, type: 'blob', mode: '100644', sha: String(i + 1).padStart(40, 'a'), size: Buffer.byteLength(text) }));
   const gh = async ([url]) => url.includes('/trees/') ? JSON.stringify({ tree }) : JSON.stringify({ encoding: 'base64', content: Buffer.from(files[tree.find((x) => url.endsWith(x.sha)).path]).toString('base64') });
-  return { home, ws, tree, files, gh, api: (override = {}) => createSkills({ home, stateDir: join(home, 'state'), workspaces: { get: async (id) => id === ws.id ? ws : null, list: async () => [ws] }, gh, ...override }) };
+  return { home, ws, tree, files, gh, api: (override = {}) => createSkills({ home, stateDir: join(home, 'state'), workspaces: { get: async (id) => id === ws.id ? ws : null, list: async () => [ws] }, gh, web: async () => { throw Object.assign(new Error('not found'), { status: 404 }); }, ...override }) };
 }
 
 test('catalog sources are shipped as data', () => assert.deepEqual(SOURCES, ['vercel-labs/skills', 'anthropics/skills', 'mattpocock/skills', 'vercel-labs/agent-browser']));
@@ -29,6 +29,7 @@ test('discovers user and workspace skills, not the repos\' own, without followin
   await symlink(join(f.home, 'private'), join(f.ws.dir, 'repo/.claude'));
   const api = f.api(); const list = await api.list();
   assert.equal(list.items.length, 2);
+  assert.equal(list.catalog, false);
   assert.deepEqual(list.items.map((s) => s.group), ['Claude Code', 'project · workspace']);
   assert.equal(list.items[0].owned, false);
   assert.match((await api.read(list.items[0].id)).text, /Instructions/);
@@ -94,21 +95,54 @@ test('browse lists skills under skills/, grouped folders too, not a skill\'s own
   await assert.rejects(() => api.preview({ source: 'x/y', scope: 'global', dirs: [] }), /at least one/);
   assert.deepEqual((await api.preview({ source: 'x/y', scope: 'global', dirs: ['skills/example'] })).skills.map((s) => s.name), ['example']);
 });
-test('skills.sh gives names to pick; the skill is found in its repo by id, also outside skills/', async (t) => {
-  const f = await fixture(t), urls = [];
-  const page = 'self.__next_f.push([1,"{\\"source\\":\\"x/y\\",\\"skillId\\":\\"example\\",\\"name\\":\\"example\\",\\"installs\\":5},{\\"source\\":\\"a/b\\",\\"skillId\\":\\"top\\",\\"name\\":\\"top\\",\\"installs\\":90},{\\"source\\":\\"../x\\",\\"skillId\\":\\"bad\\",\\"name\\":\\"bad\\",\\"installs\\":99}"])';
-  const web = async (url) => { urls.push(url); return url.includes('/api/search') ? JSON.stringify({ skills: [{ source: 'x/y', skillId: 'helper', name: 'helper', installs: 3 }, { source: 'x/y', skillId: '../etc' }] }) : page; };
-  const api = f.api({ web });
-  assert.deepEqual((await api.popular()).skills.map((s) => `${s.source}/${s.skill}`), ['a/b/top', 'x/y/example']);
-  await api.popular(); assert.equal(urls.length, 1, 'the ranking is held for an hour');
-  assert.deepEqual((await api.search({ q: 'help' })).skills.map((s) => s.skill), ['helper']);
-  assert.match(urls[1], /api\/search\?q=help/);
+test('catalog needs a token file, re-reads rotated tokens, and only accepts GitHub skills', async (t) => {
+  const f = await fixture(t), tokenFile = join(f.home, 'token.env'), calls = [];
+  const web = async (url, headers) => { calls.push({ url, headers }); return JSON.stringify({ data: [
+    { sourceType: 'github', source: 'x/y', slug: 'example', name: 'Example', installs: 5 },
+    { sourceType: 'well-known', source: 'example.com', slug: 'other' },
+    { sourceType: 'github', source: 'x/y', slug: '../bad' },
+  ] }); };
+  const api = f.api({ tokenFile, web });
+  await assert.rejects(() => api.popular(), /server token/);
+  assert.equal(calls.length, 0);
+  await writeFile(tokenFile, 'VERCEL_OIDC_TOKEN="one"\n');
+  assert.deepEqual((await api.popular()).skills.map((s) => s.skill), ['example']);
+  assert.match(calls[0].url, /api\/v1\/skills\?view=trending/);
+  assert.equal(calls[0].headers.Authorization, 'Bearer one');
+  await writeFile(tokenFile, 'VERCEL_OIDC_TOKEN="two"\n');
+  await api.search({ q: 'hello' });
+  assert.equal(calls[1].headers.Authorization, 'Bearer two');
+  assert.match(calls[1].url, /api\/v1\/skills\/search\?q=hello/);
   await assert.rejects(() => api.search({ q: 'h' }), /2 characters/);
+  const curated = f.api({ tokenFile, web: async () => JSON.stringify({ data: [{ skills: [{ sourceType: 'github', source: 'x/y', slug: 'example' }] }] }) });
+  assert.equal((await curated.curated()).skills[0].skill, 'example');
   f.files['.claude/skills/helper/SKILL.md'] = '---\nname: helper\ndescription: Helps.\n---\n# Helper';
   f.tree.push({ path: '.claude/skills/helper/SKILL.md', type: 'blob', mode: '100644', sha: 'f'.repeat(40), size: Buffer.byteLength(f.files['.claude/skills/helper/SKILL.md']) });
   assert.match((await api.peek({ source: 'x/y', dir: 'example' })).text, /Do not run scripts/);
   assert.deepEqual((await api.preview({ source: 'x/y', scope: 'global', dirs: ['example', 'helper'] })).skills.map((s) => s.name), ['example', 'helper']);
-  await assert.rejects(() => api.preview({ source: 'x/y', scope: 'global', dirs: ['missing'] }), /not in this repository/);
+});
+test('skills.sh links select exactly one skill; unsafe URLs are rejected', async (t) => {
+  const f = await fixture(t), api = f.api();
+  assert.deepEqual(parseSkillSource('https://skills.sh/x/y/example'), { source: 'x/y', skill: 'example' });
+  assert.deepEqual(parseSkillSource('x/y'), { source: 'x/y', skill: null });
+  assert.equal((await api.browse({ source: 'https://skills.sh/x/y/example' })).skills[0].dir, 'example');
+  for (const url of ['https://evil.test/x/y/example', 'https://skills.sh/x/y/../bad', 'https://skills.sh/x/y/example?x=1', 'x/../y']) assert.throws(() => parseSkillSource(url));
+});
+test('audits are displayed and failed or high-risk audits require a second confirmation', async (t) => {
+  const f = await fixture(t), urls = [];
+  const api = f.api({ web: async (url) => { urls.push(url); return JSON.stringify({ audits: [
+    { provider: 'Socket', status: 'pass', summary: 'OK', riskLevel: 'LOW' },
+    { provider: 'Snyk', status: 'warn', summary: 'Danger', riskLevel: 'HIGH' },
+  ] }); } });
+  const p = await api.preview({ source: 'x/y', dirs: ['example'], scope: 'global' });
+  assert.equal(p.skills[0].audit.status, 'fail');
+  await assert.rejects(() => api.install(p.token), /explicitly confirm/);
+  await api.install(p.token, true);
+  const item = (await api.list()).items.find((s) => s.name === 'example');
+  assert.equal(item.audit.entries[1].riskLevel, 'HIGH');
+  assert.equal(urls.length, 1, 'installed audits use the cached result');
+  const absent = f.api({ web: async () => { throw Object.assign(new Error('missing'), { status: 404 }); } });
+  assert.equal((await absent.audit('x/y', 'example')).reason, 'Not audited yet');
 });
 test('accepts folded YAML descriptions and rejects empty descriptions', async (t) => {
   const f = await fixture(t);
