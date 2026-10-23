@@ -2,8 +2,14 @@
 
 What changed in fox, newest first: one line per merged pull request. Written by a job from the pull requests; edit the PR title to change a line.
 
+## 2026-10-23
+
+- Expose new fx settings as opt-in controls ([#43](https://github.com/jamarks/fox/pull/43))
+
 ## 2026-10-22
 
+- Insert installed fx skills from a small shelf ([#39](https://github.com/jamarks/fox/pull/39))
+- Skills for fx: see, install and remove them from Settings ([#35](https://github.com/jamarks/fox/pull/35))
 - Branch menu: solid over the sky theme, long names on one line ([#40](https://github.com/jamarks/fox/pull/40))
 - Switch a workspace repo's branch from the sidebar, and get back to main safely ([#37](https://github.com/jamarks/fox/pull/37))
 - Expose new fx settings as opt-in controls ([#38](https://github.com/jamarks/fox/pull/38))
