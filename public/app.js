@@ -623,7 +623,7 @@ updateDictationAvailability();
 const DRAFT_LIMIT = 4000;
 const draftKey = (id) => `fox.nextDraft.${id}`;
 const draftBox = $('#next-draft'), draftText = $('#next-draft-text');
-let draftSession = null;
+let draftSession = null, draftSaved = false;
 function readNextDraft(id) {
   try { return (localStorage.getItem(draftKey(id)) ?? '').slice(0, DRAFT_LIMIT); } catch { return ''; }
 }
@@ -633,7 +633,7 @@ function nextDraftTarget() {
   const terminal = state.terminals.find((t) => t.resume === s.id && t.name === s.terminal);
   const tab = terminal && state.tabs.get(terminal.name);
   return (s.state === 'ready' || s.state === 'needs_input') && state.activeTab === terminal?.name
-    && !state.waking && tab && !tab.closed && tab.ws?.readyState === WebSocket.OPEN ? tab : null;
+    && !state.waking && tab?.ready && !tab.closed && tab.ws?.readyState === WebSocket.OPEN ? tab : null;
 }
 function renderNextDraft() {
   const s = sessionById(state.selected);
@@ -642,10 +642,11 @@ function renderNextDraft() {
   if (id !== draftSession) {
     draftSession = id;
     draftText.value = id ? readNextDraft(id) : '';
-    draftBox.open = Boolean(draftText.value);
-    $('#next-draft-hint').textContent = 'Saved in this browser · Enter sends after insertion';
+    draftSaved = Boolean(draftText.value);
+    draftBox.open = draftSaved;
+    $('#next-draft-hint').textContent = 'Stored in this browser · Enter sends after insertion';
   }
-  $('#next-draft-mark').textContent = draftText.value ? '· saved' : '';
+  $('#next-draft-mark').textContent = draftSaved && draftText.value ? '· saved' : '';
   $('#next-draft-insert').disabled = !id || !draftText.value.trim() || !nextDraftTarget();
 }
 draftText.addEventListener('input', () => {
@@ -655,8 +656,9 @@ draftText.addEventListener('input', () => {
   try {
     if (draftText.value) localStorage.setItem(draftKey(id), draftText.value);
     else localStorage.removeItem(draftKey(id));
-    $('#next-draft-hint').textContent = 'Saved in this browser · Enter sends after insertion';
-  } catch { $('#next-draft-hint').textContent = 'Could not save in this browser'; }
+    draftSaved = Boolean(draftText.value);
+    $('#next-draft-hint').textContent = 'Stored in this browser · Enter sends after insertion';
+  } catch { draftSaved = false; $('#next-draft-hint').textContent = 'Could not save in this browser'; }
   renderNextDraft();
 });
 $('#next-draft-insert').addEventListener('click', () => {
@@ -676,6 +678,7 @@ $('#next-draft-insert').addEventListener('click', () => {
   try { localStorage.removeItem(draftKey(id)); }
   catch { $('#next-draft-hint').textContent = 'Inserted · could not clear saved draft'; return; }
   draftText.value = '';
+  draftSaved = false;
   $('#next-draft-hint').textContent = 'Inserted · press Enter in the terminal to send';
   renderNextDraft();
   tab.term.focus();
@@ -1027,12 +1030,14 @@ function connectTab(tab) {
   let reveal = null;
   ws.onmessage = (ev) => {
     term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data));
-    if (!tab.ready) { clearTimeout(reveal); reveal = setTimeout(() => { tab.ready = true; wrap.classList.remove('warming'); updateTermLoading(); }, 120); }
+    if (!tab.ready) { clearTimeout(reveal); reveal = setTimeout(() => { tab.ready = true; wrap.classList.remove('warming'); updateTermLoading(); renderNextDraft(); }, 120); }
   };
   ws.onopen = () => { tab.attempts = 0; updateDictationAvailability(); renderNextDraft(); };
   ws.onclose = (e) => {
     if (tab.ws !== ws) return; // replaced or closed by fox
     tab.ws = null;
+    clearTimeout(reveal);
+    tab.ready = false;
     renderNextDraft();
     if (tab.closed) return;
     const dropped = e.code === 1006 && (tab.attempts ?? 0) < RECONNECT_DELAYS.length && state.terminals.some((t) => t.name === tab.name);
