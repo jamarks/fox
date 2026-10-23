@@ -21,7 +21,10 @@ export function createFx({ sessionsDir, bin }) {
       const dir = join(sessionsDir, id);
       const meta = await readJson(join(dir, 'session.json'));
       if (!meta) continue;
-      const snap = (await readJson(join(dir, 'usage-v2.json')))?.snapshot ?? {};
+      const usagePath = join(dir, 'usage-v2.json');
+      const snap = (await readJson(usagePath))?.snapshot;
+      const hasTokens = [snap?.input_tokens, snap?.output_tokens, snap?.cache_read_tokens].some(Number.isFinite);
+      const usageSavedAt = hasTokens ? await stat(usagePath).then((s) => s.mtimeMs).catch(() => null) : null;
       let turns = 0, firstPrompt = '', latestReply = null, lastKind = null, partial = null, answeredBy = null;
       try {
         const raw = await readFile(join(dir, 'events.jsonl'), 'utf8');
@@ -73,11 +76,12 @@ export function createFx({ sessionsDir, bin }) {
         live: await ownerAlive(dir),
         turns,
         usage: {
-          input: snap.input_tokens ?? 0,
-          output: snap.output_tokens ?? 0,
-          cacheRead: snap.cache_read_tokens ?? 0,
-          cost: snap.total_cost ?? 0,
-          wallMs: snap.wall_duration_ms ?? 0,
+          input: snap?.input_tokens ?? 0,
+          output: snap?.output_tokens ?? 0,
+          cacheRead: snap?.cache_read_tokens ?? 0,
+          cost: snap?.total_cost ?? 0,
+          wallMs: snap?.wall_duration_ms ?? 0,
+          savedAt: usageSavedAt,
         },
       });
     }

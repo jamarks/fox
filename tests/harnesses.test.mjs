@@ -113,6 +113,22 @@ test('a fox started inside a Claude Code session does not pass that session on t
   assert.deepEqual(argv, ['env', '-u', 'CLAUDECODE', '-u', 'CLAUDE_CODE_SESSION_ID', '-u', 'ANTHROPIC_BASE_URL', 'claude', '--session-id', id]);
 });
 
+test('fx preserves snapshot presence and file freshness separately from zero token counts', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'fox-usage-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  for (const id of ['parent', 'child', 'empty']) {
+    await mkdir(join(dir, id));
+    await writeFile(join(dir, id, 'session.json'), JSON.stringify({ title: id, created_at_ms: 1 }));
+  }
+  await writeFile(join(dir, 'empty', 'usage-v2.json'), JSON.stringify({ snapshot: {} }));
+  await writeFile(join(dir, 'child', 'usage-v2.json'), JSON.stringify({ snapshot: { input_tokens: 3, output_tokens: 2, cache_read_tokens: 8 } }));
+  const rows = await createFx({ sessionsDir: dir, bin: 'fx' }).listSessions();
+  assert.equal(rows.find((s) => s.id === 'parent').usage.savedAt, null);
+  assert.equal(rows.find((s) => s.id === 'empty').usage.savedAt, null);
+  assert.deepEqual([rows.find((s) => s.id === 'child').usage.input, rows.find((s) => s.id === 'child').usage.cacheRead], [3, 8]);
+  assert.ok(rows.find((s) => s.id === 'child').usage.savedAt > 0);
+});
+
 test('each harness reads its own screen: working, waiting for an answer, or ready for a message', () => {
   const claude = createClaude({ bin: 'claude', stateDir: tmpdir(), env: {} });
   assert.equal(claude.activity('❯ make it\n✻ Churning… (3s · esc to interrupt)\n❯ \n  ⏵⏵ auto mode on · esc to interrupt'), 'working');

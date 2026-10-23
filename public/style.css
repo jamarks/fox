@@ -410,6 +410,19 @@ button.agent-open { padding: 0; line-height: 1.45; }
 .files-more { margin: 4px 6px 0; font-size: 11px; color: var(--accent); text-decoration: none; }
 .agent-note { margin-top: 4px; padding-left: 21px; font-size: 11px; color: var(--muted); font-style: italic; }
 .board .agent.selected { border-color: var(--accent); }
+/* A saved local snapshot is a footprint, not a live provider balance. */
+.family-usage { margin: 4px 0 16px; font-size: 11px; color: var(--muted); }
+.family-usage summary { cursor: pointer; list-style: none; padding: 4px 2px; }
+.family-usage summary::-webkit-details-marker { display: none; }
+.family-usage summary::before { content: '▸'; display: inline-block; width: 14px; }
+.family-usage[open] summary::before { content: '▾'; }
+.family-usage summary:hover { color: var(--text); }
+.family-usage-hint, .family-usage-note { color: var(--muted); }
+.family-usage-rows { border-left: 1px solid var(--border); margin: 4px 0 0 6px; padding: 2px 0 2px 10px; }
+.family-usage-row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-family: var(--mono); }
+.family-usage-row span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.family-usage-row span:last-child { flex: none; color: var(--text); }
+.family-usage-note { margin-top: 7px; font-size: 10px; }
 .files + .section-title, .section-title.fold + .section-title.fold { margin-top: 18px; }
 a.section-title.fold { display: block; text-decoration: none; cursor: pointer; }
 a.section-title.fold::before { content: '▾'; display: inline-block; width: 14px; font-size: 11px; }
