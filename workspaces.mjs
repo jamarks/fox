@@ -4,7 +4,7 @@
 // files unless asked, and never when a repo has uncommitted or unpushed work.
 import { readFile, writeFile, mkdir, rename, readdir, rm, realpath, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID, createHash } from 'node:crypto';
@@ -207,16 +207,17 @@ export function createWorkspaces({
       if (!ws || !(await inside(ws.dir))) return [];
       const root = await realpath(ws.dir).catch(() => null);
       const current = await realpath(cwd).catch(() => null);
-      if (!root || !current || current === root || current !== resolve(cwd) || !current.startsWith(root + sep)) return [];
-      if (!ws.repos.some((r) => REPO_PART.test(r.dir) && (current === join(ws.dir, r.dir) || current.startsWith(join(ws.dir, r.dir) + sep)))) return [];
+      // Parent links (including macOS's /var) are fine; links inside the workspace are not.
+      if (!root || !current || current === root || current !== join(root, relative(resolve(ws.dir), resolve(cwd))) || !current.startsWith(root + sep)) return [];
+      if (!ws.repos.some((r) => REPO_PART.test(r.dir) && (current === join(root, r.dir) || current.startsWith(join(root, r.dir) + sep)))) return [];
       const repos = [];
       for (const r of ws.repos) {
         if (!REPO_PART.test(r.dir) || r.dir === '..') continue;
-        const dir = join(ws.dir, r.dir);
+        const dir = join(ws.dir, r.dir), realDir = join(root, r.dir);
         // Do not expose links, missing clones or folders without git, even if listed in workspaces.json.
-        if (await realpath(dir).catch(() => null) !== dir || !(await stat(dir).catch(() => null))?.isDirectory() ||
+        if (await realpath(dir).catch(() => null) !== realDir || !(await stat(dir).catch(() => null))?.isDirectory() ||
             !(await stat(join(dir, '.git')).catch(() => null))) continue;
-        if (current === dir || current.startsWith(dir + sep)) continue;
+        if (current === realDir || current.startsWith(realDir + sep)) continue;
         repos.push({ owner: r.owner, name: r.name, dir });
       }
       return repos;
