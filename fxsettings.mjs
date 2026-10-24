@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 export const FX_SETTINGS = [
   { key: 'collapse_tool_calls', label: 'Summarize tool calls', description: 'One line per group of reads, edits and commands', type: 'bool', default: false },
   { key: 'statusLine.context', label: 'Context in the footer', description: 'How full the session is, to know when to start a new one', type: 'bool', default: false },
+  { key: 'statusLine.session', label: 'Session title in the footer', description: 'Identify the session in fox’s terminal view', type: 'bool', default: false, introduced: '2026-10-24', documentation: 'https://fx.sh/docs/configure-fx/configuration.md#interface-and-update-settings', upstreamDefault: 'off' },
   { key: 'statusLine.workspace', label: 'Folder and branch in the footer', description: 'Where fx is working and on which git branch', type: 'bool', default: false },
   { key: 'fast_mode', label: 'Fast mode', description: 'Faster answers when the provider supports it', type: 'bool', default: false },
   { key: 'max_tool_result_bytes', label: 'Tool output budget (bytes)', description: 'Limit tool output kept in model context; saved results can be larger', type: 'integer', min: 1024, max: 2147483647, default: 65536, introduced: '2026-10-22', documentation: 'https://fx.sh/docs/configure-fx/configuration.md#project-configuration', upstreamDefault: '65536 bytes' },
