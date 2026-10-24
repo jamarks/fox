@@ -767,6 +767,13 @@ a.pr-chip { color: var(--accent); } a.pr-chip:hover { border-color: var(--accent
 .run-row .rdur, .run-row .rwhen { color: var(--muted); white-space: nowrap; }
 .run-detail { padding: 8px 16px 14px 36px; border-bottom: 1px solid var(--border); background: var(--panel); }
 .run-detail pre { margin: 0; max-height: 50vh; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 12px; font-family: var(--mono); color: var(--text); }
+.run-inputs { display: grid; gap: 4px; padding: 2px 0 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border); font: 11px var(--mono); color: var(--muted); }
+.run-input-title { color: var(--text); font: 600 12px var(--mono); margin-bottom: 4px; }
+.run-input { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 10px; overflow-wrap: anywhere; }
+.run-input > span:last-child { color: var(--text); }
+.run-input code { font: inherit; }
+.run-changed { color: var(--warn); white-space: nowrap; }
+@media (max-width: 600px) { .run-input { grid-template-columns: 1fr; gap: 1px; } }
 .run-files { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .run-files a { font-family: var(--mono); font-size: 12px; color: var(--accent); text-decoration: none; border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; }
 .jobs-none { padding: 20px 16px; color: var(--muted); }

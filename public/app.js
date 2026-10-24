@@ -2906,13 +2906,28 @@ async function showRunDetail(jobId, run) {
   const box = $('#run-detail'); if (!box || !run) return;
   const cached = runDetails.get(run.id);
   if (cached && box.innerHTML !== cached.html) box.innerHTML = cached.html; // at once, also right after a rebuild
-  if (cached?.final) return;
+  const details = await (await fetch(`/api/jobs/${jobId}/runs/${run.id}`)).json().catch(() => null);
+  if (!details && cached?.final) return;
+  const p = details?.provenance;
+  const flag = (changed) => changed ? '<span class="run-changed">changed since run</span>' : '';
+  const row = (label, value) => `<div class="run-input"><span>${label}</span><span>${value}</span></div>`;
+  const inputs = p ? `<div class="run-inputs"><div class="run-input-title">Inputs at run start</div>
+    ${row('Script', `<code>${esc(p.script)}</code> ${flag(details.scriptChanged)}`)}
+    ${row('SHA-256', `<code>${esc(p.sha256 ?? 'unavailable')}</code>`)}
+    ${row('Arguments', `<code>${esc(JSON.stringify(p.args ?? []))}</code>`)}
+    ${row('Trigger', esc(p.trigger === 'manual' ? 'manual' : `scheduled${p.scheduledAt ? ' · ' + fmtTime(p.scheduledAt) : ''}`))}
+    ${row('Schedule', `<code>${esc(JSON.stringify(p.schedule))}</code> · ${esc(p.tz ?? '')}`)}
+    ${row('Model / effort', esc([p.model ?? 'default', p.effort ?? 'default'].join(' / ')))}
+    ${row('fx', `<code>${esc(p.fxVersion ?? 'unavailable')}</code>`)}
+    ${p.repos?.length ? p.repos.map((r) => row(`Repo ${esc(r.path)}`, `<code>${esc(r.head)}</code> ${r.dirty === null ? 'dirty unknown' : r.dirty ? 'dirty' : 'clean'} ${flag(details.reposChanged?.find((x) => x.path === r.path)?.changed)}`)).join('') : row('Repos', 'none found')}
+  </div>` : '<div class="run-inputs muted">Inputs unavailable for this run.</div>';
+  if (cached?.final && cached.inputs === inputs) return;
   const files = (run.outputs ?? []).map((o) => `<a href="/api/jobs/${jobId}/runs/${run.id}/files/${encodeURIComponent(o.name)}" target="_blank" rel="noopener">${esc(o.name)}</a>`).join('');
-  const log = await (await fetch(`/api/jobs/${jobId}/runs/${run.id}/log`)).text().catch(() => null);
+  const log = cached?.final ? cached.log : await (await fetch(`/api/jobs/${jobId}/runs/${run.id}/log`)).text().catch(() => null);
   if (log === null) return;
-  const html = `${files ? `<div class="run-files">${files}</div>` : ''}<pre>${log ? linkify(log) : '(no output)'}</pre>`;
-  runDetails.set(run.id, { html, final: run.status !== 'running' });
-  const now = $('#run-detail'); if (!now || now.innerHTML === html) return;
+  const html = `${inputs}${files ? `<div class="run-files">${files}</div>` : ''}<pre>${log ? linkify(log) : '(no output)'}</pre>`;
+  runDetails.set(run.id, { html, inputs, log, final: run.status !== 'running' });
+  const now = $('#run-detail'); if (!now || state.openRun !== run.id || state.jobView !== jobId || now.innerHTML === html) return;
   // A running log grows: keep the reader where they were, or at the bottom if they were following it.
   const pre = now.querySelector('pre'), atEnd = pre && pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 4, top = pre?.scrollTop ?? 0;
   now.innerHTML = html;
