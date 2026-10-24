@@ -232,10 +232,12 @@ export function createSkills({ home, stateDir, workspaces, web = fetchText, gh =
     previews.set(token, { until: Date.now() + 10 * 60_000, scope, source, skills });
     return { token, source, scope, skills: skills.map((s) => ({ name: s.name, description: s.description, files: s.files.map((f) => ({ name: f.name, size: f.data.length })), text: s.files.find((f) => f.name === 'SKILL.md').data.toString('utf8') })) };
   }
-  async function install(token) {
+  // `scope` may change where it goes after the preview (picked next to Install); what goes is what was shown.
+  async function install(token, scope = null) {
     return locked(async () => {
       const p = previews.get(token); previews.delete(token);
       if (!p || p.until < Date.now()) fail('Preview expired. Preview again.', 409);
+      if (scope) p.scope = scope;
       const root = await target(p.scope), owned = await records();
       await ensureParents(root);
       for (const s of p.skills) for (const r of await roots(p.scope)) if (await lstat(join(r, s.name)).catch(() => null)) fail(`${s.name} already exists; nothing was replaced.`, 409);

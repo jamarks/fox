@@ -55,6 +55,12 @@ test('preview shows files and markdown before writing; install is confirmed and 
   await api.remove(id);
   assert.equal((await api.list()).items.some((s) => s.name === 'example'), false);
 });
+test('the place picked next to Install wins over the preview\'s, and must be a real one', async (t) => {
+  const f = await fixture(t), api = f.api();
+  await assert.rejects(async () => api.install((await api.preview({ source: 'x/y', scope: 'global', dirs: ['skills/example'] })).token, 'workspace:nope'), /Unknown workspace/);
+  await api.install((await api.preview({ source: 'x/y', scope: 'global', dirs: ['skills/example'] })).token, 'workspace:one');
+  assert.match(await readFile(join(f.ws.dir, '.claude/skills/example/SKILL.md'), 'utf8'), /Do not run scripts/);
+});
 test('installs where Claude Code and fx both read; an earlier install in .fx/skills still blocks a duplicate and can be removed', async (t) => {
   const f = await fixture(t), api = f.api();
   await api.install((await api.preview({ source: 'x/y', scope: 'global', dirs: ['skills/example'] })).token);

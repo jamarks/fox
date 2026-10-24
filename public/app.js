@@ -2232,8 +2232,10 @@ $('#settings-tools').addEventListener('click', async (e) => {
 // skills.sh search, or one repo; ticked skills, from any of them, are reviewed file by file before installing.
 // Skills are instructions, not programs: nothing is copied before that review.
 let skillCount = null, skillItems = [], skillSources = [], skillTab = null;
-let skillView = 'popular', skillRows = null, skillViewMsg = '', skillPreviews = null;
-const skillChecked = new Map(), skillCache = new Map();
+let skillView = 'popular', skillRows = null, skillViewMsg = '', skillScopes = [], skillScope = 'global';
+// One skill open at a time in Browse: its key and what its panel shows (loading, the downloaded skill, or why not).
+let skillOpen = null, skillPanel = null;
+const skillCache = new Map();
 async function skillApi(action, body) {
   const r = await fetch(`/api/skills/${action}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const j = await r.json(); if (!r.ok) throw new Error(j.error || 'That did not work.'); return j;
@@ -2249,9 +2251,8 @@ async function loadSkills() {
     const { items, sources, scopes } = await r.json();
     skillItems = items; skillSources = sources; skillCount = items.length; renderSkillsEntry();
     $('#skill-count').textContent = items.length;
-    const scope = $('#skill-scope').value;
-    $('#skill-scope').innerHTML = '<option value="global">Every workspace</option>' + scopes.map((s) => `<option value="${esc(s.id)}">${esc(s.name)} workspace</option>`).join('');
-    if ([...$('#skill-scope').options].some((o) => o.value === scope)) $('#skill-scope').value = scope;
+    skillScopes = [{ id: 'global', name: 'Every workspace' }, ...scopes.map((s) => ({ id: s.id, name: `${s.name} workspace` }))];
+    if (!skillScopes.some((s) => s.id === skillScope)) skillScope = 'global';
     // One group per place a skill applies: every workspace, or one workspace. Which folder it sits in (fx's,
     // Claude Code's…) is on hover; one line per skill, the full text is behind Read.
     const groups = new Map();
@@ -2281,6 +2282,7 @@ function renderSkillChips() {
 }
 // Rows are { source, id, name, desc, installs, problem }: id is a folder from a repo's list or a skills.sh id.
 async function openSkillView(view, q) {
+  skillOpen = null; skillPanel = null;
   skillView = view; skillRows = null; skillViewMsg = view === 'search' ? 'Searching skills.sh…' : view === 'popular' ? 'Loading popular skills…' : 'Reading the repository…';
   if (view !== 'search') $('#skills-search').value = '';
   if (view === 'popular' || view === 'search' || skillSources.includes(view)) $('#skill-other').classList.add('hidden');
@@ -2301,16 +2303,41 @@ async function openSkillView(view, q) {
   renderSkillPick();
 }
 const fmtInstalls = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n);
-// The list to tick. One already in the chosen place says so; one fox cannot install says why.
+// The list: a row per skill; clicking one opens it under the row. Opening downloads the whole skill from GitHub
+// (SKILL.md and every file, shown in full), and Install copies exactly that: what you read is what gets installed.
+const skillPlaceOf = (name) => skillItems.filter((i) => i.name === name).map((i) => i.scope);
 function renderSkillPick() {
-  const scope = $('#skill-scope').value;
   $('#skill-pick').innerHTML = !skillRows ? `<div class="set-foot">${esc(skillViewMsg)}</div>` : skillRows.map((s) => {
-    const key = `${s.source}|${s.id}`, installed = skillItems.some((i) => i.name === s.name && i.scope === scope), off = Boolean(s.problem) || installed;
-    if (off) skillChecked.delete(key);
+    const key = `${s.source}|${s.id}`, open = skillOpen === key, installed = skillPlaceOf(s.name).length > 0;
     const meta = installed ? 'installed' : s.installs ? fmtInstalls(s.installs) : '';
-    return `<label class="skill-row skill-pickrow${off ? ' off' : ''}"><input type="checkbox" value="${esc(key)}"${off ? ' disabled' : ''}${skillChecked.has(key) ? ' checked' : ''}><span class="skill-name">${esc(s.name)}</span><span class="skill-desc${s.problem ? ' bad' : s.installs != null ? ' mono' : ''}" title="${esc(s.problem || s.desc || '')}">${esc(s.problem ? `Can't install: ${s.problem}` : s.desc || 'No description')}</span>${meta ? `<span class="skill-src">${esc(meta)}</span>` : ''}<button type="button" class="set-act" data-skill-peek="${esc(key)}">Read</button></label>`;
+    return `<button type="button" class="skill-row skill-pickrow${open ? ' open' : ''}" data-skill-open="${esc(key)}" aria-expanded="${open}"><span class="skill-caret" aria-hidden="true">›</span><span class="skill-name">${esc(s.name)}</span><span class="skill-desc${s.problem ? ' bad' : s.installs != null ? ' mono' : ''}" title="${esc(s.problem || s.desc || '')}">${esc(s.problem ? `Can't install: ${s.problem}` : s.desc || 'No description')}</span>${meta ? `<span class="skill-src">${esc(meta)}</span>` : ''}</button>${open ? skillPanelHtml(s) : ''}`;
   }).join('');
-  $('#skill-review').textContent = skillChecked.size ? `Review ${skillChecked.size}` : 'Review';
+}
+function skillPanelHtml(row) {
+  const p = skillPanel;
+  if (!p || p.state === 'loading') return '<div class="skill-review skill-detail"><span class="term-spinner" aria-hidden="true"></span> Loading the skill from GitHub…</div>';
+  const s = p.skill, size = (files) => `${files.length} file${files.length === 1 ? '' : 's'} · ${Math.ceil(files.reduce((a, f) => a + f.size, 0) / 1024)} KB`;
+  const files = s?.files ?? [];
+  const head = `<p class="skill-about">${esc(s?.description || row.desc || '')}</p><div class="set-sub"><a href="https://github.com/${esc(row.source)}" target="_blank" rel="noopener">${esc(row.source)}</a>${files.length ? ` · ${size(files)}` : ''}${row.installs ? ` · ${fmtInstalls(row.installs)} installs on skills.sh` : ''}</div>`;
+  const list = files.length ? `<details class="skill-files"><summary>Files</summary><div class="set-sub">${files.map((f) => `${esc(f.name)} <span class="mono">${f.size} B</span>`).join('<br>')}</div></details>` : '';
+  const text = s?.text ? `<div class="md skill-text">${renderMarkdown(s.text)}</div>` : '';
+  if (p.state === 'error') return `<div class="skill-review skill-detail">${head}${text}<div class="skill-why">Can't install: ${esc(p.error)}</div></div>`;
+  const here = skillPlaceOf(s.name).includes(skillScope);
+  return `<div class="skill-review skill-detail">${head}${list}${text}<div class="skill-install-row"><label>Install for <select data-skill-scope>${skillScopes.map((o) => `<option value="${esc(o.id)}"${o.id === skillScope ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</select></label>${here ? '<span class="skill-src">installed here</span>' : !p.token ? '' : `<button type="button" class="set-act skill-install" data-skill-install>${p.installing ? 'Installing…' : 'Install'}</button>`}</div><div class="set-foot">${p.note ? esc(p.note) : 'Instructions from someone else: fx and Claude Code follow them, so read them first.'}</div></div>`;
+}
+async function openSkillRow(key) {
+  if (skillOpen === key) { skillOpen = null; skillPanel = null; return renderSkillPick(); }
+  const row = skillRows.find((s) => `${s.source}|${s.id}` === key); if (!row) return;
+  skillOpen = key; skillPanel = { state: 'loading' }; renderSkillPick();
+  try {
+    const j = await skillApi('preview', { source: row.source, dirs: [row.id], scope: skillScope });
+    if (skillOpen === key) skillPanel = { state: 'ready', token: j.token, skill: j.skills[0] };
+  } catch (err) {
+    // Not installable: still show what it is, when its SKILL.md can be read.
+    const peek = await skillApi('peek', { source: row.source, dir: row.id }).catch(() => null);
+    if (skillOpen === key) skillPanel = { state: 'error', error: err.message, skill: peek ? { text: peek.text, files: peek.files } : null };
+  }
+  if (skillOpen === key) renderSkillPick();
 }
 function skillsOpen() { return !$('#skill-view').classList.contains('hidden'); }
 function openSkills() {
@@ -2346,53 +2373,24 @@ $('#skills-search').addEventListener('input', () => {
   const q = $('#skills-search').value.trim();
   skillSearchTimer = setTimeout(() => (q.length >= 2 ? openSkillView('search', q) : !q && skillView === 'search' && openSkillView('popular')), 300);
 });
-// Read in the list: the skill's SKILL.md and its files under the row, nothing ticked or downloaded beyond that.
 $('#skill-pick').addEventListener('click', async (e) => {
-  const btn = e.target.closest('[data-skill-peek]'); if (!btn) return;
-  e.preventDefault();
-  const row = btn.closest('.skill-row');
-  if (row.nextElementSibling?.classList.contains('skill-review')) { row.nextElementSibling.remove(); btn.classList.remove('active'); return; }
-  const [source, ...rest] = btn.dataset.skillPeek.split('|'); btn.disabled = true;
+  if (e.target.closest('a, select, details')) return;
+  const row = e.target.closest('[data-skill-open]');
+  if (row) return openSkillRow(row.dataset.skillOpen);
+  if (!e.target.closest('[data-skill-install]') || !skillPanel?.token || skillPanel.installing) return;
+  const p = skillPanel, key = skillOpen;
+  p.installing = true; renderSkillPick();
   try {
-    const j = await skillApi('peek', { source, dir: rest.join('|') });
-    if (!row.isConnected) return;
-    row.insertAdjacentHTML('afterend', `<div class="skill-review"><span class="set-sub">${esc(source)} · ${j.files.length} file${j.files.length === 1 ? '' : 's'} · ${Math.ceil(j.files.reduce((a, f) => a + f.size, 0) / 1024)} KB · ${j.files.slice(0, 12).map((f) => esc(f.name)).join(', ')}${j.files.length > 12 ? '…' : ''}</span><div class="md skill-text">${renderMarkdown(j.text)}</div></div>`);
-    btn.classList.add('active');
-  } catch (err) { $('#skill-note').textContent = err.message; } finally { btn.disabled = false; }
+    const j = await skillApi('install', { token: p.token, scope: skillScope });
+    p.note = `Installed. New and resumed sessions of fx and Claude Code see ${j.installed.length === 1 ? 'it' : 'them'}.`;
+  } catch (err) { p.note = /expired/i.test(err.message) ? 'This was open too long. Close it and open it again to install.' : err.message; }
+  p.installing = false; p.token = null;
+  await loadSkills();
+  if (skillOpen === key) renderSkillPick();
 });
 $('#skill-pick').addEventListener('change', (e) => {
-  if (e.target.type !== 'checkbox') return;
-  const [source, ...rest] = e.target.value.split('|');
-  e.target.checked ? skillChecked.set(e.target.value, { source, id: rest.join('|') }) : skillChecked.delete(e.target.value);
-  $('#skill-review').textContent = skillChecked.size ? `Review ${skillChecked.size}` : 'Review';
-});
-$('#skill-scope').addEventListener('change', () => { if (skillRows) renderSkillPick(); });
-// One review per repo the ticked skills come from; one Install installs them all.
-$('#skill-review').addEventListener('click', async () => {
-  if (!skillChecked.size) { $('#skill-note').textContent = 'Tick at least one skill.'; return; }
-  const btn = $('#skill-review'); btn.disabled = true; skillPreviews = null;
-  const scope = $('#skill-scope').value, bySource = new Map();
-  for (const { source, id } of skillChecked.values()) { if (!bySource.has(source)) bySource.set(source, []); bySource.get(source).push(id); }
-  $('#skill-preview').innerHTML = ''; $('#skill-note').textContent = 'Downloading for review…';
-  try {
-    const list = await Promise.all([...bySource].map(([source, dirs]) => skillApi('preview', { source, dirs, scope })));
-    skillPreviews = list.map((j) => j.token);
-    const skills = list.flatMap((j) => j.skills.map((s) => ({ ...s, source: j.source })));
-    $('#skill-preview').innerHTML = `<div class="skill-review"><strong>Review ${skills.length} skill${skills.length === 1 ? '' : 's'}</strong><span class="set-sub">${esc($('#skill-scope').selectedOptions[0].textContent)}</span>${skills.map((s) => `<details ${skills.length === 1 ? 'open' : ''}><summary>${esc(s.name)} · ${esc(s.source)} · ${s.files.length} files · ${Math.ceil(s.files.reduce((a, f) => a + f.size, 0) / 1024)} KB</summary><p>${esc(s.description)}</p><div class="set-sub">${s.files.map((f) => `${esc(f.name)} (${f.size} B)`).join('<br>')}</div><div class="md skill-text">${renderMarkdown(s.text)}</div></details>`).join('')}<button type="button" class="set-act" id="skill-confirm">Install ${skills.length === 1 ? 'this skill' : `these ${skills.length} skills`}</button></div>`;
-    $('#skill-note').textContent = 'These are untrusted instructions. Review before installing.';
-    $('#skill-preview').scrollIntoView({ block: 'nearest' });
-  } catch (err) { $('#skill-note').textContent = err.message; } finally { btn.disabled = false; }
-});
-$('#skill-preview').addEventListener('click', async (e) => {
-  if (e.target.id !== 'skill-confirm' || !skillPreviews) return;
-  const tokens = skillPreviews; skillPreviews = null; e.target.disabled = true;
-  const installed = [];
-  try {
-    for (const token of tokens) installed.push(...(await skillApi('install', { token })).installed);
-    $('#skill-preview').innerHTML = ''; skillChecked.clear();
-    $('#skill-note').textContent = `${installed.join(', ')} installed. New and resumed sessions see ${installed.length === 1 ? 'it' : 'them'}.`;
-  } catch (err) { $('#skill-note').textContent = (installed.length ? `${installed.join(', ')} installed; ` : '') + err.message; }
-  await loadSkills();
+  if (!e.target.matches('[data-skill-scope]')) return;
+  skillScope = e.target.value; renderSkillPick();
 });
 // Read opens the skill under its row; a second click closes it.
 $('#skills-list').addEventListener('click', async (e) => {
