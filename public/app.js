@@ -246,10 +246,10 @@ function wsRepoSummary(wsp) {
   return `<div class="ws-repos-line">${attention.map((r) => wsRepoLine(r, wsp.id)).join('')}${clean ? `<div class="ws-line"><button type="button" class="ws-more" data-ws-all="${esc(wsp.id)}" title="Show ${esc(wsp.repos.filter((r) => !attention.includes(r)).map((r) => r.dir).join(', '))} and their branches">${attention.length ? `${clean} more` : `${GITHUB_MARK}${n}`}</button></div>` : open ? `<div class="ws-line"><button type="button" class="ws-more" data-ws-all="${esc(wsp.id)}">fewer</button></div>` : ''}</div>`;
 }
 
-// Jobs and pull requests belong to a workspace too: a job by the workspace it names (its script can live in another
-// folder, like a jobs repo that changes fox) or else its folder's, a PR by its repo. Nothing to assign by hand.
+// Jobs use their named workspace when scripts live elsewhere (e.g. a jobs repo); otherwise their folder's.
+// Pull requests belong to the workspace containing their repo.
 const workspaceNamed = (name) => (state.workspaces ?? []).find((w) => w.name === name);
-const jobWorkspace = (j) => workspaceNamed(j.workspace) ?? workspaceFor(j.cwd);
+const jobWorkspace = (j) => j.workspace ? workspaceNamed(j.workspace) : workspaceFor(j.cwd);
 const prWorkspace = (p) => (state.workspaces ?? []).find((w) => w.repos.some((r) => `${r.owner}/${r.name}`.toLowerCase() === String(p.repo).toLowerCase()));
 // Jobs or Pull requests narrowed to one workspace (its name), from the counts under it in the sidebar.
 const wsFilter = () => workspaceNamed(state.wsFilter);
@@ -390,7 +390,7 @@ $('#session-groups').addEventListener('click', async (e) => {
   if (d.editWs) return openWorkspaceDialog(d.editWs);
   if (d.branchWs) return openBranchMenu(btn, d.branchWs, d.branchDir);
   if (d.wsJobs) { state.wsFilter = d.wsJobs; return openJobs(); }
-  if (d.wsPrs) { state.wsFilter = d.wsPrs; return openPrs(); }
+  if (d.wsPrs) { state.wsFilter = d.wsPrs; prFilter = 'open'; return openPrs(); }
   if (d.wsAll) { wsShowAll.has(d.wsAll) ? wsShowAll.delete(d.wsAll) : wsShowAll.add(d.wsAll); return renderSessions(); }
   if (d.pin) return setPinned(d.pin, !state.pinned.has(d.pin));
   if (d.rename) return renameInline(d.rename);
@@ -2853,6 +2853,7 @@ const linkChips = (links = []) => links.filter((l) => /^https?:\/\//.test(l.url)
 async function loadJobs() {
   try { state.jobs = await (await fetch('/api/jobs')).json(); } catch { return; }
   renderJobsEntry();
+  renderSessions();
   if (state.jobView === 'list') renderJobList();
   else if (state.jobView) renderJobView();
 }
@@ -2985,6 +2986,7 @@ async function loadPrs(force = false, filter = 'open') {
   } catch { ok = false; prFailed.add(filter); }
   prLoading.delete(filter);
   renderPrsEntry();
+  if (filter === 'open') renderSessions();
   if (state.prView && prFilter === filter) renderPrList();
   return ok;
 }
@@ -3304,8 +3306,9 @@ async function openJobDialog(id = null) {
   $('#jd-cwd').value = cwd && !known ? cwd : '';
   $('#jd-cwd').classList.toggle('hidden', !(cwd && !known) && folders.length > 0);
   if (!folders.length) $('#jd-folder').value = '__other';
-  $('#jd-workspace').innerHTML = `<option value="">Its folder's</option>` + (state.workspaces ?? []).map((w) => `<option value="${esc(w.name)}">${esc(w.name)}</option>`).join('');
-  $('#jd-workspace').value = workspaceNamed(j?.workspace) ? j.workspace : '';
+  $('#jd-workspace').innerHTML = `<option value="">Its folder's</option>` + (state.workspaces ?? []).map((w) => `<option value="${esc(w.name)}">${esc(w.name)}</option>`).join('')
+    + (j?.workspace && !workspaceNamed(j.workspace) ? `<option value="${esc(j.workspace)}">${esc(j.workspace)} (missing)</option>` : '');
+  $('#jd-workspace').value = j?.workspace ?? '';
   $('#jd-args').value = (j?.args ?? []).join(' ');
   const s = j?.schedule ?? { kind: 'hours', every: 2, from: '09:00', to: '19:00', days: [1, 2, 3, 4, 5] };
   jd.kind = s.kind; jd.days = new Set(s.days ?? [1, 2, 3, 4, 5, 6, 7]);
