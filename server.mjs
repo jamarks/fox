@@ -36,6 +36,7 @@ import { ensureFoxNotes, foxNotes } from './notes.mjs';
 import { createModels, launchArgs } from './models.mjs';
 import { createUsage } from './usage.mjs';
 import { turnTimeline } from './timeline.mjs';
+import { familyUsage } from './family-usage.mjs';
 import { createFx } from './harnesses/fx.mjs';
 import { createClaude, claudeBin } from './harnesses/claude.mjs';
 import { toResume, splitOnce, nextWorking, CONTINUE_TEXT } from './restart.mjs';
@@ -493,6 +494,9 @@ async function handlePanelRequest(req, res) {
           child.state = c.phase === 'running' ? 'working' : c.phase === 'idle' ? 'ready' : 'done';
           if (!child.firstPrompt && c.task) child.firstPrompt = c.task;
         }
+      }
+      for (const s of sessions) {
+        if (s.children?.length) s.familyUsage = familyUsage(s, byId);
       }
       return send(res, 200, { sessions, terminals, repos, workspaces: await listWorkspaces() });
     }

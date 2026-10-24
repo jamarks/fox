@@ -1345,6 +1345,17 @@ function timelineSection(t, selectedId) {
 }
 let agentsCollapsed = false;
 try { agentsCollapsed = localStorage.getItem('fox.agentsCollapsed') === '1'; } catch {}
+let familyUsageOpen = false;
+function familyUsageLine(parent) {
+  const usage = parent.familyUsage;
+  if (!usage?.rows?.length) return '';
+  const total = usage.tokens;
+  const stale = usage.rows.some((r) => r.pending);
+  const hint = [usage.missing ? `${usage.missing} without snapshot` : '', stale ? 'saved data may lag live work' : ''].filter(Boolean).join(' · ');
+  return `<details class="family-usage" ${familyUsageOpen ? 'open' : ''}><summary data-toggle-family-usage>local ${usage.missing ? 'partial ' : ''}estimate · ${fmtTokens(total)} tokens${hint ? ` <span class="family-usage-hint">· ${hint}</span>` : ''}</summary>
+    <div class="family-usage-rows">${usage.rows.map((r) => `<div class="family-usage-row"><span title="${esc(r.model ?? 'unknown model')}">${r.id === parent.id ? 'parent' : `child ${parent.children.findIndex((c) => c.id === r.id) + 1}`} · ${esc(r.model ? modelShort(r.model) : 'unknown model')}</span><span>${fmtTokens(r.tokens)} · ${total ? Math.round(r.tokens / total * 100) + '%' : '—'}${r.pending ? ' · saved' : ''}</span></div>`).join('')}
+    <div class="family-usage-note">Saved session snapshots · input + output + cache read${usage.missing ? ' · shares of saved total' : ''}. Not provider spend or remaining quota.</div></div></details>`;
+}
 let lastChildShown = null;
 const fmtDur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + 's' : s < 3600 ? Math.round(s / 60) + 'm' : Math.floor(s / 3600) + 'h ' + Math.round((s % 3600) / 60) + 'm'; };
 const vendorDot = (model) => { const v = vendorOf(model); return `<span class="vdot" style="background:${v?.[2] ?? 'var(--muted)'}" title="${esc(v?.[3] ?? 'unknown vendor')}"></span>`; };
@@ -1406,7 +1417,7 @@ function agentsBoard(parent, { selectedId = null } = {}) {
   const n = parent.children.length;
   const title = `${n} subagent${n === 1 ? '' : 's'}${groups.size > 1 && groups.size < n ? ` · ${groups.size} tasks` : ''}`;
   const head = `<a href="#" class="section-title fold ${agentsCollapsed ? 'closed' : ''}" data-toggle-agents>${title}</a>`;
-  return agentsCollapsed ? head : `${head}<div class="board">${html.join('')}</div>`;
+  return agentsCollapsed ? head : `${head}<div class="board">${html.join('')}</div>${familyUsageLine(parent)}`;
 }
 
 const convoShown = new Set();
@@ -1618,6 +1629,7 @@ $('#transcript').addEventListener('click', (e) => {
   }
   const viewer = e.target.closest('[data-view-file]');
   if (viewer) { e.preventDefault(); return openView(state.selected, viewer.dataset.viewFile, viewer.dataset.viewMode || 'page'); }
+  if (e.target.closest('[data-toggle-family-usage]')) { familyUsageOpen = !familyUsageOpen; return; }
   if (e.target.closest('[data-toggle-agents]')) {
     e.preventDefault(); agentsCollapsed = !agentsCollapsed;
     try { localStorage.setItem('fox.agentsCollapsed', agentsCollapsed ? '1' : '0'); } catch {}

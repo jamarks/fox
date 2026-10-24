@@ -42,7 +42,7 @@ const resultText = (c) => typeof c === 'string' ? c : Array.isArray(c) ? c.map((
 export function parseTranscript(raw, { sidechain = false } = {}) {
   const events = [], calls = new Map(), seenUsage = new Set();
   const info = { title: null, firstPrompt: '', turns: 0, model: null, cwd: null, firstAt: null, lastAt: null, latestReply: null, lastKind: null,
-    usage: { input: 0, output: 0, cacheRead: 0, cost: 0, wallMs: 0 }, subagentCalls: [], handback: null };
+    usage: { input: 0, output: 0, cacheRead: 0, cost: 0, wallMs: 0 }, usageRecorded: false, subagentCalls: [], handback: null };
   let open = null, messageIndex = 0, completed = 0, answer = null; // open: the assistant message that may end the turn
   // A turn ends with the message that stopped it, stamped with that message's time.
   const endTurn = () => {
@@ -98,6 +98,7 @@ export function parseTranscript(raw, { sidechain = false } = {}) {
     if (m.model && m.model !== '<synthetic>') info.model = m.model;
     if (m.usage && m.id && !seenUsage.has(m.id)) {
       seenUsage.add(m.id);
+      info.usageRecorded ||= [m.usage.input_tokens, m.usage.cache_creation_input_tokens, m.usage.output_tokens, m.usage.cache_read_input_tokens].some(Number.isFinite);
       info.usage.input += (m.usage.input_tokens ?? 0) + (m.usage.cache_creation_input_tokens ?? 0);
       info.usage.output += m.usage.output_tokens ?? 0;
       info.usage.cacheRead += m.usage.cache_read_input_tokens ?? 0;
@@ -243,7 +244,7 @@ export function createClaude({ bin, stateDir, projectsDir = join(homedir(), '.cl
     subagentChild: false,
     live: false,
     turns: t?.info.turns ?? 0,
-    usage: t?.info.usage ?? { input: 0, output: 0, cacheRead: 0, cost: 0, wallMs: 0 },
+    usage: { ...(t?.info.usage ?? { input: 0, output: 0, cacheRead: 0, cost: 0, wallMs: 0 }), savedAt: t?.info.usageRecorded ? t.mtime : null },
     ...extra,
   });
 
