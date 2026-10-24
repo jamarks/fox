@@ -2,6 +2,12 @@
 
 What changed in fox, newest first: one line per merged pull request. Written by a job from the pull requests; edit the PR title to change a line.
 
+## 2026-10-24
+
+- Expose new fx settings as opt-in controls ([#49](https://github.com/jamarks/fox/pull/49))
+- Keep an editable next-message draft per session ([#47](https://github.com/jamarks/fox/pull/47))
+- Show token footprint for a parent and its subagents ([#45](https://github.com/jamarks/fox/pull/45))
+
 ## 2026-10-23
 
 - Expose new fx settings as opt-in controls ([#43](https://github.com/jamarks/fox/pull/43))
