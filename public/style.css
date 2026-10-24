@@ -279,7 +279,9 @@ aside, section, .tab, .session, button, input, #summary, #transcript-meta { tran
 #sky { display: none; position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
 body.night #sky { display: block; }
 body.night { background: #070912; }
-body.night aside, body.night section, body.night main { position: relative; z-index: 1; }
+/* Only the outer panes sit above the sky. Matching nested sections overrides page-view's absolute
+   positioning, lets it grow past the viewport, and leaves its content clipped instead of scrollable. */
+body.night > :is(aside, section, main) { position: relative; z-index: 1; }
 body.night #center { background: transparent; }
 /* Pages in the center cover the terminal: in sky its own background is see-through, so they get the night panel with a blur instead, and the terminal never shows through. */
 body.night .page-view { background: rgba(9, 11, 22, .93); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }

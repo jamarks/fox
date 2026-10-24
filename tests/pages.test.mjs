@@ -27,6 +27,11 @@ test('page layout lives on the class, not on each page', () => {
   }
 });
 
+test('sky stacks only the outer panes, leaving nested pages positioned and scrollable', () => {
+  assert.match(css, /body\.night > :is\(aside, section, main\) \{ position: relative; z-index: 1; \}/);
+  assert.doesNotMatch(css, /body\.night (?:aside|section|main)[^{]*\{[^}]*position: relative/);
+});
+
 test('every page can be closed by closePages, so going to a session never leaves one open', () => {
   const closers = app.slice(app.indexOf('const PAGE_CLOSERS = {'), app.indexOf('function closePages('));
   for (const [, id] of html.matchAll(/<section id="([a-z]+-view)"/g)) assert.match(closers, new RegExp(`'${id}':`), `${id} is missing from PAGE_CLOSERS`);
