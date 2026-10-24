@@ -16,7 +16,7 @@ test('right column steps aside only when neither a tab nor a session is open', (
   const ctx = {
     state, document: { body: { classList: { toggle(name, on) { if (on) classes.add(name); else classes.delete(name); } } } },
     $: (selector) => elements[selector], updateDictationAvailability() {}, updatePageTitle() {}, markReplyRead() {},
-    renderSessions() {}, loadTranscript() {}, syncUrl() {},
+    renderSessions() {}, renderNextDraft() {}, loadTranscript() {}, syncUrl() {},
   };
   vm.runInNewContext(selection + render, ctx);
   vm.runInNewContext('renderTabs()', ctx);

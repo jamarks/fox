@@ -6,6 +6,55 @@ import { mkdtemp, mkdir, writeFile, readFile, chmod, rm } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
+import vm from 'node:vm';
+
+// The desktop draft is local to the browser; exercise its real handlers without attaching to tmux.
+test('next-message drafts stay scoped, survive selection/reconnect, and insert only on an open ready parent terminal', async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const snippet = source.slice(source.indexOf('const DRAFT_LIMIT = 4000;'), source.indexOf('// Paste on a phone (see #pastesheet).'));
+  const stored = new Map(), handlers = {}, elements = {};
+  let storageFails = false;
+  const $ = (key) => elements[key] ??= {
+    value: '', textContent: '', disabled: false, open: false,
+    classList: { hidden: false, toggle(_key, value) { this.hidden = value; }, contains() { return this.hidden; } },
+    addEventListener(event, cb) { handlers[`${key}:${event}`] = cb; },
+  };
+  const parent = { id: 'parent', state: 'working', terminal: 'term' };
+  const other = { id: 'other', state: 'ready', terminal: 'other-term' };
+  const child = { id: 'child', parentId: 'parent', state: 'ready' };
+  const sent = [], ws = { readyState: 1, send: (data) => sent.push(JSON.parse(data)) };
+  const tab = { name: 'term', ready: false, ws, term: { focus() {}, paste(text) { if (ws.readyState === 1) { sent.push({ type: 'input', data: text }); tab.draftSent = true; } } } };
+  const state = { selected: 'parent', sessions: [parent, other, child], terminals: [{ name: 'term', resume: 'parent' }, { name: 'other-term', resume: 'other' }], tabs: new Map([['term', tab]]), activeTab: 'term' };
+  const ctx = { $, state, WebSocket: { OPEN: 1 }, localStorage: { getItem: (k) => stored.get(k), setItem: (k, v) => { if (storageFails) throw Error('storage denied'); stored.set(k, v); }, removeItem: (k) => stored.delete(k) }, sessionById: (id) => state.sessions.find((s) => s.id === id) };
+  vm.createContext(ctx); vm.runInContext(snippet, ctx);
+  const render = () => vm.runInContext('renderNextDraft()', ctx);
+  const edit = (text) => { $('#next-draft-text').value = text; handlers['#next-draft-text:input'](); };
+  const insert = () => handlers['#next-draft-insert:click']();
+  render(); edit('first\nsecond\x1b');
+  assert.equal(stored.get('fox.nextDraft.parent'), 'first\nsecond\x1b');
+  assert.equal($('#next-draft-insert').disabled, true, 'working cannot insert');
+  state.selected = 'other'; render(); edit('other draft');
+  state.selected = 'child'; render(); assert.equal($('#next-draft').classList.hidden, true); insert();
+  state.selected = 'parent'; parent.state = 'ready'; render();
+  assert.equal($('#next-draft-text').value, 'first\nsecond\x1b');
+  assert.equal($('#next-draft-insert').disabled, true, 'open socket without terminal output is not ready');
+  tab.ready = true; render();
+  assert.equal($('#next-draft-insert').disabled, false);
+  ws.readyState = 0; tab.ready = false; render(); insert(); assert.equal(sent.length, 0); assert.ok(stored.has('fox.nextDraft.parent'));
+  ws.readyState = 1; render(); assert.equal($('#next-draft-insert').disabled, true, 'reconnect waits for terminal output');
+  tab.ready = true; state.activeTab = 'other-term'; render(); insert(); assert.equal(sent.length, 0);
+  state.activeTab = 'term'; render(); tab.term.paste = () => {}; insert(); assert.ok(stored.has('fox.nextDraft.parent'), 'no accepted input keeps draft');
+  tab.term.paste = (text) => { sent.push({ type: 'input', data: text }); tab.draftSent = true; };
+  insert(); assert.equal(sent.length, 1);
+  assert.equal(sent[0].data, 'first second ');
+  assert.equal(stored.has('fox.nextDraft.parent'), false);
+  assert.equal(stored.get('fox.nextDraft.other'), 'other draft');
+  edit('a'.repeat(5000)); assert.equal(stored.get('fox.nextDraft.parent').length, 4000);
+  storageFails = true; edit('unsaved');
+  assert.equal($('#next-draft-mark').textContent, '');
+  assert.equal($('#next-draft-hint').textContent, 'Could not save in this browser');
+  assert.equal($('#next-draft-text').value, 'unsaved');
+});
 
 const freePort = () => new Promise((resolve, reject) => {
   const server = createServer(); server.once('error', reject);
