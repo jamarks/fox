@@ -233,18 +233,15 @@ function wsRepoLine(r, wsId = null) {
   return `<div class="ws-line" title="${esc(r.owner)}/${esc(r.name)}"><span>${esc(r.dir)}</span>${branch}${stateHtml}</div>`;
 }
 
-// In the sidebar only the repos that need you show up (uncommitted, behind or ahead, cloning, failed);
-// when all are clean, one quiet line says how many there are. The edit dialog lists them all.
+// In the sidebar only the repos that need you show up (uncommitted, behind or ahead, cloning, failed, off their
+// default branch); the GitHub mark in the workspace's header shows them all, to change a branch there too.
 const wsShowAll = new Set(); // workspaces whose repo lines are all shown, this page only
 function wsRepoSummary(wsp) {
-  // Repos that need a look show their line; the rest fold into one line that opens them all (to change a branch there too).
   const open = wsShowAll.has(wsp.id);
-  const attention = wsp.repos.filter((r) => open || r.status !== 'ready' || r.changed || r.behind || r.ahead || (r.branch && r.default && r.branch !== r.default));
-  const n = wsp.repos.length;
-  if (!n) return '';
-  const clean = n - attention.length;
-  return `<div class="ws-repos-line">${attention.map((r) => wsRepoLine(r, wsp.id)).join('')}${clean ? `<div class="ws-line"><button type="button" class="ws-more" data-ws-all="${esc(wsp.id)}" title="Show ${esc(wsp.repos.filter((r) => !attention.includes(r)).map((r) => r.dir).join(', '))} and their branches">${attention.length ? `${clean} more` : `${GITHUB_MARK}${n}`}</button></div>` : open ? `<div class="ws-line"><button type="button" class="ws-more" data-ws-all="${esc(wsp.id)}">fewer</button></div>` : ''}</div>`;
+  const shown = wsp.repos.filter((r) => open || r.status !== 'ready' || r.changed || r.behind || r.ahead || (r.branch && r.default && r.branch !== r.default));
+  return shown.length ? `<div class="ws-repos-line">${shown.map((r) => wsRepoLine(r, wsp.id)).join('')}</div>` : '';
 }
+const wsReposButton = (wsp) => wsp.repos.length ? `<button class="icon ws-repos-toggle${wsShowAll.has(wsp.id) ? ' on' : ''}" data-ws-all="${esc(wsp.id)}" title="${wsShowAll.has(wsp.id) ? 'Hide' : 'Show'} its ${wsp.repos.length} repo${wsp.repos.length === 1 ? '' : 's'} and their branches">${GITHUB_MARK}</button>` : '';
 
 // Jobs use their named workspace when scripts live elsewhere (e.g. a jobs repo); otherwise their folder's.
 // Pull requests belong to the workspace containing their repo.
@@ -253,12 +250,21 @@ const jobWorkspace = (j) => j.workspace ? workspaceNamed(j.workspace) : workspac
 const prWorkspace = (p) => (state.workspaces ?? []).find((w) => w.repos.some((r) => `${r.owner}/${r.name}`.toLowerCase() === String(p.repo).toLowerCase()));
 // Jobs or Pull requests narrowed to one workspace (its name), from the counts under it in the sidebar.
 const wsFilter = () => workspaceNamed(state.wsFilter);
+// Only what needs you: PRs to merge or to look at, jobs that failed or wait for your OK. Nothing pending, no line;
+// the totals live in Jobs and Pull requests. A chip opens that page narrowed to this workspace.
 function wsWorkLine(wsp) {
-  const jobs = (state.jobs ?? []).filter((j) => jobWorkspace(j) === wsp).length;
-  const prs = (state.prs?.prs ?? []).filter((p) => prWorkspace(p) === wsp).length;
-  if (!jobs && !prs) return '';
-  const link = (n, word, attr, title) => n ? `<button type="button" class="ws-more" ${attr}="${esc(wsp.name)}" title="${title}">${n} ${word}${n === 1 ? '' : 's'}</button>` : '';
-  return `<div class="ws-repos-line ws-work"><div class="ws-line">${link(jobs, 'job', 'data-ws-jobs', `This workspace's jobs`)}${link(prs, 'open PR', 'data-ws-prs', `Open pull requests of this workspace's repos`)}</div></div>`;
+  const jobs = (state.jobs ?? []).filter((j) => jobWorkspace(j) === wsp), prs = (state.prs?.prs ?? []).filter((p) => prWorkspace(p) === wsp);
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const chip = (n, text, kind, attr, title) => n ? `<button type="button" class="ws-chip ${kind}" ${attr}="${esc(wsp.name)}" title="${title}">${text}</button>` : '';
+  const ready = prs.filter((p) => p.ready).length;
+  const needYou = prs.filter((p) => !p.ready && (p.checks === 'failing' || p.review?.verdict === 'needs-you')).length;
+  const failed = jobs.filter((j) => BAD.includes(jobState(j))).length;
+  const approve = jobs.filter((j) => j.pendingApproval).length;
+  const html = chip(ready, plural(ready, 'PR ready to merge', 'PRs ready to merge'), 'ok', 'data-ws-prs', 'Checks pass and the review is good')
+    + chip(needYou, plural(needYou, 'PR needs you', 'PRs need you'), 'warn', 'data-ws-prs', 'Failing checks, or the review asks for you')
+    + chip(failed, plural(failed, 'job failed', 'jobs failed'), 'warn', 'data-ws-jobs', 'Its last run did not go well')
+    + chip(approve, plural(approve, 'job to approve', 'jobs to approve'), 'warn', 'data-ws-jobs', 'Added from a terminal; it waits for your OK before it runs');
+  return html ? `<div class="ws-work">${html}</div>` : '';
 }
 
 function renderSessions() {
@@ -290,7 +296,7 @@ function renderSessions() {
     const wsp = (state.workspaces ?? []).find((w) => w.dir === ws);
     if (wsp) {
       g.classList.add('workspace');
-      g.innerHTML = `<h3 draggable="true" title="Drag to reorder"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(groupName(wsp.name))}</span><span class="gcount" title="${wsp.repos.length} repo${wsp.repos.length === 1 ? '' : 's'}">${list.length}</span><button class="icon" data-edit-ws="${esc(wsp.id)}" title="Edit workspace">${ICON.rename}</button><button class="icon" data-new="${esc(ws)}" title="New session in this workspace">+</button></h3>${isCollapsed ? '' : wsRepoSummary(wsp) + wsWorkLine(wsp)}`;
+      g.innerHTML = `<h3 draggable="true" title="Drag to reorder"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(groupName(wsp.name))}</span><span class="gcount" title="${list.length} session${list.length === 1 ? '' : 's'}">${list.length}</span>${wsReposButton(wsp)}<button class="icon" data-edit-ws="${esc(wsp.id)}" title="Edit workspace">${ICON.rename}</button><button class="icon" data-new="${esc(ws)}" title="New session in this workspace">+</button></h3>${isCollapsed ? '' : wsRepoSummary(wsp) + wsWorkLine(wsp)}`;
       if (!isCollapsed) list.forEach((s, i) => g.appendChild(sessionCard(s, i + 1)));
       root.appendChild(g);
       continue;
