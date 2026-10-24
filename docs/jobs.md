@@ -5,6 +5,7 @@ A job is a script fox runs on a schedule. fox shows each run (status, a one-line
 ## The contract
 
 - **Where it lives.** A script inside a folder (usually a private repo of your own, for example `jobs/report.py`). fox runs it from that folder. Before each run fox fast-forwards the folder if it is a clean git checkout on its default branch, so a script you pushed from another copy is the one that runs.
+- **Which workspace it shows under.** The one its folder is in. When the scripts live in their own repo but work on another workspace's repos (a jobs repo that opens PRs on fox), name it: `fox-job add … --workspace fox`, `fox-job workspace <name> fox`, or "Shows under workspace" in the job's dialog. The sidebar counts a workspace's jobs and open PRs under it.
 - **How it starts.** By extension: `.py` with `python3`, `.sh` with `bash`, `.mjs`/`.js` with `node`; anything else is run as an executable. Arguments come from the job definition, never through a shell string.
 - **What it tells fox.** Lines on its output:
   - `FOX_SUMMARY: <one line>`: what this run did. Shown in the list and on the run.

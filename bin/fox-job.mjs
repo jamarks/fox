@@ -23,7 +23,8 @@ const USAGE = `fox-job: scripts on a schedule, shown in fox
   fox-job add <name> --script <path> [--cwd <dir>]
               (--every <hours> --from HH:MM --to HH:MM | --daily HH:MM | --once YYYY-MM-DD HH:MM)
               [--days mon-fri|sat,sun|mon,thu|all] [--tz Area/City] [--timeout <minutes>] [--model <id>] [--effort low|medium|high] [--paused]
-              [-- <script arguments>]
+              [--workspace <name>] [-- <script arguments>]
+  fox-job workspace <name> [<workspace>]   the workspace it works for (none: its folder's)
   fox-job run <name>         run now
   fox-job pause <name> | resume <name> | remove <name>
   fox-job runs <name>        recent runs and their summaries
@@ -64,7 +65,7 @@ export function parseAdd(argv, { cwd = process.cwd(), tz = defaultTz() } = {}) {
   return {
     name, script, cwd: dir, args, schedule,
     tz: one('--tz') ?? tz, timeoutMin: one('--timeout') ? Number(one('--timeout')) : undefined,
-    ...(one('--model') ? { model: one('--model') } : {}), ...(one('--effort') ? { effort: one('--effort') } : {}), enabled: !opts.includes('--paused'),
+    ...(one('--model') ? { model: one('--model') } : {}), ...(one('--workspace') ? { workspace: one('--workspace') } : {}), ...(one('--effort') ? { effort: one('--effort') } : {}), enabled: !opts.includes('--paused'),
   };
 }
 
@@ -94,6 +95,7 @@ async function main(argv) {
   const job = await byName(rest[0]);
   if (cmd === 'run') { await store.trigger(job.id, { from: 'terminal' }); return console.log(`${job.name} will start within a few seconds (after any job already running).`); }
   if (cmd === 'pause' || cmd === 'resume') { await store.update(job.id, { enabled: cmd === 'resume' }, { from: 'terminal' }); return console.log(`${job.name} ${cmd === 'pause' ? 'paused' : 'resumed'}.`); }
+  if (cmd === 'workspace') { await store.update(job.id, { workspace: rest[1] ?? '' }, { from: 'terminal' }); return console.log(rest[1] ? `${job.name} works for ${rest[1]}.` : `${job.name} belongs to its folder's workspace.`); }
   if (cmd === 'remove') { await store.remove(job.id); return console.log(`Removed ${job.name} and its run history; the script stays.`); }
   if (cmd === 'runs') {
     const runs = await store.runs(job.id, 20);

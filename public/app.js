@@ -246,6 +246,21 @@ function wsRepoSummary(wsp) {
   return `<div class="ws-repos-line">${attention.map((r) => wsRepoLine(r, wsp.id)).join('')}${clean ? `<div class="ws-line"><button type="button" class="ws-more" data-ws-all="${esc(wsp.id)}" title="Show ${esc(wsp.repos.filter((r) => !attention.includes(r)).map((r) => r.dir).join(', '))} and their branches">${attention.length ? `${clean} more` : `${GITHUB_MARK}${n}`}</button></div>` : open ? `<div class="ws-line"><button type="button" class="ws-more" data-ws-all="${esc(wsp.id)}">fewer</button></div>` : ''}</div>`;
 }
 
+// Jobs and pull requests belong to a workspace too: a job by the workspace it names (its script can live in another
+// folder, like a jobs repo that changes fox) or else its folder's, a PR by its repo. Nothing to assign by hand.
+const workspaceNamed = (name) => (state.workspaces ?? []).find((w) => w.name === name);
+const jobWorkspace = (j) => workspaceNamed(j.workspace) ?? workspaceFor(j.cwd);
+const prWorkspace = (p) => (state.workspaces ?? []).find((w) => w.repos.some((r) => `${r.owner}/${r.name}`.toLowerCase() === String(p.repo).toLowerCase()));
+// Jobs or Pull requests narrowed to one workspace (its name), from the counts under it in the sidebar.
+const wsFilter = () => workspaceNamed(state.wsFilter);
+function wsWorkLine(wsp) {
+  const jobs = (state.jobs ?? []).filter((j) => jobWorkspace(j) === wsp).length;
+  const prs = (state.prs?.prs ?? []).filter((p) => prWorkspace(p) === wsp).length;
+  if (!jobs && !prs) return '';
+  const link = (n, word, attr, title) => n ? `<button type="button" class="ws-more" ${attr}="${esc(wsp.name)}" title="${title}">${n} ${word}${n === 1 ? '' : 's'}</button>` : '';
+  return `<div class="ws-repos-line ws-work"><div class="ws-line">${link(jobs, 'job', 'data-ws-jobs', `This workspace's jobs`)}${link(prs, 'open PR', 'data-ws-prs', `Open pull requests of this workspace's repos`)}</div></div>`;
+}
+
 function renderSessions() {
   if (state.renaming) return; // replacing the sidebar would blur the input and save prematurely
   const active = state.sessions.filter((s) => !s.archived && !s.parentId);
@@ -275,7 +290,7 @@ function renderSessions() {
     const wsp = (state.workspaces ?? []).find((w) => w.dir === ws);
     if (wsp) {
       g.classList.add('workspace');
-      g.innerHTML = `<h3 draggable="true" title="Drag to reorder"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(groupName(wsp.name))}</span><span class="gcount" title="${wsp.repos.length} repo${wsp.repos.length === 1 ? '' : 's'}">${list.length}</span><button class="icon" data-edit-ws="${esc(wsp.id)}" title="Edit workspace">${ICON.rename}</button><button class="icon" data-new="${esc(ws)}" title="New session in this workspace">+</button></h3>${isCollapsed ? '' : wsRepoSummary(wsp)}`;
+      g.innerHTML = `<h3 draggable="true" title="Drag to reorder"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(groupName(wsp.name))}</span><span class="gcount" title="${wsp.repos.length} repo${wsp.repos.length === 1 ? '' : 's'}">${list.length}</span><button class="icon" data-edit-ws="${esc(wsp.id)}" title="Edit workspace">${ICON.rename}</button><button class="icon" data-new="${esc(ws)}" title="New session in this workspace">+</button></h3>${isCollapsed ? '' : wsRepoSummary(wsp) + wsWorkLine(wsp)}`;
       if (!isCollapsed) list.forEach((s, i) => g.appendChild(sessionCard(s, i + 1)));
       root.appendChild(g);
       continue;
@@ -374,6 +389,8 @@ $('#session-groups').addEventListener('click', async (e) => {
   if (d.new) return newSessionSheet(d.new);
   if (d.editWs) return openWorkspaceDialog(d.editWs);
   if (d.branchWs) return openBranchMenu(btn, d.branchWs, d.branchDir);
+  if (d.wsJobs) { state.wsFilter = d.wsJobs; return openJobs(); }
+  if (d.wsPrs) { state.wsFilter = d.wsPrs; return openPrs(); }
   if (d.wsAll) { wsShowAll.has(d.wsAll) ? wsShowAll.delete(d.wsAll) : wsShowAll.add(d.wsAll); return renderSessions(); }
   if (d.pin) return setPinned(d.pin, !state.pinned.has(d.pin));
   if (d.rename) return renameInline(d.rename);
@@ -1207,6 +1224,7 @@ function syncUrl(push = false) {
   else if (appsOpen()) q.set('view', 'apps');
   else if (state.jobView === 'list') q.set('view', 'jobs');
   else if (state.jobView) { q.set('job', state.jobView); if (state.openRun) q.set('run', state.openRun); }
+  if ((state.prView || state.jobView === 'list') && state.wsFilter) q.set('ws', state.wsFilter);
   if (state.jobDialog) q.set('edit', state.jobDialog);
   if (t?.resume) q.set('open', t.resume);
   if (sel && sel !== t?.resume) q.set('session', sel);
@@ -1220,6 +1238,7 @@ async function applyUrl() {
   try {
     const q = new URLSearchParams(location.search);
     const view = q.get('view'), job = q.get('job'), edit = q.get('edit');
+    state.wsFilter = q.get('ws');
     if (view === 'settings') openSettings(); else closeSettings();
     if (view === 'prs') { state.prOpen = q.get('pr'); openPrs(); } else if (state.prView) closePrs();
     if (view === 'skills') openSkills(); else closeSkills();
@@ -2847,9 +2866,18 @@ function renderJobsEntry() {
     ? `<span class="jdot ${worst}"></span><span class="jtitle">Jobs</span><span>${jobs.length}</span><span class="jnext">${worst === 'running' ? 'running' : next ? 'next ' + esc(whenText(next)) : ''}</span>`
     : '<span class="jdot none"></span><span class="jtitle">Jobs</span><span class="jnext">scripts on a schedule</span>';
 }
+function renderWsChip(el) {
+  const w = wsFilter();
+  el.classList.toggle('hidden', !w);
+  el.textContent = w ? `${w.name} ×` : '';
+}
+function clearWsFilter() { state.wsFilter = null; if (state.prView) renderPrList(); if (state.jobView === 'list') renderJobList(); syncUrl(); }
 function renderJobList() {
-  const box = $('#job-list');
-  const html = !state.jobs.length ? '<div class="jobs-none">No jobs yet. A job is a script on a schedule: New job to make one, or ask fx.</div>' : state.jobs.map((j) => {
+  const box = $('#job-list'), w = wsFilter();
+  renderWsChip($('#job-ws'));
+  const jobs = w ? state.jobs.filter((j) => jobWorkspace(j) === w) : state.jobs;
+  const html = !state.jobs.length ? '<div class="jobs-none">No jobs yet. A job is a script on a schedule: New job to make one, or ask fx.</div>'
+    : !jobs.length ? `<div class="jobs-none">No jobs for ${esc(w.name)}.</div>` : jobs.map((j) => {
     const st = jobState(j), r = j.lastRun;
     const right = st === 'running' ? `<span class="jnext running">running ${runDur(r)}</span>` : !j.enabled ? `<span class="jnext${j.pendingApproval ? ' approve' : ''}">${pausedText(j)}</span>` : `<span class="jnext">${esc(whenText(j.nextRun))}</span>`;
     // Last run: when, and whether it went well. The summary and its links live in the job's page.
@@ -2859,7 +2887,8 @@ function renderJobList() {
   if (html !== jobListHtml) { box.innerHTML = html; jobListHtml = html; } // polled: only when something changed
 }
 let jobListHtml = '';
-$('#jobs-entry').addEventListener('click', () => (state.jobView ? closeJob() : openJobs()));
+$('#jobs-entry').addEventListener('click', () => { if (state.jobView) return closeJob(); state.wsFilter = null; openJobs(); });
+$('#job-ws').addEventListener('click', clearWsFilter);
 $('#job-list').addEventListener('click', (e) => { if (e.target.closest('[data-link]')) return; const row = e.target.closest('[data-job]'); if (row) openJob(row.dataset.job); });
 function showJobView(mode) {
   closePages({ except: 'job-view' });
@@ -2981,10 +3010,12 @@ function renderPrList() {
   const data = (prFilter === 'open' ? state.prs : state[`${prFilter}Prs`]) ?? { prs: [], errors: [] }, box = $('#pr-list');
   for (const btn of $('#pr-filters').children) btn.classList.toggle('on', btn.dataset.prFilter === prFilter);
   $('#pr-more').classList.toggle('hidden', prFilter === 'open' || !data.hasMore);
-  const repos = [...new Set(data.prs.map((p) => p.repo))];
+  const w = wsFilter(), list = w ? data.prs.filter((p) => prWorkspace(p) === w) : data.prs;
+  renderWsChip($('#pr-ws'));
+  const repos = [...new Set(list.map((p) => p.repo))];
   $('#pr-repos').textContent = repos.length ? repos.join(' · ') : '';
   $('#pr-repos').classList.toggle('hidden', !repos.length);
-  const rows = data.prs.map((p) => {
+  const rows = list.map((p) => {
     const key = prKey(p), open = state.prOpen === key;
     const status = String(p.state ?? (prFilter === 'merged' ? 'MERGED' : 'OPEN')).toLowerCase();
     const done = status !== 'open';
@@ -3011,7 +3042,7 @@ function renderPrList() {
       + `${done ? '' : '<input class="pr-reason" placeholder="Why close it? Optional, it goes on the PR" maxlength="1000" />'}</div></div>`;
   });
   const errors = (data.errors ?? []).map((e) => `<div>${esc(e.repo)}: ${esc(e.error)}</div>`).join('');
-  const empty = prLoading.has(prFilter) ? 'Loading pull requests…' : prFailed.has(prFilter) ? 'Could not load pull requests. Refresh to try again.' : `No ${prFilter} pull requests in your workspaces' repos.`;
+  const empty = prLoading.has(prFilter) ? 'Loading pull requests…' : prFailed.has(prFilter) ? 'Could not load pull requests. Refresh to try again.' : `No ${prFilter} pull requests in ${w ? `${esc(w.name)}'s` : `your workspaces'`} repos.`;
   const html = (rows.join('') || `<div class="jobs-none" role="status">${empty}</div>`) + (errors ? `<div class="pr-errors">${errors}</div>` : '');
   // Polled: rebuild only when something changed, and never under someone typing why they close a PR.
   const typing = document.activeElement?.classList.contains('pr-reason') && box.contains(document.activeElement);
@@ -3039,7 +3070,8 @@ function closePrs({ sync = true } = {}) {
   renderPrsEntry(); requestAnimationFrame(fitActive);
   if (sync) syncUrl(true);
 }
-$('#prs-entry').addEventListener('click', () => (state.prView ? closePrs() : openPrs()));
+$('#prs-entry').addEventListener('click', () => { if (state.prView) return closePrs(); state.wsFilter = null; openPrs(); });
+$('#pr-ws').addEventListener('click', clearWsFilter);
 $('#pr-close').addEventListener('click', () => closePrs());
 $('#pr-refresh').addEventListener('click', () => { prFiles.clear(); loadPrs(true, prFilter); });
 $('#pr-filters').addEventListener('click', (e) => {
@@ -3272,6 +3304,8 @@ async function openJobDialog(id = null) {
   $('#jd-cwd').value = cwd && !known ? cwd : '';
   $('#jd-cwd').classList.toggle('hidden', !(cwd && !known) && folders.length > 0);
   if (!folders.length) $('#jd-folder').value = '__other';
+  $('#jd-workspace').innerHTML = `<option value="">Its folder's</option>` + (state.workspaces ?? []).map((w) => `<option value="${esc(w.name)}">${esc(w.name)}</option>`).join('');
+  $('#jd-workspace').value = workspaceNamed(j?.workspace) ? j.workspace : '';
   $('#jd-args').value = (j?.args ?? []).join(' ');
   const s = j?.schedule ?? { kind: 'hours', every: 2, from: '09:00', to: '19:00', days: [1, 2, 3, 4, 5] };
   jd.kind = s.kind; jd.days = new Set(s.days ?? [1, 2, 3, 4, 5, 6, 7]);
@@ -3302,7 +3336,7 @@ $('#jobform').addEventListener('submit', async (e) => {
   e.preventDefault();
   const body = { name: $('#jd-name').value.trim(), cwd: jdCwd(), script: $('#jd-script').value, args: $('#jd-args').value.trim() ? $('#jd-args').value.trim().split(/\s+/) : [],
     schedule: jdSchedule(), tz: $('#jd-tz').value.trim(), timeoutMin: Number($('#jd-timeout').value),
-    model: $('#jd-model').value, effort: $('#jd-effort').value };
+    model: $('#jd-model').value, effort: $('#jd-effort').value, workspace: $('#jd-workspace').value };
   const r = await fetch(jd.id ? `/api/jobs/${jd.id}` : '/api/jobs', { method: jd.id ? 'PATCH' : 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { $('#jd-error').textContent = j.error || 'Could not save the job.'; return; }
