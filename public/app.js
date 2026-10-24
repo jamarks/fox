@@ -234,14 +234,14 @@ function wsRepoLine(r, wsId = null) {
 }
 
 // In the sidebar only the repos that need you show up (uncommitted, behind or ahead, cloning, failed, off their
-// default branch); the GitHub mark in the workspace's header shows them all, to change a branch there too.
+// default branch); the repos chip under the workspace's name shows them all, to change a branch there too.
 const wsShowAll = new Set(); // workspaces whose repo lines are all shown, this page only
 function wsRepoSummary(wsp) {
   const open = wsShowAll.has(wsp.id);
   const shown = wsp.repos.filter((r) => open || r.status !== 'ready' || r.changed || r.behind || r.ahead || (r.branch && r.default && r.branch !== r.default));
   return shown.length ? `<div class="ws-repos-line">${shown.map((r) => wsRepoLine(r, wsp.id)).join('')}</div>` : '';
 }
-const wsReposButton = (wsp) => wsp.repos.length ? `<button class="icon ws-repos-toggle${wsShowAll.has(wsp.id) ? ' on' : ''}" data-ws-all="${esc(wsp.id)}" title="${wsShowAll.has(wsp.id) ? 'Hide' : 'Show'} its ${wsp.repos.length} repo${wsp.repos.length === 1 ? '' : 's'} and their branches">${GITHUB_MARK}</button>` : '';
+
 
 // Jobs use their named workspace when scripts live elsewhere (e.g. a jobs repo); otherwise their folder's.
 // Pull requests belong to the workspace containing their repo.
@@ -253,8 +253,17 @@ const wsFilter = () => workspaceNamed(state.wsFilter);
 // Pull request and job marks for the chips below (outline, like the mockup they come from).
 const PR_MARK = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="18" r="2"/><circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="M6 8v8M11 6h5a2 2 0 0 1 2 2v8"/><path d="M14 9l-3-3 3-3"/></svg>';
 const CLOCK_MARK = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>';
-// Only what needs you: PRs to merge or to look at, jobs that failed or wait for your OK. Nothing pending, no line;
-// the totals live in Jobs and Pull requests. A chip opens that page narrowed to this workspace.
+// Under a workspace's name: one quiet line with its repos, jobs and open PRs (a mark and a number each), then, only
+// when something needs you, the notices: PRs to merge or to look at, jobs that failed or wait for your OK.
+// The repos chip shows every repo and its branch; the others open Jobs or Pull requests narrowed to this workspace.
+function wsSummaryLine(wsp) {
+  const jobs = (state.jobs ?? []).filter((j) => jobWorkspace(j) === wsp).length, prs = (state.prs?.prs ?? []).filter((p) => prWorkspace(p) === wsp).length;
+  const n = wsp.repos.length, open = wsShowAll.has(wsp.id), s = (k) => k === 1 ? '' : 's';
+  const html = (n ? `<button type="button" class="ws-chip${open ? ' on' : ''}" data-ws-all="${esc(wsp.id)}" title="${open ? 'Hide' : 'Show'} its ${n} repo${s(n)} and their branches">${GITHUB_MARK}${n}</button>` : '')
+    + (jobs ? `<button type="button" class="ws-chip" data-ws-jobs="${esc(wsp.name)}" title="${jobs} job${s(jobs)}">${CLOCK_MARK}${jobs}</button>` : '')
+    + (prs ? `<button type="button" class="ws-chip" data-ws-prs="${esc(wsp.name)}" title="${prs} open pull request${s(prs)}">${PR_MARK}${prs}</button>` : '');
+  return html ? `<div class="ws-work">${html}</div>` : '';
+}
 function wsWorkLine(wsp) {
   const jobs = (state.jobs ?? []).filter((j) => jobWorkspace(j) === wsp), prs = (state.prs?.prs ?? []).filter((p) => prWorkspace(p) === wsp);
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -299,7 +308,7 @@ function renderSessions() {
     const wsp = (state.workspaces ?? []).find((w) => w.dir === ws);
     if (wsp) {
       g.classList.add('workspace');
-      g.innerHTML = `<h3 draggable="true" title="Drag to reorder"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(groupName(wsp.name))}</span><span class="gcount" title="${list.length} session${list.length === 1 ? '' : 's'}">${list.length}</span>${wsReposButton(wsp)}<button class="icon" data-edit-ws="${esc(wsp.id)}" title="Edit workspace">${ICON.rename}</button><button class="icon" data-new="${esc(ws)}" title="New session in this workspace">+</button></h3>${isCollapsed ? '' : wsRepoSummary(wsp) + wsWorkLine(wsp)}`;
+      g.innerHTML = `<h3 draggable="true" title="Drag to reorder"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(groupName(wsp.name))}</span><span class="gcount" title="${list.length} session${list.length === 1 ? '' : 's'}">${list.length}</span><button class="icon" data-edit-ws="${esc(wsp.id)}" title="Edit workspace">${ICON.rename}</button><button class="icon" data-new="${esc(ws)}" title="New session in this workspace">+</button></h3>${isCollapsed ? '' : wsSummaryLine(wsp) + wsWorkLine(wsp) + wsRepoSummary(wsp)}`;
       if (!isCollapsed) list.forEach((s, i) => g.appendChild(sessionCard(s, i + 1)));
       root.appendChild(g);
       continue;

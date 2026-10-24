@@ -17,7 +17,7 @@ const state = {
   prs: { prs: [{ repo: 'A/FOX', ready: true }, { repo: 'a/fox', checks: 'failing' }, { repo: 'a/fox' }, { repo: 'a/other', ready: true }] },
 };
 const ctx = { state, workspaceFor: (path) => workspaces.find((w) => path === w.dir || path.startsWith(w.dir + '/')), esc: (s) => String(s),
-  BAD: ['failed', 'timeout', 'interrupted'], jobState: (j) => j.lastRun?.status === 'running' ? 'running' : !j.enabled ? 'paused' : j.lastRun?.status ?? 'none' };
+  wsShowAll: new Set(), GITHUB_MARK: '<svg class="gh-mark"></svg>', BAD: ['failed', 'timeout', 'interrupted'], jobState: (j) => j.lastRun?.status === 'running' ? 'running' : !j.enabled ? 'paused' : j.lastRun?.status ?? 'none' };
 vm.createContext(ctx);
 vm.runInContext(section, ctx);
 
@@ -29,6 +29,10 @@ test('sidebar counts and list filters assign explicit jobs only to their named w
   assert.doesNotMatch(jobs, /failed/, 'the job with a removed workspace belongs to none');
   assert.equal(vm.runInContext('jobWorkspace(state.jobs[2])', ctx), undefined, 'a removed explicit workspace must not silently fall back to the script folder');
   assert.equal(vm.runInContext('state.prs.prs.filter(p => prWorkspace(p) === state.workspaces[0]).length', ctx), 3);
+  const summary = vm.runInContext('wsSummaryLine(state.workspaces[0])', ctx);
+  assert.match(summary, /data-ws-all="undefined"[^>]*>[^<]*<svg[\s\S]*?<\/svg>1</, 'repos: one');
+  assert.match(summary, /data-ws-jobs="fox"[\s\S]*?<\/svg>1</, 'jobs: the one named for fox');
+  assert.match(summary, /data-ws-prs="fox"[\s\S]*?<\/svg>3</, 'open PRs: all three, not only the ones needing you');
   state.jobs = []; state.prs = { prs: [{ repo: 'a/fox' }] };
   assert.equal(vm.runInContext('wsWorkLine(state.workspaces[0])', ctx), '', 'nothing pending: no line');
 });
