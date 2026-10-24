@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fox: your coding agents on your own server</title>
+<meta name="description" content="fox runs fx and Claude Code on your own server and shows every session, every subagent and a terminal that never dies, from your phone or your laptop.">
+<link rel="icon" href="fox.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* Night palette: fox's agents work while you sleep. The status colors are the
+     sidebar's own (working, waiting, needs you) and only ever mean that. */
+  :root {
+    --night: #131a2c;
+    --night-deep: #0d1322;
+    --panel: #1b2440;
+    --line: #2c3757;
+    --text: #ece8f4;
+    --muted: #a3aac4;
+    --fox: #f0883e;
+    --fox-soft: #f6b27c;
+    --working: #63d69e;
+    --waiting: #f2c14e;
+    --needs: #f2849b;
+    --display: "Bricolage Grotesque", system-ui, sans-serif;
+    --body: "Atkinson Hyperlegible", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--night-deep); color-scheme: dark; }
+  body { margin: 0; background: var(--night); color: var(--text); font: 18px/1.6 var(--body); -webkit-font-smoothing: antialiased; }
+  a { color: var(--fox-soft); text-underline-offset: 3px; }
+  a:hover { color: var(--text); }
+  :focus-visible { outline: 3px solid var(--fox-soft); outline-offset: 3px; border-radius: 4px; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  /* Header */
+  .top { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font: 800 24px/1 var(--display); color: var(--text); text-decoration: none; letter-spacing: -.02em; }
+  .brand img { width: 30px; height: 30px; }
+  .top nav { display: flex; gap: 24px; font-size: 16px; }
+  .top nav a { color: var(--muted); text-decoration: none; }
+  .top nav a:hover { color: var(--text); }
+
+  /* Hero: a sky over a session list */
+  .hero { position: relative; overflow: hidden; background:
+      radial-gradient(1px 1px at 12% 22%, #fff9 50%, transparent 51%),
+      radial-gradient(1px 1px at 28% 68%, #fff6 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 41% 14%, #fffa 50%, transparent 51%),
+      radial-gradient(1px 1px at 55% 80%, #fff5 50%, transparent 51%),
+      radial-gradient(1px 1px at 63% 33%, #fff7 50%, transparent 51%),
+      radial-gradient(1.5px 1.5px at 78% 12%, #fff9 50%, transparent 51%),
+      radial-gradient(1px 1px at 86% 58%, #fff6 50%, transparent 51%),
+      radial-gradient(1px 1px at 94% 26%, #fff8 50%, transparent 51%),
+      radial-gradient(1px 1px at 6% 84%, #fff5 50%, transparent 51%),
+      linear-gradient(180deg, var(--night-deep) 0%, var(--night) 100%);
+    padding-bottom: 72px; }
+  .hero-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: 56px; align-items: center; padding-top: 56px; }
+  h1 { font: 800 clamp(44px, 6.4vw, 84px)/.98 var(--display); letter-spacing: -.035em; margin: 0 0 28px; text-wrap: balance; }
+  h1 .line2 { display: block; color: var(--muted); font-weight: 500; }
+  .lede { max-width: 34em; color: var(--muted); font-size: 20px; margin: 0 0 32px; }
+  .lede strong { color: var(--text); font-weight: 700; }
+
+  .install { max-width: 620px; background: var(--night-deep); border: 1px solid var(--line); border-radius: 12px; padding: 14px 14px 14px 18px; display: flex; gap: 12px; align-items: center; }
+  .install code { flex: 1; min-width: 0; font: 14px/1.5 var(--mono); color: var(--text); overflow-x: auto; white-space: nowrap; scrollbar-width: thin; }
+  .install code .p { color: var(--fox); user-select: none; }
+  .copy { flex: none; font: 700 15px var(--body); color: var(--night-deep); background: var(--fox); border: 0; border-radius: 8px; padding: 10px 16px; cursor: pointer; }
+  .copy:hover { background: var(--fox-soft); }
+  .after-install { margin: 14px 0 0; font-size: 16px; color: var(--muted); }
+
+  /* The session list mock: the one moving thing on the page */
+  .panel { background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--line); border-radius: 16px; padding: 10px; box-shadow: 0 30px 80px -30px #000c; backdrop-filter: blur(6px); }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 12px; font-size: 14px; color: var(--muted); }
+  .replies { color: #9ab8ff; font-weight: 700; opacity: 0; transition: opacity .5s; }
+  .replies.on { opacity: 1; }
+  .sess { display: grid; grid-template-columns: 14px 1fr auto; gap: 12px; align-items: start; padding: 12px 10px; border-top: 1px solid var(--line); }
+  .sess b { display: block; font-weight: 700; font-size: 16px; line-height: 1.3; }
+  .sess small { display: block; font: 12.5px/1.5 var(--mono); color: var(--muted); margin-top: 3px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; }
+  .dot.working { background: var(--working); box-shadow: 0 0 0 0 var(--working); animation: pulse 1.8s infinite; }
+  .dot.waiting { background: var(--waiting); }
+  .dot.needs { background: var(--needs); }
+  .dot.done { background: transparent; border: 2px solid var(--muted); animation: none; }
+  .state { font-size: 13px; color: var(--muted); white-space: nowrap; padding-top: 2px; }
+  .bell { display: inline-block; opacity: 0; transform: rotate(0); }
+  .bell.ring { opacity: 1; animation: ring .9s ease-in-out 1; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 #63d69e88; } 70% { box-shadow: 0 0 0 8px #63d69e00; } 100% { box-shadow: 0 0 0 0 #63d69e00; } }
+  @keyframes ring { 0%,100% { transform: rotate(0); } 20% { transform: rotate(18deg); } 40% { transform: rotate(-14deg); } 60% { transform: rotate(9deg); } 80% { transform: rotate(-4deg); } }
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; padding: 12px 10px 4px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .legend i { width: 8px; height: 8px; border-radius: 50%; }
+
+  /* Screenshot */
+  .shot { margin: 0; padding: 0 0 96px; }
+  .shot img { display: block; width: 100%; height: auto; border-radius: 14px; border: 1px solid var(--line); box-shadow: 0 40px 100px -40px #000; }
+  .shot figcaption { margin-top: 14px; color: var(--muted); font-size: 16px; max-width: 46em; }
+
+  section { padding: 0 0 96px; }
+  h2 { font: 700 clamp(32px, 4vw, 48px)/1.05 var(--display); letter-spacing: -.025em; margin: 0 0 40px; max-width: 18em; }
+  h3 { font: 700 22px/1.25 var(--display); letter-spacing: -.01em; margin: 0 0 8px; }
+  p { margin: 0; }
+
+  /* How it works: a real sequence, so it is numbered */
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; counter-reset: step; }
+  .steps li { counter-increment: step; border-top: 2px solid var(--fox); padding-top: 20px; }
+  .steps li::before { content: counter(step); display: block; font: 800 44px/1 var(--display); color: var(--fox); margin-bottom: 14px; }
+  .steps p { color: var(--muted); }
+
+  /* Features: not a sequence, so no numbers */
+  .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 44px 40px; }
+  .features p { color: var(--muted); }
+
+  .needs { display: grid; grid-template-columns: 13em 1fr; gap: 0; margin: 0; max-width: 860px; }
+  .needs dt, .needs dd { margin: 0; padding: 16px 0; border-top: 1px solid var(--line); }
+  .needs dt { font-weight: 700; padding-right: 24px; }
+  .needs dd { color: var(--muted); }
+  .needs .opt { font-weight: 400; color: var(--muted); }
+
+  .closing { background: var(--night-deep); border-top: 1px solid var(--line); padding: 80px 0 64px; }
+  .closing h2 { margin-bottom: 28px; }
+  footer { padding: 40px 0 0; margin-top: 64px; border-top: 1px solid var(--line); color: var(--muted); font-size: 15px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+
+  @media (max-width: 900px) {
+    .hero-grid { grid-template-columns: minmax(0, 1fr); gap: 44px; padding-top: 32px; }
+    .steps, .features { grid-template-columns: 1fr; gap: 32px; }
+  }
+  @media (max-width: 560px) {
+    .wrap { padding: 0 16px; }
+    body { font-size: 17px; }
+    .top nav a.hide-sm { display: none; }
+    .lede { font-size: 18px; }
+    .install { flex-direction: column; align-items: stretch; }
+    .copy { align-self: flex-start; }
+    .needs { grid-template-columns: 1fr; }
+    .needs dd { border-top: 0; padding-top: 0; }
+    section, .shot { padding-bottom: 72px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dot.working { animation: none; }
+    .bell.ring { animation: none; }
+    .replies { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="#"><img src="fox.svg" alt="">fox</a>
+      <nav>
+        <a class="hide-sm" href="#how">How it works</a>
+        <a href="https://github.com/jamarks/fox/blob/main/docs/server.md">Setup guide</a>
+        <a href="https://github.com/jamarks/fox">GitHub</a>
+      </nav>
+    </header>
+
+    <div class="hero-grid">
+      <div>
+        <h1>Close the laptop.<span class="line2">Your agents keep working.</span></h1>
+        <p class="lede">fox runs <strong>fx</strong> and <strong>Claude Code</strong> on your own server. Every session, every subagent and a terminal that never dies, from your phone or your laptop.</p>
+        <div class="install">
+          <code id="cmd"><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/jamarks/fox/release/setup-server.sh | sudo bash -s -- --cloudflare fox.example.com</code>
+          <button class="copy" type="button" data-copy="cmd">Copy</button>
+        </div>
+        <p class="after-install">One script on Ubuntu or Debian. No domain? Use <code>--tailscale</code> instead. <a href="https://github.com/jamarks/fox/blob/main/docs/server.md">Read the setup guide</a></p>
+      </div>
+
+      <div class="panel" aria-label="Example of fox's session list">
+        <div class="panel-head"><span>~/workspaces/shop</span><span class="replies" id="replies">1 new reply</span></div>
+        <div class="sess">
+          <i class="dot working" id="d1"></i>
+          <div><b>Fix the flaky checkout test</b><small>gpt-6-sol</small></div>
+          <span class="state" id="s1">working</span>
+        </div>
+        <div class="sess">
+          <i class="dot working"></i>
+          <div><b>Same bug, three models</b><small>3 subagents</small></div>
+          <span class="state">working</span>
+        </div>
+        <div class="sess">
+          <i class="dot needs"></i>
+          <div><b>Migrate orders to Postgres</b><small>claude code</small></div>
+          <span class="state">needs you</span>
+        </div>
+        <div class="sess">
+          <i class="dot waiting"></i>
+          <div><b>Weekly dependency update</b><small>job, opened a pull request</small></div>
+          <span class="state">waiting</span>
+        </div>
+        <div class="legend">
+          <span><i style="background:var(--working)"></i>working</span>
+          <span><i style="background:var(--waiting)"></i>waiting</span>
+          <span><i style="background:var(--needs)"></i>needs your answer</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <figure class="shot">
+    <img src="screenshot.png" width="2400" height="1440" alt="fox with three subagents on three models answering the same question, grouped side by side next to the real fx terminal">
+    <figcaption>The same question to three models in three subagents. fox groups the answers side by side and flags the weak ones.</figcaption>
+  </figure>
+
+  <section id="how">
+    <h2>Your server, the real agents, any device</h2>
+    <ol class="steps">
+      <li>
+        <h3>Run one script on your server</h3>
+        <p>A VPS or a computer at home with Ubuntu 24.04 and 4 GB of RAM. It sets up fox, tmux and a way in through Cloudflare Tunnel or Tailscale.</p>
+      </li>
+      <li>
+        <h3>Sign in to your agents once</h3>
+        <p>fx with a ChatGPT subscription, a Vercel AI Gateway key or Grok. Claude Code with Pro or Max. fox never talks to a model itself.</p>
+      </li>
+      <li>
+        <h3>Open it from anywhere</h3>
+        <p>Sign in with a passkey from your phone or laptop. Sessions keep running with every browser closed.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>What you get</h2>
+    <div class="features">
+      <div>
+        <h3>Know which session needs you</h3>
+        <p>Sessions grouped by workspace, each with a live dot. A bell when one finishes, and an inbox of replies you have not read.</p>
+      </div>
+      <div>
+        <h3>Compare models side by side</h3>
+        <p>Subagents grouped by task, so the same question on three models reads as one comparison.</p>
+      </div>
+      <div>
+        <h3>A terminal that never dies</h3>
+        <p>One tmux terminal per session. Drop files on it, dictate into it, or watch four sessions at once in the mosaic.</p>
+      </div>
+      <div>
+        <h3>Jobs that open pull requests</h3>
+        <p>Scripts on a schedule, each with its log and summary. A job can have fx make a change and open a pull request it checked itself.</p>
+      </div>
+      <div>
+        <h3>Review and merge from fox</h3>
+        <p>Open pull requests of all your repos in one list, with what each does and the review job's verdict.</p>
+      </div>
+      <div>
+        <h3>Keep what your agents build</h3>
+        <p>Publish a page or a tool as a named app on your domain, private to you, up after the session ends.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What you need</h2>
+    <dl class="needs">
+      <dt>A server</dt><dd>A Linux VPS or a computer at home: Ubuntu 24.04, 4 GB of RAM or more.</dd>
+      <dt>A model provider for fx</dt><dd>A ChatGPT subscription, a Vercel AI Gateway key or a Grok subscription.</dd>
+      <dt>Claude Code <span class="opt">(optional)</span></dt><dd>A Claude Pro or Max subscription.</dd>
+      <dt>A way in</dt><dd>A domain on Cloudflare (Tunnel and Access are free), or Tailscale if you have no domain.</dd>
+      <dt>A passkey</dt><dd>On the devices you will use. It is how you sign in to fox.</dd>
+      <dt>GitHub <span class="opt">(optional)</span></dt><dd><code>gh</code> with a fine-grained token, to open workspaces from your repos and let fx open pull requests.</dd>
+    </dl>
+  </section>
+</div>
+
+<div class="closing">
+  <div class="wrap">
+    <h2>Set up fox tonight. Check on it in the morning.</h2>
+    <div class="install">
+      <code id="cmd2"><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/jamarks/fox/release/setup-server.sh | sudo bash -s -- --cloudflare fox.example.com</code>
+      <button class="copy" type="button" data-copy="cmd2">Copy</button>
+    </div>
+    <p class="after-install">Want to try it on your own computer first? <a href="https://github.com/jamarks/fox#set-up">Install it locally</a> on macOS or Linux.</p>
+    <footer>
+      <span>fox is an independent project, not affiliated with Vercel. fx is <a href="https://github.com/vercel-labs/fx">vercel-labs/fx</a>, Apache-2.0.</span>
+      <span>MIT licensed. <a href="https://github.com/jamarks/fox">jamarks/fox</a></span>
+    </footer>
+  </div>
+</div>
+
+<script>
+  // Copy buttons: the command without the "$ " prompt.
+  document.querySelectorAll('.copy').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const text = document.getElementById(btn.dataset.copy).textContent.replace(/^\$\s*/, '');
+      try { await navigator.clipboard.writeText(text); btn.textContent = 'Copied'; }
+      catch { btn.textContent = 'Select and copy'; }
+      setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+    });
+  });
+
+  // The page's one moment: a session finishes and the bell rings.
+  const finish = () => {
+    document.getElementById('d1').className = 'dot done';
+    document.getElementById('s1').innerHTML = '<svg class="bell" id="bell" aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="var(--fox)"><path d="M12 2a6 6 0 0 0-6 6v4l-2 4h16l-2-4V8a6 6 0 0 0-6-6zm-2.5 16a2.5 2.5 0 0 0 5 0z"/></svg> done';
+    document.getElementById('replies').classList.add('on');
+    requestAnimationFrame(() => document.getElementById('bell').classList.add('ring'));
+  };
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) finish();
+  else setTimeout(finish, 2600);
+</script>
+</body>
+</html>

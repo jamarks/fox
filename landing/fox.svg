@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- flat fox head: ears, face, white muzzle, dark nose -->
+  <path d="M4 3 L13 9 L19 9 L28 3 L27 15 C27 22 22 28 16 29 C10 28 5 22 5 15 Z" fill="#f0883e"/>
+  <path d="M4 3 L13 9 L9 15 Z" fill="#c9621f"/>
+  <path d="M28 3 L19 9 L23 15 Z" fill="#c9621f"/>
+  <path d="M9 18 L16 29 L23 18 L16 21 Z" fill="#fff4e8"/>
+  <circle cx="16" cy="23.5" r="1.7" fill="#1d1d1f"/>
+  <circle cx="11.5" cy="16" r="1.4" fill="#1d1d1f"/>
+  <circle cx="20.5" cy="16" r="1.4" fill="#1d1d1f"/>
+</svg>
