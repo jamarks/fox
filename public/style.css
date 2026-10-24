@@ -663,6 +663,8 @@ button.linkish { color: var(--accent); padding: 5px 0; margin-right: auto; }
 .group.workspace h3 .gname, .group.folder h3 .gname { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--text); font-weight: 600; }
 .group.workspace .ws-repos-line { display: flex; flex-direction: column; gap: 1px; padding: 0 12px 6px 28px; font-size: 11px; color: var(--muted); }
 .group.workspace .ws-repos-line .ws-line { font-family: var(--mono); }
+.group.workspace .ws-repos-line + .ws-work { margin-top: -4px; }
+.group.workspace .ws-work .ws-line { gap: 12px; }
 .ns-actions button.linkish { border: 0; padding: 5px 0; white-space: nowrap; color: var(--accent); }
 #ws-summary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 
@@ -820,7 +822,8 @@ body.metrics-page { display: block; height: auto; min-height: 100%; }
 #prs-entry .jnext.ready { color: var(--ok); }
 #apps-entry .jnext, #prs-entry .jnext, #jobs-entry .jnext, #skills-entry .jnext { margin-left: auto; font-family: var(--mono); font-size: 11px; }
 #job-view[data-mode=list] #job-back, #job-view[data-mode=list] #job-run, #job-view[data-mode=list] #job-pause, #job-view[data-mode=list] #job-edit, #job-view[data-mode=list] #job-runs, #job-view[data-mode=list] #job-when, #job-view[data-mode=list] #job-meta { display: none; }
-#job-view[data-mode=detail] #job-new, #job-view[data-mode=detail] #job-list { display: none; }
+#job-view[data-mode=detail] #job-new, #job-view[data-mode=detail] #job-list, #job-view[data-mode=detail] #job-ws { display: none; }
+button.ws-filter { color: var(--accent); border-color: var(--accent); } button.ws-filter:hover { color: var(--text); }
 #job-back { margin-right: 4px; }
 #job-list { overflow-y: auto; flex: 1; }
 .jl-row { display: grid; grid-template-columns: 10px minmax(0, max-content) minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }

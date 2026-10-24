@@ -248,6 +248,16 @@ test('a job added from a terminal waits for the OK on fox\'s page before it ever
   await store.update(job.id, { enabled: true }, { from: 'terminal' });
 });
 
+test('a job can name the workspace it works for; empty goes back to its folder\'s', async () => {
+  const { store, work } = await setup({ 'w.sh': 'true\n' });
+  const base = { cwd: work, script: 'jobs/w.sh', schedule: daily('08:00'), tz };
+  await assert.rejects(store.create({ ...base, name: 'x', workspace: '../fox' }), /workspace name/);
+  const job = await store.create({ ...base, name: 'w', workspace: 'fox' });
+  assert.equal(job.workspace, 'fox');
+  await store.update(job.id, { workspace: '' }, { from: 'terminal' });
+  assert.equal('workspace' in await store.get(job.id), false);
+});
+
 test('a job can pick fx\'s model and effort; its script sees them as FOX_JOB_MODEL and FOX_JOB_EFFORT', async () => {
   const { store, work } = await setup({ 'm.sh': 'echo "FOX_SUMMARY: ${FOX_JOB_MODEL:-none} ${FOX_JOB_EFFORT:-none}"\n' });
   const base = { cwd: work, script: 'jobs/m.sh', schedule: daily('08:00'), tz };

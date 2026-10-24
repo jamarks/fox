@@ -114,6 +114,8 @@
       <input id="jd-name" autocapitalize="none" autocorrect="off" autocomplete="off" placeholder="linear-bugfix" spellcheck="false" />
       <label class="ns-label" for="jd-folder">Runs in</label>
       <div class="row jd-row"><select id="jd-folder"></select><input id="jd-cwd" class="hidden" placeholder="~/path/to/folder" spellcheck="false" /></div>
+      <label class="ns-label" for="jd-workspace">Shows under workspace</label>
+      <select id="jd-workspace"></select>
       <label class="ns-label" for="jd-script">Script</label>
       <div class="row jd-row"><select id="jd-script"></select><input id="jd-args" placeholder="arguments (optional)" spellcheck="false" /></div>
       <label class="ns-label" for="jd-model">Model</label>
@@ -171,7 +173,7 @@
       <section id="job-view" class="page-view hidden" aria-label="Jobs" data-mode="list">
         <header class="job-head">
           <button type="button" id="job-back" class="linkish">← Jobs</button>
-          <div class="job-title"><span id="job-name"></span><span id="job-when" class="job-chip"></span></div>
+          <div class="job-title"><span id="job-name"></span><span id="job-when" class="job-chip"></span><button type="button" id="job-ws" class="job-chip ws-filter hidden" title="Show every workspace's jobs"></button></div>
           <div class="job-actions"><button type="button" id="job-new">New job</button><button type="button" id="job-run">Run now</button><button type="button" id="job-pause">Pause</button><button type="button" id="job-edit">Edit</button><button type="button" id="job-close" class="icon" aria-label="Close">×</button></div>
         </header>
         <div id="job-meta" class="muted"></div>
@@ -187,7 +189,7 @@
       </section>
       <section id="pr-view" class="page-view hidden" aria-label="Pull requests">
         <header class="job-head">
-          <div class="job-title"><span id="pr-title">Pull requests</span><span id="pr-repos" class="job-chip"></span></div>
+          <div class="job-title"><span id="pr-title">Pull requests</span><button type="button" id="pr-ws" class="job-chip ws-filter hidden" title="Show every workspace's pull requests"></button><span id="pr-repos" class="job-chip"></span></div>
           <div class="job-actions"><button type="button" id="pr-refresh">Refresh</button><button type="button" id="pr-close" class="icon" aria-label="Close">×</button></div>
         </header>
         <div id="pr-filters" class="pr-filters" aria-label="Pull request status"><button type="button" data-pr-filter="open" class="on">Open</button><button type="button" data-pr-filter="merged">Merged</button><button type="button" data-pr-filter="all">All</button></div>

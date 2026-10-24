@@ -53,7 +53,7 @@ When the user wants something to stay up (a page, a dashboard, an internal tool)
 fox runs scripts on a schedule on this machine ("jobs"); the user sees them on fox's Jobs page. Manage them with the \`fox-job\` command:
 - \`fox-job list\` · \`fox-job runs <name>\` · \`fox-job log <name> [<run>]\`
 - \`fox-job add <name> --script <path> [--cwd <dir>] (--every <hours> --from HH:MM --to HH:MM | --daily HH:MM | --once YYYY-MM-DD HH:MM) [--days mon-fri|sat,sun|mon,thu|all] [--tz Area/City] [--timeout <minutes>] [--paused] [-- <script arguments>]\`
-- \`fox-job run <name>\` (now) · \`fox-job pause|resume <name>\` · \`fox-job remove <name>\`
+- \`fox-job run <name>\` (now) · \`fox-job pause|resume <name>\` · \`fox-job remove <name>\` · \`fox-job workspace <name> [<workspace>]\`
 
 Rules:
 - Create, change or remove a job only when the user asks, and confirm the name, script and schedule with them before running \`fox-job add\`.
@@ -61,6 +61,7 @@ Rules:
 - A job is a script: keep it in the workspace (for example \`jobs/<name>.py\`) and commit it. Do as much as possible in plain code; when there is nothing to do, exit early without calling a model.
 - Print \`FOX_SUMMARY: <one line>\` with what the run did; write reports or files for the user to \`$FOX_JOB_OUTPUT\`.
 - To use a model inside a job, call \`fx ask --no-save --json "<prompt>"\` and read \`final_output\`. Validate what comes back; never run a model's output as shell commands.
+- fox shows a job under the workspace its folder is in. When the script lives in one place but works on another workspace's repos, pass \`--workspace <name>\` so it shows there.
 - One job runs at a time, each with a time limit (\`--timeout\`, 30 minutes by default). Before each run fox fast-forwards the job's folder if it is a clean checkout, so a script pushed from another copy is what runs.
 - How to write a job, and the Python helpers every job can import (\`import foxjob\`; \`foxjob.propose_change()\` for a job that changes code through a pull request): ${JOBS_GUIDE}. Read it before writing one.
 - A job that changes code proposes a pull request (\`foxjob.propose_change\`); it never pushes to main or to a deploy branch.`;

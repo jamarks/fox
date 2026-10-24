@@ -21,6 +21,7 @@ import { spawn as nodeSpawn, execFile } from 'node:child_process';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { nextRuns, scheduleError, describeSchedule } from './schedule.mjs';
+import { WORKSPACE_NAME } from './workspaces.mjs';
 
 export const JOB_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
 const KEEP_RUNS = 50;
@@ -145,6 +146,13 @@ export function createJobStore({ stateDir }) {
       const e = String(def.effort ?? '').trim();
       if (e && !EFFORTS.includes(e)) throw fail(`Effort is one of ${EFFORTS.join(', ')}.`);
       if (e) job.effort = e; else delete job.effort;
+    }
+    // The workspace the job works for, when its folder does not say it (a jobs repo that changes another repo).
+    // Empty: the workspace its folder is in. Only a name; fox groups by it, nothing else depends on it.
+    if (def.workspace !== undefined) {
+      const w = String(def.workspace ?? '').trim();
+      if (w && !WORKSPACE_NAME.test(w)) throw fail('That is not a workspace name.');
+      if (w) job.workspace = w; else delete job.workspace;
     }
     if (def.timeoutMin !== undefined) {
       const t = Number(def.timeoutMin);
