@@ -664,9 +664,10 @@ button.linkish { color: var(--accent); padding: 5px 0; margin-right: auto; }
 .group.workspace .ws-repos-line { display: flex; flex-direction: column; gap: 1px; padding: 0 12px 6px 28px; font-size: 11px; color: var(--muted); }
 .group.workspace .ws-repos-line .ws-line { font-family: var(--mono); }
 .group.workspace .ws-work { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px 28px; }
-.ws-chip { padding: 1px 7px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
-.ws-chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
-.ws-chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.ws-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border: 1px solid var(--border); border-radius: 6px; background: transparent; font: inherit; font-size: 11px; line-height: 1.2; cursor: pointer; }
+.ws-chip svg { flex: none; }
+.ws-chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 28%, transparent); }
+.ws-chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 28%, transparent); }
 .ws-chip:hover { background: var(--panel-2); }
 /* The repos toggle shows on hover where there is a mouse; on a touch screen it stays. */
 .group h3 .ws-repos-toggle { flex: none; }

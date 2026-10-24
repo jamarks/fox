@@ -250,18 +250,21 @@ const jobWorkspace = (j) => j.workspace ? workspaceNamed(j.workspace) : workspac
 const prWorkspace = (p) => (state.workspaces ?? []).find((w) => w.repos.some((r) => `${r.owner}/${r.name}`.toLowerCase() === String(p.repo).toLowerCase()));
 // Jobs or Pull requests narrowed to one workspace (its name), from the counts under it in the sidebar.
 const wsFilter = () => workspaceNamed(state.wsFilter);
+// Pull request and job marks for the chips below (outline, like the mockup they come from).
+const PR_MARK = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="18" r="2"/><circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="M6 8v8M11 6h5a2 2 0 0 1 2 2v8"/><path d="M14 9l-3-3 3-3"/></svg>';
+const CLOCK_MARK = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>';
 // Only what needs you: PRs to merge or to look at, jobs that failed or wait for your OK. Nothing pending, no line;
 // the totals live in Jobs and Pull requests. A chip opens that page narrowed to this workspace.
 function wsWorkLine(wsp) {
   const jobs = (state.jobs ?? []).filter((j) => jobWorkspace(j) === wsp), prs = (state.prs?.prs ?? []).filter((p) => prWorkspace(p) === wsp);
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-  const chip = (n, text, kind, attr, title) => n ? `<button type="button" class="ws-chip ${kind}" ${attr}="${esc(wsp.name)}" title="${title}">${text}</button>` : '';
+  const chip = (n, text, kind, attr, title) => n ? `<button type="button" class="ws-chip ${kind}" ${attr}="${esc(wsp.name)}" title="${title}">${attr === 'data-ws-prs' ? PR_MARK : CLOCK_MARK}${text}</button>` : '';
   const ready = prs.filter((p) => p.ready).length;
   const needYou = prs.filter((p) => !p.ready && (p.checks === 'failing' || p.review?.verdict === 'needs-you')).length;
   const failed = jobs.filter((j) => BAD.includes(jobState(j))).length;
   const approve = jobs.filter((j) => j.pendingApproval).length;
-  const html = chip(ready, plural(ready, 'PR ready to merge', 'PRs ready to merge'), 'ok', 'data-ws-prs', 'Checks pass and the review is good')
-    + chip(needYou, plural(needYou, 'PR needs you', 'PRs need you'), 'warn', 'data-ws-prs', 'Failing checks, or the review asks for you')
+  const html = chip(ready, `${ready} ready to merge`, 'ok', 'data-ws-prs', `${plural(ready, 'pull request', 'pull requests')}: checks pass and the review is good`)
+    + chip(needYou, `${needYou} need${needYou === 1 ? 's' : ''} you`, 'warn', 'data-ws-prs', `${plural(needYou, 'pull request', 'pull requests')}: failing checks, or the review asks for you`)
     + chip(failed, plural(failed, 'job failed', 'jobs failed'), 'warn', 'data-ws-jobs', 'Its last run did not go well')
     + chip(approve, plural(approve, 'job to approve', 'jobs to approve'), 'warn', 'data-ws-jobs', 'Added from a terminal; it waits for your OK before it runs');
   return html ? `<div class="ws-work">${html}</div>` : '';

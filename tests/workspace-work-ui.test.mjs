@@ -23,7 +23,7 @@ vm.runInContext(section, ctx);
 
 test('sidebar counts and list filters assign explicit jobs only to their named workspace, PRs by repo', () => {
   const fox = vm.runInContext('wsWorkLine(state.workspaces[0])', ctx), jobs = vm.runInContext('wsWorkLine(state.workspaces[1])', ctx);
-  assert.match(fox, /1 PR ready to merge.*1 PR needs you.*1 job failed/s, 'only what needs you; the plain open PR is not counted');
+  assert.match(fox, /1 ready to merge.*1 needs you.*1 job failed/s, 'only what needs you; the plain open PR is not counted');
   assert.doesNotMatch(fox, /to approve/);
   assert.match(jobs, /1 job to approve/);
   assert.doesNotMatch(jobs, /failed/, 'the job with a removed workspace belongs to none');
