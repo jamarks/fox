@@ -684,6 +684,8 @@ html, body { overscroll-behavior-y: none; }
 #term-loading { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; gap: 14px; color: var(--muted); background: var(--bg); padding: 24px; text-align: left; }
 #term-loading.hidden { display: none; }
 #terminals.waking > .term-wrap { visibility: hidden; }
+/* Same for "No terminal open": with no tab yet, it sat right under the notice and both read at once. */
+#terminals:has(> #term-loading:not(.hidden)) > #empty-state { visibility: hidden; }
 #term-loading-title { color: var(--text); font-weight: 500; margin-bottom: 4px; }
 #term-loading-hint { font-size: 12px; max-width: 340px; }
 .term-spinner { width: 22px; height: 22px; flex: none; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: term-spin .9s linear infinite; }
