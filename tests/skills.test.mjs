@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, symlink, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createSkills, SOURCES } from '../skills.mjs';
+import { createSkills, SOURCES, auditStatus } from '../skills.mjs';
 
 async function fixture(t) {
   const home = await mkdtemp(join(tmpdir(), 'fox-skills-'));
@@ -13,7 +13,7 @@ async function fixture(t) {
   const files = { 'skills/example/SKILL.md': '---\nname: example\ndescription: Test the preview.\n---\n# Sample\nDo not run scripts.', 'skills/example/docs/notes.md': 'Notes' };
   const tree = Object.entries(files).map(([path, text], i) => ({ path, type: 'blob', mode: '100644', sha: String(i + 1).padStart(40, 'a'), size: Buffer.byteLength(text) }));
   const gh = async ([url]) => url.includes('/trees/') ? JSON.stringify({ tree }) : JSON.stringify({ encoding: 'base64', content: Buffer.from(files[tree.find((x) => url.endsWith(x.sha)).path]).toString('base64') });
-  return { home, ws, tree, files, gh, api: (override = {}) => createSkills({ home, stateDir: join(home, 'state'), workspaces: { get: async (id) => id === ws.id ? ws : null, list: async () => [ws] }, gh, ...override }) };
+  return { home, ws, tree, files, gh, api: (override = {}) => createSkills({ home, stateDir: join(home, 'state'), workspaces: { get: async (id) => id === ws.id ? ws : null, list: async () => [ws] }, gh, web: async () => { throw new Error('offline in tests'); }, ...override }) };
 }
 
 test('catalog sources are shipped as data', () => assert.deepEqual(SOURCES, ['vercel-labs/skills', 'anthropics/skills', 'mattpocock/skills', 'vercel-labs/agent-browser']));
@@ -142,4 +142,27 @@ test('rejects unsafe paths, symlinks, oversized files, collisions and unsafe des
   const { rm } = await import('node:fs/promises'); await rm(join(f.home, '.claude/skills'), { recursive: true });
   await symlink(f.ws.dir, join(f.home, '.claude/skills'));
   await assert.rejects(() => api.install(p2.token), /symlink/);
+});
+
+test('skills.sh audits come with the preview; a failed one installs only when confirmed', async (t) => {
+  const f = await fixture(t), asked = [];
+  const audits = { example: { audits: [{ provider: 'Snyk', status: 'warn', riskLevel: 'medium', summary: 'Risk: MEDIUM', auditedAt: '2026-09-15T12:20:57Z' }, { provider: 'Socket', status: 'pass', summary: 'No alerts' }] } };
+  const web = async (url) => { asked.push(url); const id = url.split('/').pop(); if (!audits[id]) throw new Error('404'); return JSON.stringify(audits[id]); };
+  const api = f.api({ web });
+  const p = await api.preview({ source: 'x/y', scope: 'global', dirs: ['skills/example'] });
+  assert.equal(asked[0], 'https://skills.sh/api/v1/skills/audit/x/y/example');
+  assert.deepEqual(p.skills[0].audit, { status: 'warn', entries: [
+    { provider: 'Snyk', status: 'warn', risk: 'MEDIUM', summary: 'Risk: MEDIUM', at: '2026-09-15' },
+    { provider: 'Socket', status: 'pass', risk: null, summary: 'No alerts', at: null }] });
+  await api.install(p.token);
+  await api.remove((await api.list()).items.find((s) => s.name === 'example').id);
+  audits.example.audits.push({ provider: 'Gen', status: 'pass', riskLevel: 'HIGH' });
+  const risky = await f.api({ web }).preview({ source: 'x/y', scope: 'global', dirs: ['skills/example'] });
+  assert.equal(risky.skills[0].audit.status, 'fail', 'high risk fails it even when the reviewer says pass');
+  const again = f.api({ web }), q = await again.preview({ source: 'x/y', scope: 'global', dirs: ['skills/example'] });
+  await assert.rejects(() => again.install(q.token), /failed a security audit/);
+  await again.install(q.token, null, true); // the same preview, now confirmed
+  delete audits.example;
+  assert.equal((await f.api({ web }).preview({ source: 'x/y', scope: 'workspace:one', dirs: ['skills/example'] })).skills[0].audit.status, 'unavailable', 'not audited');
+  assert.equal(auditStatus([]), 'unavailable');
 });

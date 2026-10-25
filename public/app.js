@@ -2350,6 +2350,16 @@ function renderSkillPick() {
     return `<button type="button" class="skill-row skill-pickrow${open ? ' open' : ''}" data-skill-open="${esc(key)}" aria-expanded="${open}"><span class="skill-caret" aria-hidden="true">›</span><span class="skill-name">${esc(s.name)}</span><span class="skill-desc${s.problem ? ' bad' : s.installs != null ? ' mono' : ''}" title="${esc(s.problem || s.desc || '')}">${esc(s.problem ? `Can't install: ${s.problem}` : s.desc || 'No description')}</span>${meta ? `<span class="skill-src">${esc(meta)}</span>` : ''}</button>${open ? skillPanelHtml(s) : ''}`;
   }).join('');
 }
+// skills.sh's security audits: one line that says how it went, the reviewers one by one underneath.
+const AUDIT_HEAD = { pass: 'Passed the security audits on skills.sh', warn: 'Security audits on skills.sh: warnings', fail: 'Failed a security audit on skills.sh', unavailable: 'Not audited on skills.sh' };
+function skillAuditHtml(a) {
+  if (!a) return '';
+  const counts = ['fail', 'warn', 'pass'].map((k) => [k, a.entries.filter((e) => e.status === k).length]).filter(([, n]) => n).map(([k, n]) => `${n} ${k === 'pass' ? 'passed' : k === 'warn' ? `warning${n === 1 ? '' : 's'}` : 'failed'}`).join(' · ');
+  const list = a.entries.map((e) => `<div class="audit-entry"><span class="audit-dot ${e.status}"></span><b>${esc(e.provider)}</b>${e.risk ? ` <span class="mono">${esc(e.risk.toLowerCase())}</span>` : ''}<span>${esc(e.summary)}</span>${e.at ? `<span class="mono">${esc(e.at)}</span>` : ''}</div>`).join('');
+  return a.entries.length
+    ? `<details class="skill-audit ${a.status}"><summary><span class="audit-dot ${a.status}"></span>${AUDIT_HEAD[a.status]} <span class="set-sub inline">${counts}</span></summary>${list}</details>`
+    : `<div class="skill-audit unavailable"><span class="audit-dot unavailable"></span>${AUDIT_HEAD.unavailable}</div>`;
+}
 function skillPanelHtml(row) {
   const p = skillPanel;
   if (!p || p.state === 'loading') return '<div class="skill-review skill-detail"><span class="term-spinner" aria-hidden="true"></span> Loading the skill from GitHub…</div>';
@@ -2359,8 +2369,8 @@ function skillPanelHtml(row) {
   const list = files.length ? `<details class="skill-files"><summary>Files</summary><div class="set-sub">${files.map((f) => `${esc(f.name)} <span class="mono">${f.size} B</span>`).join('<br>')}</div></details>` : '';
   const text = s?.text ? `<div class="md skill-text">${renderMarkdown(s.text)}</div>` : '';
   if (p.state === 'error') return `<div class="skill-review skill-detail">${head}${text}<div class="skill-why">Can't install: ${esc(p.error)}</div></div>`;
-  const here = skillPlaceOf(s.name).includes(skillScope);
-  return `<div class="skill-review skill-detail">${head}${list}${text}<div class="skill-install-row"><label>Install for <select data-skill-scope>${skillScopes.map((o) => `<option value="${esc(o.id)}"${o.id === skillScope ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</select></label>${here ? '<span class="skill-src">installed here</span>' : !p.token ? '' : `<button type="button" class="set-act skill-install" data-skill-install>${p.installing ? 'Installing…' : 'Install'}</button>`}</div><div class="set-foot">${p.note ? esc(p.note) : 'Instructions from someone else: fx and Claude Code follow them, so read them first.'}</div></div>`;
+  const here = skillPlaceOf(s.name).includes(skillScope), risky = s.audit?.status === 'fail';
+  return `<div class="skill-review skill-detail">${head}${skillAuditHtml(s.audit)}${list}${text}<div class="skill-install-row"><label>Install for <select data-skill-scope>${skillScopes.map((o) => `<option value="${esc(o.id)}"${o.id === skillScope ? ' selected' : ''}>${esc(o.name)}</option>`).join('')}</select></label>${here ? '<span class="skill-src">installed here</span>' : !p.token ? '' : `<button type="button" class="set-act skill-install${risky ? ' risky' : ''}" data-skill-install>${p.installing ? 'Installing…' : risky ? 'Install anyway' : 'Install'}</button>`}</div><div class="set-foot">${p.note ? esc(p.note) : 'Instructions from someone else: fx and Claude Code follow them, so read them first.'}</div></div>`;
 }
 async function openSkillRow(key) {
   if (skillOpen === key) { skillOpen = null; skillPanel = null; return renderSkillPick(); }
@@ -2411,14 +2421,14 @@ $('#skills-search').addEventListener('input', () => {
   skillSearchTimer = setTimeout(() => (q.length >= 2 ? openSkillView('search', q) : !q && skillView === 'search' && openSkillView('popular')), 300);
 });
 $('#skill-pick').addEventListener('click', async (e) => {
-  if (e.target.closest('a, select, details')) return;
+  if (e.target.closest('a, select, details, .skill-audit')) return;
   const row = e.target.closest('[data-skill-open]');
   if (row) return openSkillRow(row.dataset.skillOpen);
   if (!e.target.closest('[data-skill-install]') || !skillPanel?.token || skillPanel.installing) return;
   const p = skillPanel, key = skillOpen;
   p.installing = true; renderSkillPick();
   try {
-    const j = await skillApi('install', { token: p.token, scope: skillScope });
+    const j = await skillApi('install', { token: p.token, scope: skillScope, confirmRisk: p.skill?.audit?.status === 'fail' });
     p.note = `Installed. New and resumed sessions of fx and Claude Code see ${j.installed.length === 1 ? 'it' : 'them'}.`;
   } catch (err) { p.note = /expired/i.test(err.message) ? 'This was open too long. Close it and open it again to install.' : err.message; }
   p.installing = false; p.token = null;

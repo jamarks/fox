@@ -56,6 +56,10 @@ function findDir(entries, id) {
   fail(hits.length ? `More than one ${id} in this repository.` : 'That skill is not in this repository.', hits.length ? 409 : 404);
 }
 const SKILLS_SH = 'https://skills.sh';
+// One verdict out of skills.sh's audits: any reviewer failing it or rating it high or critical risk fails it.
+export const auditStatus = (entries) => !entries.length ? 'unavailable'
+  : entries.some((a) => a.status === 'fail' || ['HIGH', 'CRITICAL'].includes(a.risk)) ? 'fail'
+  : entries.some((a) => a.status === 'warn') ? 'warn' : 'pass';
 async function fetchText(url) {
   const r = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { accept: 'text/html,application/json' } });
   if (!r.ok) throw Object.assign(new Error('skills.sh did not answer.'), { status: 502 });
@@ -70,7 +74,7 @@ async function pool(items, n, fn) {
 
 export function createSkills({ home, stateDir, workspaces, web = fetchText, gh = (args) => exec('gh', ['api', ...args], { timeout: 30000, maxBuffer: 4 * 1024 * 1024, env: { ...process.env, GH_PROMPT_DISABLED: '1' } }).then((r) => r.stdout) }) {
   const record = join(stateDir, 'skills.json');
-  const previews = new Map(), trees = new Map();
+  const previews = new Map(), trees = new Map(), audits = new Map();
   let writing = Promise.resolve();
   const locked = (fn) => { const p = writing.then(fn); writing = p.catch(() => {}); return p; };
   const records = async () => { try { return JSON.parse(await readFile(record, 'utf8')); } catch { return {}; } };
@@ -211,6 +215,27 @@ export function createSkills({ home, stateDir, workspaces, web = fetchText, gh =
     const prefix = dir ? `${dir}/` : '';
     return { source, dir, text: (await blob(source, md)).toString('utf8'), files: files.map((f) => ({ name: f.path.slice(prefix.length), size: f.size })) };
   }
+  // skills.sh's security audits of a skill: outside reviewers (Snyk, Socket, Gen…) each say pass, warn or fail,
+  // some with a risk level. Public, no token; held a few minutes. Not audited (or skills.sh away): 'unavailable'.
+  async function audit(source, id) {
+    if (!REPO.test(source) || !NAME.test(id)) return { status: 'unavailable', entries: [] };
+    const key = `${source}/${id}`, hit = audits.get(key);
+    if (hit && hit.until > Date.now()) return hit.value;
+    let value;
+    try {
+      const j = JSON.parse(await web(`${SKILLS_SH}/api/v1/skills/audit/${key}`));
+      const entries = (Array.isArray(j.audits) ? j.audits : []).slice(0, 12).map((a) => ({
+        provider: String(a.provider || 'Unknown').slice(0, 60),
+        status: ['pass', 'warn', 'fail'].includes(a.status) ? a.status : 'warn',
+        risk: String(a.riskLevel || '').toUpperCase().slice(0, 12) || null,
+        summary: String(a.summary || '').slice(0, 300),
+        at: /^\d{4}-\d{2}-\d{2}/.test(a.auditedAt ?? '') ? a.auditedAt.slice(0, 10) : null,
+      }));
+      value = { status: auditStatus(entries), entries };
+    } catch { value = { status: 'unavailable', entries: [] }; }
+    audits.set(key, { value, until: Date.now() + (value.status === 'unavailable' ? 60_000 : 5 * 60_000) });
+    return value;
+  }
   async function preview({ source, dirs, scope }) {
     await target(scope);
     const entries = await repoTree(source, true);
@@ -225,18 +250,22 @@ export function createSkills({ home, stateDir, workspaces, web = fetchText, gh =
       const meta = header(data.find((f) => f.name === 'SKILL.md').data.toString('utf8'));
       if (!NAME.test(meta.name) || !meta.description || meta.description.length > 4000) fail('SKILL.md needs a valid name and description.');
       if (skills.some((s) => s.name === meta.name)) fail('Duplicate skill names.');
-      skills.push({ ...meta, files: data });
+      skills.push({ ...meta, files: data, audit: await audit(source, posix.basename(dir) || source.split('/')[1]) });
     }
     const token = randomUUID();
     for (const [k, v] of previews) if (v.until < Date.now()) previews.delete(k);
     previews.set(token, { until: Date.now() + 10 * 60_000, scope, source, skills });
-    return { token, source, scope, skills: skills.map((s) => ({ name: s.name, description: s.description, files: s.files.map((f) => ({ name: f.name, size: f.data.length })), text: s.files.find((f) => f.name === 'SKILL.md').data.toString('utf8') })) };
+    return { token, source, scope, skills: skills.map((s) => ({ name: s.name, description: s.description, audit: s.audit, files: s.files.map((f) => ({ name: f.name, size: f.data.length })), text: s.files.find((f) => f.name === 'SKILL.md').data.toString('utf8') })) };
   }
   // `scope` may change where it goes after the preview (picked next to Install); what goes is what was shown.
-  async function install(token, scope = null) {
+  // A skill that failed a security audit installs only with `confirmRisk`, the "Install anyway" of the page.
+  async function install(token, scope = null, confirmRisk = false) {
     return locked(async () => {
-      const p = previews.get(token); previews.delete(token);
-      if (!p || p.until < Date.now()) fail('Preview expired. Preview again.', 409);
+      const p = previews.get(token);
+      if (!p || p.until < Date.now()) { previews.delete(token); fail('Preview expired. Preview again.', 409); }
+      const risky = p.skills.filter((s) => s.audit?.status === 'fail').map((s) => s.name);
+      if (risky.length && !confirmRisk) fail(`${risky.join(', ')} failed a security audit on skills.sh; install anyway only if you trust it.`, 409);
+      previews.delete(token);
       if (scope) p.scope = scope;
       const root = await target(p.scope), owned = await records();
       await ensureParents(root);

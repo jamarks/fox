@@ -628,7 +628,7 @@ async function handlePanelRequest(req, res) {
           : p === '/api/skills/peek' ? await skills.peek(body)
           : p === '/api/skills/search' ? await skills.search(body)
           : p === '/api/skills/preview' ? await skills.preview(body)
-          : p === '/api/skills/install' ? await skills.install(body.token, body.scope)
+          : p === '/api/skills/install' ? await skills.install(body.token, body.scope, body.confirmRisk === true)
           : p === '/api/skills/read' ? await skills.read(body.id)
           : p === '/api/skills/remove' ? await skills.remove(body.id) : null;
         return result ? send(res, 200, result) : send(res, 404, { error: 'not found' });

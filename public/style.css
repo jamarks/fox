@@ -928,6 +928,18 @@ a.set-val[href]:hover { color: var(--text); }
 .skill-detail a { color: var(--accent); }
 .skill-files summary { cursor: pointer; color: var(--muted); font-size: 11.5px; }
 .skill-why { color: var(--warn); }
+.skill-audit { font-size: 12px; }
+.skill-audit summary { cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.skill-audit.fail summary { color: var(--err); } .skill-audit.warn summary { color: var(--warn); } .skill-audit.pass summary { color: var(--ok); }
+.skill-audit.unavailable { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.set-sub.inline { display: inline; margin: 0; }
+.audit-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.audit-dot.pass { background: var(--ok); } .audit-dot.warn { background: var(--warn); } .audit-dot.fail { background: var(--err); }
+.audit-entry { display: flex; align-items: baseline; gap: 8px; padding: 4px 0 0 13px; color: var(--muted); }
+.audit-entry .audit-dot { transform: translateY(-1px); }
+.audit-entry b { color: var(--text); font-weight: 500; white-space: nowrap; }
+.audit-entry span:not(.audit-dot):not(.mono) { flex: 1; min-width: 0; }
+.skill-install-row .skill-install.risky { border-color: var(--err); color: var(--err); }
 .skill-install-row { display: flex; justify-content: flex-end; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
 .skill-install-row .skill-install { border-color: var(--accent); color: var(--accent); padding: 4px 14px; }
 .skill-desc.bad { color: var(--warn); }
