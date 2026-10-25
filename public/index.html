@@ -146,28 +146,45 @@
       <section id="settings-view" class="page-view hidden" aria-label="Settings">
         <header class="job-head"><div class="job-title"><span class="set-title">Settings</span></div><button type="button" id="settings-close" class="icon" aria-label="Close">×</button></header>
         <div class="set-body">
+          <nav id="settings-nav" class="set-nav" aria-label="Settings sections"></nav>
+          <div class="set-pane">
+          <div class="set-group" data-set="appearance" data-name="Appearance">
           <h3 class="set-sec">Appearance</h3>
           <div class="set-row"><span>Theme</span><div id="theme-dots" class="theme-dots"></div><select id="theme" class="hidden" aria-hidden="true" tabindex="-1">
               <option value="dark">dark</option><option value="dusk">dusk</option><option value="mauve">mauve</option><option value="terracotta">terracotta</option><option value="copper">copper</option><option value="plum">plum</option><option value="sky">sky</option>
             </select></div>
+          </div>
+          <div class="set-group" data-set="notifications" data-name="Notifications">
           <h3 class="set-sec">Notifications</h3>
           <button type="button" id="bell" class="set-row" title="Sound and a desktop notification when an agent finishes or needs input"><span>When fx finishes or needs you</span><span class="switch" aria-hidden="true"></span></button>
-          <div id="settings-deploy" class="hidden">
+          </div>
+          <div id="settings-deploy" class="set-group hidden" data-set="deploy" data-name="Deploy">
             <h3 class="set-sec">Deploy</h3>
             <div class="set-row"><span class="set-main">Server updates from<span class="set-sub" id="deploy-sub"></span></span><div class="seg" id="deploy-seg"><button type="button" data-deploy="release">release</button><button type="button" data-deploy="main">main</button></div></div>
           </div>
+          <div class="set-group" data-set="fx" data-name="fx">
           <h3 class="set-sec">fx <span class="set-note">new and resumed sessions</span></h3>
           <div id="settings-fx"></div>
           <div id="settings-fx-note" class="set-foot"></div>
+          </div>
+          <div class="set-group" data-set="tools" data-name="Tools">
           <h3 class="set-sec">Tools <span class="set-note">every session</span></h3>
           <div id="settings-tools"></div>
           <div id="settings-tools-note" class="set-foot"></div>
+          </div>
+          <div class="set-group" data-set="devices" data-name="Devices">
           <h3 class="set-sec" id="set-devices">Devices</h3>
           <button type="button" id="pair-phone" class="set-row"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="1.5" width="7" height="13" rx="1.5"/><path d="M7 12.5h2"/></svg><span>Pair phone</span><span class="set-go">›</span></button>
+          </div>
+          <div class="set-group set-keys" data-set="keyboard" data-name="Keyboard">
           <h3 class="set-sec set-keys">Keyboard</h3>
           <button type="button" id="keys" class="set-row set-keys"><span>Shortcuts</span><span class="set-go">⌥?</span></button>
+          </div>
+          <div class="set-group" data-set="server" data-name="Server">
           <h3 class="set-sec">Server</h3>
           <div class="set-row"><span>Running</span><a id="settings-version" class="set-val" target="_blank" rel="noopener"></a></div>
+          </div>
+          </div>
         </div>
       </section>
       <section id="job-view" class="page-view hidden" aria-label="Jobs" data-mode="list">

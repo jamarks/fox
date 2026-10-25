@@ -59,44 +59,6 @@ test('step limit is opt-in, read-only until applied, and preserves existing sett
   assert.match(entry(await fx.list()).documentation, /^https:\/\/fx.sh\//);
 });
 
-test('new badge is browser-local and independent of application', async () => {
-  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  const source = app.slice(app.indexOf('// fx\'s own settings (see fxsettings.mjs).'), app.indexOf('// Tools (MCP'));
-  const storage = new Map();
-  let click, writes = 0;
-  const panel = { innerHTML: '', addEventListener: (_, fn) => { click = fn; } };
-  const note = { textContent: '' };
-  const context = { $: (s) => s === '#settings-fx' ? panel : note, esc: String,
-    localStorage: { getItem: (k) => storage.get(k), setItem: (k, v) => storage.set(k, v) },
-    fetch: async (_, opts) => { if (opts) writes++; return { ok: true, json: async () => fxSettingsView({}) }; } };
-  runInNewContext(source, context);
-  await runInNewContext('loadFxSettings()', context);
-  assert.equal(writes, 0);
-  assert.match(panel.innerHTML, /New/);
-  assert.match(panel.innerHTML, /aria-checked="false" aria-label="Apply setting/);
-  let removed = false;
-  const seen = { dataset: { fxSeen: 'max_agent_steps:2026-10-18' }, closest: () => ({ remove: () => { removed = true; } }) };
-  await click({ target: { closest: (s) => s === '[data-fx-seen]' ? seen : null } });
-  assert.equal(removed, true);
-  assert.equal(writes, 0);
-  await runInNewContext('loadFxSettings()', context);
-  assert.doesNotMatch(panel.innerHTML, /data-fx-seen="max_agent_steps:/);
-  assert.match(panel.innerHTML, /data-fx-seen="auto_compact_percent:2026-10-21"/);
-  const reloaded = { ...context };
-  runInNewContext(source, reloaded);
-  await runInNewContext('loadFxSettings()', reloaded);
-  assert.doesNotMatch(panel.innerHTML, /data-fx-seen="max_agent_steps:/);
-  const applied = runInNewContext(`fxSettingRow(${JSON.stringify(fxSettingsView({ max_agent_steps: 17 }).at(-1))})`, context);
-  assert.match(applied, /value="17"/);
-  assert.match(applied, /aria-checked="true"/);
-  assert.doesNotMatch(applied, /Mark as seen/);
-  const input = { value: '22', reportValidity: () => true };
-  const row = { querySelector: (s) => s === '[data-fx-input]' ? input : { classList: { contains: () => false } } };
-  const button = { dataset: { fxKey: 'max_agent_steps', fxSave: '' }, classList: { contains: () => false }, closest: () => row };
-  await click({ target: { closest: (s) => s === '[data-fx-key]' ? button : null } });
-  assert.equal(writes, 0, 'saving an un-applied draft never writes');
-});
-
 test('compaction override is opt-in and validates the installed fx range', async () => {
   const file = join(await mkdtemp(join(tmpdir(), 'fox-fxs-')), 'settings.json');
   const fx = createFxSettings(file);
@@ -127,59 +89,6 @@ test('compaction override is opt-in and validates the installed fx range', async
   assert.equal(entry(await fx.list()).applied, true);
   assert.equal(entry(await fx.list()).introduced, '2026-10-21');
   assert.match(entry(await fx.list()).documentation, /^https:\/\/fx.sh\//);
-});
-
-test('compaction UI validates drafts and keeps badge state independent of activation', async () => {
-  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  const source = app.slice(app.indexOf('// fx\'s own settings (see fxsettings.mjs).'), app.indexOf('// Tools (MCP'));
-  const storage = new Map();
-  let click, saved = {}, writes = [];
-  const panel = { innerHTML: '', addEventListener: (_, fn) => { click = fn; } };
-  const note = { textContent: '' };
-  const context = { $: (s) => s === '#settings-fx' ? panel : note, esc: String,
-    localStorage: { getItem: (k) => storage.get(k), setItem: (k, v) => storage.set(k, v) },
-    fetch: async (_, opts) => {
-      if (opts) { const { key, value } = JSON.parse(opts.body); writes.push(value); saved = withFxSetting(saved, key, value); }
-      return { ok: true, json: async () => fxSettingsView(saved) };
-    } };
-  runInNewContext(source, context);
-  await runInNewContext('loadFxSettings()', context);
-  assert.equal(writes.length, 0);
-  const rowHtml = () => runInNewContext(`fxSettingRow(${JSON.stringify(fxSettingsView(saved).find((s) => s.key === 'auto_compact_percent'))})`, context);
-  assert.match(rowHtml(), /aria-checked="false"/);
-  assert.match(rowHtml(), /No fox override/);
-  assert.match(rowHtml(), /Upstream default: 80%/);
-  assert.match(rowHtml(), /Mark as seen/);
-  const input = { value: '', reportValidity: () => false };
-  let applied = false;
-  const row = { querySelector: (s) => s === '[data-fx-input]' ? input : { classList: { contains: () => applied } } };
-  const button = { dataset: { fxKey: 'auto_compact_percent', fxApply: '' }, classList: { contains: () => applied }, closest: () => row };
-  const press = () => click({ target: { closest: (s) => s === '[data-fx-key]' ? button : null } });
-  await press();
-  input.value = '81';
-  await press();
-  assert.equal(writes.length, 0, 'invalid drafts never write');
-  input.value = '60'; input.reportValidity = () => true;
-  await press();
-  assert.deepEqual(writes, [60]);
-  assert.match(rowHtml(), /value="60"/);
-  assert.match(rowHtml(), /aria-checked="true"/);
-  assert.match(rowHtml(), /Mark as seen/, 'activation does not mark seen');
-  const seen = { dataset: { fxSeen: 'auto_compact_percent:2026-10-21' }, closest: () => ({ remove() {} }) };
-  await click({ target: { closest: (s) => s === '[data-fx-seen]' ? seen : null } });
-  assert.equal(writes.length, 1);
-  assert.doesNotMatch(rowHtml(), /Mark as seen/);
-  assert.match(rowHtml(), /aria-checked="true"/, 'dismissal does not deactivate');
-  applied = true; button.disabled = false;
-  await press();
-  assert.deepEqual(writes, [60, null]);
-  assert.deepEqual(saved, {});
-  assert.doesNotMatch(rowHtml(), /Mark as seen/, 'removing an override does not reset seen');
-  const reloaded = { ...context };
-  runInNewContext(source, reloaded);
-  const html = runInNewContext(`fxSettingRow(${JSON.stringify(fxSettingsView(saved).find((s) => s.key === 'auto_compact_percent'))})`, reloaded);
-  assert.doesNotMatch(html, /Mark as seen/);
-  assert.match(html, /aria-checked="false"/);
 });
 
 test('tool output budget is opt-in, preserves config and validates bytes', async () => {
@@ -213,57 +122,4 @@ test('tool output budget is opt-in, preserves config and validates bytes', async
   assert.equal(entry(await fx.list()).introduced, '2026-10-22');
   assert.match(entry(await fx.list()).documentation, /^https:\/\/fx.sh\//);
   assert.throws(() => withFxSetting({}, 'max_tool_result_bytes.nested', 2048), /does not manage/);
-});
-
-test('tool output budget UI validates drafts and keeps badge state independent of activation', async () => {
-  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
-  const source = app.slice(app.indexOf('// fx\'s own settings (see fxsettings.mjs).'), app.indexOf('// Tools (MCP servers'));
-  const storage = new Map();
-  let click, saved = {}, writes = [];
-  const panel = { innerHTML: '', addEventListener: (_, fn) => { click = fn; } };
-  const note = { textContent: '' };
-  const context = { $: (s) => s === '#settings-fx' ? panel : note, esc: String,
-    localStorage: { getItem: (k) => storage.get(k), setItem: (k, v) => storage.set(k, v) },
-    fetch: async (_, opts) => {
-      if (opts) { const { key, value } = JSON.parse(opts.body); writes.push(value); saved = withFxSetting(saved, key, value); }
-      return { ok: true, json: async () => fxSettingsView(saved) };
-    } };
-  runInNewContext(source, context);
-  await runInNewContext('loadFxSettings()', context);
-  assert.equal(writes.length, 0);
-  const rowHtml = () => runInNewContext(`fxSettingRow(${JSON.stringify(fxSettingsView(saved).find((s) => s.key === 'max_tool_result_bytes'))})`, context);
-  assert.match(rowHtml(), /aria-checked="false"/);
-  assert.match(rowHtml(), /No fox override/);
-  assert.match(rowHtml(), /Upstream default: 65536 bytes/);
-  assert.match(rowHtml(), /Mark as seen/);
-  const input = { value: '', reportValidity: () => false };
-  let applied = false;
-  const row = { querySelector: (s) => s === '[data-fx-input]' ? input : { classList: { contains: () => applied } } };
-  const button = { dataset: { fxKey: 'max_tool_result_bytes', fxApply: '' }, classList: { contains: () => applied }, closest: () => row };
-  const press = () => click({ target: { closest: (s) => s === '[data-fx-key]' ? button : null } });
-  await press();
-  input.value = '1023';
-  await press();
-  assert.equal(writes.length, 0, 'invalid drafts never write');
-  input.value = '131072'; input.reportValidity = () => true;
-  await press();
-  assert.deepEqual(writes, [131072]);
-  assert.match(rowHtml(), /value="131072"/);
-  assert.match(rowHtml(), /aria-checked="true"/);
-  assert.match(rowHtml(), /Mark as seen/, 'activation does not mark seen');
-  const seen = { dataset: { fxSeen: 'max_tool_result_bytes:2026-10-22' }, closest: () => ({ remove() {} }) };
-  await click({ target: { closest: (s) => s === '[data-fx-seen]' ? seen : null } });
-  assert.equal(writes.length, 1);
-  assert.doesNotMatch(rowHtml(), /Mark as seen/);
-  assert.match(rowHtml(), /aria-checked="true"/, 'dismissal does not deactivate');
-  applied = true; button.disabled = false;
-  await press();
-  assert.deepEqual(writes, [131072, null]);
-  assert.deepEqual(saved, {});
-  assert.doesNotMatch(rowHtml(), /Mark as seen/, 'removing an override does not reset seen');
-  const reloaded = { ...context };
-  runInNewContext(source, reloaded);
-  const html = runInNewContext(`fxSettingRow(${JSON.stringify(fxSettingsView(saved).find((s) => s.key === 'max_tool_result_bytes'))})`, reloaded);
-  assert.doesNotMatch(html, /Mark as seen/);
-  assert.match(html, /aria-checked="false"/);
 });

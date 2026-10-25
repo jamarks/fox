@@ -2125,6 +2125,7 @@ function openSettings() {
   dictation.cancel();
   $('#settings-view').classList.remove('hidden');
   $('#settings').classList.add('active'); $('#settings').setAttribute('aria-expanded', 'true');
+  renderSettingsNav();
   if (mobileLayout.matches) showMobileView('terminal');
   renderThemeDots();
   loadTools();
@@ -2136,6 +2137,7 @@ function openSettings() {
 const DEPLOY_SUB = { release: 'merged pull requests go live', main: 'every push goes live within a minute' };
 function renderDeploy(d) {
   $('#settings-deploy').classList.toggle('hidden', !d?.available);
+  renderSettingsNav();
   if (!d?.available) return;
   for (const b of document.querySelectorAll('#deploy-seg [data-deploy]')) b.classList.toggle('on', b.dataset.deploy === d.branch);
   $('#deploy-sub').textContent = DEPLOY_SUB[d.branch];
@@ -2145,6 +2147,24 @@ $('#deploy-seg').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-deploy]'); if (!b || b.classList.contains('on')) return;
   const r = await fetch('/api/deploy', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ branch: b.dataset.deploy }) });
   if (r.ok) renderDeploy(await r.json()); else toast('Could not change it');
+});
+// On a wide screen Settings is an index of sections on the left and the chosen one on the right; on a phone,
+// one long list as before. A section with nothing to show (Deploy off a server, Devices without pairing) is left out.
+let settingsSection = 'appearance';
+const settingsGroups = () => [...document.querySelectorAll('#settings-view .set-group')]
+  .filter((g) => !g.classList.contains('hidden') && [...g.children].some((c) => c.tagName !== 'H3' && !c.classList.contains('hidden')));
+const settingsSectionShown = (id) => settingsOpen() && (mobileLayout.matches || settingsSection === id);
+function renderSettingsNav() {
+  const groups = settingsGroups();
+  if (!groups.some((g) => g.dataset.set === settingsSection)) settingsSection = groups[0]?.dataset.set ?? 'appearance';
+  $('#settings-nav').innerHTML = groups.map((g) => `<button type="button" class="${g.dataset.set === settingsSection ? 'on' : ''}" data-set-nav="${g.dataset.set}">${esc(g.dataset.name)}</button>`).join('');
+  for (const g of document.querySelectorAll('#settings-view .set-group')) g.classList.toggle('current', g.dataset.set === settingsSection);
+  if (settingsSectionShown('fx')) markFxSeen();
+}
+$('#settings-nav').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-set-nav]'); if (!b) return;
+  settingsSection = b.dataset.setNav; renderSettingsNav();
+  $('#settings-view .set-body').scrollTop = 0;
 });
 // sync: false when another page takes its place, so that opening it is one step in the history, not two.
 function closeSettings({ sync = true } = {}) {
@@ -2161,53 +2181,57 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && settingsOp
 // fx's own settings (see fxsettings.mjs). Seen state is browser-only, never activation.
 const fxSettingsSeen = new Set();
 try { for (const id of JSON.parse(localStorage.getItem('fox.fxSettingsSeen') ?? '[]')) fxSettingsSeen.add(id); } catch {}
+// fx's newer options are one choice each: Default leaves fx's own value (fox writes nothing), On or Off writes
+// it; a number is typed and saved with Enter, emptied (or Default) to give it back to fx. The dot marks one you
+// have not seen yet and goes once the fx section has been shown.
 function fxSettingRow(o) {
-  const id = `${o.key}:${o.introduced}`;
-  const badge = o.introduced && !fxSettingsSeen.has(id) ? ` <span class="set-note" data-fx-badge>New · <button type="button" class="set-act" data-fx-seen="${esc(id)}">Mark as seen</button></span>` : '';
-  const main = `<span class="set-main">${esc(o.label)}${badge}<span class="set-sub">${esc(o.description)}</span></span>`;
-  if (o.type === 'integer') return `<div class="set-row set-optional">${main}<div class="set-override"><input type="number" min="${o.min}" max="${o.max}" step="1" value="${esc(o.value)}" aria-label="${esc(o.label)}" data-fx-input="${o.key}" style="width:8em"><button type="button" class="set-act" data-fx-key="${o.key}" data-fx-save>Save</button><button type="button" class="switch-btn ${o.applied ? 'on' : ''}" data-fx-key="${o.key}" data-fx-apply role="switch" aria-checked="${o.applied}" aria-label="Apply setting: ${esc(o.label)}"><span class="switch"></span></button><span>Apply setting</span><span class="set-sub">${o.applied ? 'Saved override' : 'No fox override; fx uses its own defaults or other configuration'}. Upstream default: ${esc(o.upstreamDefault)}. <a href="${esc(o.documentation)}" target="_blank" rel="noopener noreferrer">Documentation</a></span></div></div>`;
-  if (o.type === 'bool' && o.introduced) return `<div class="set-row set-optional">${main}<div class="set-override"><label style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap"><input type="checkbox" ${o.value ? 'checked' : ''} aria-label="${esc(o.label)}" data-fx-input="${o.key}" style="width:auto;margin:0"> Enabled</label><button type="button" class="set-act" data-fx-key="${o.key}" data-fx-save>Save</button><button type="button" class="switch-btn ${o.applied ? 'on' : ''}" data-fx-key="${o.key}" data-fx-apply role="switch" aria-checked="${o.applied}" aria-label="Apply setting: ${esc(o.label)}"><span class="switch"></span></button><span>Apply setting</span><span class="set-sub">${o.applied ? 'Saved override' : 'No fox override; fx uses its own defaults or other configuration'}. Upstream default: ${esc(o.upstreamDefault)}. <a href="${esc(o.documentation)}" target="_blank" rel="noopener noreferrer">Documentation</a></span></div></div>`;
+  const fresh = o.introduced && !fxSettingsSeen.has(`${o.key}:${o.introduced}`) ? '<span class="set-new" title="New"></span>' : '';
+  const more = o.introduced ? ` · fx default: ${esc(o.upstreamDefault)}${o.documentation ? ` · <a href="${esc(o.documentation)}" target="_blank" rel="noopener noreferrer">docs</a>` : ''}` : '';
+  const main = `<span class="set-main">${esc(o.label)}${fresh}<span class="set-sub">${esc(o.description)}${more}</span></span>`;
+  if (o.type === 'integer') return `<div class="set-row">${main}<div class="set-num"><input type="number" min="${o.min}" max="${o.max}" step="1" value="${o.applied ? esc(o.value) : ''}" placeholder="fx default" aria-label="${esc(o.label)}" data-fx-num="${o.key}">${o.applied ? `<button type="button" class="set-act" data-fx-key="${o.key}" data-fx-tri="default" title="Give it back to fx">Default</button>` : ''}</div></div>`;
+  if (o.type === 'bool' && o.introduced) {
+    const now = !o.applied ? 'default' : o.value ? 'on' : 'off';
+    return `<div class="set-row">${main}<div class="seg">${['default', 'on', 'off'].map((v) => `<button type="button" class="${v === now ? 'on' : ''}" data-fx-key="${o.key}" data-fx-tri="${v}">${v === 'default' ? 'Default' : v === 'on' ? 'On' : 'Off'}</button>`).join('')}</div></div>`;
+  }
   if (o.type === 'bool') return `<div class="set-row">${main}<button type="button" class="switch-btn ${o.value ? 'on' : ''}" data-fx-key="${o.key}" role="switch" aria-checked="${o.value}" aria-label="${esc(o.label)}"><span class="switch"></span></button></div>`;
   return `<div class="set-row">${main}<div class="seg">${o.choices.map((c) => `<button type="button" class="${c === o.value ? 'on' : ''}" data-fx-key="${o.key}" data-fx-value="${c}">${c}</button>`).join('')}</div></div>`;
 }
-async function loadFxSettings() {
-  try { $('#settings-fx').innerHTML = (await (await fetch('/api/fx-settings')).json()).map(fxSettingRow).join(''); } catch {}
-}
-$('#settings-fx').addEventListener('click', async (e) => {
-  const seen = e.target.closest('[data-fx-seen]');
-  if (seen) {
-    fxSettingsSeen.add(seen.dataset.fxSeen);
-    try { localStorage.setItem('fox.fxSettingsSeen', JSON.stringify([...fxSettingsSeen])); } catch {}
-    seen.closest('[data-fx-badge]').remove();
-    return;
-  }
-  const btn = e.target.closest('[data-fx-key]');
-  if (!btn || btn.disabled) return;
-  let value = 'fxValue' in btn.dataset ? btn.dataset.fxValue : !btn.classList.contains('on');
-  const input = btn.closest('.set-row').querySelector('[data-fx-input]');
-  if (input) {
-    if ('fxApply' in btn.dataset && btn.classList.contains('on')) value = null;
-    else {
-      if (input.type === 'checkbox') value = input.checked;
-      else {
-        if (!input.value.trim() || !input.reportValidity()) { $('#settings-fx-note').textContent = 'Enter a valid whole number.'; return; }
-        value = Number(input.value);
-      }
-      // Editing a draft does not opt in. The switch is the explicit application action.
-      if ('fxSave' in btn.dataset && !btn.closest('.set-row').querySelector('[data-fx-apply]').classList.contains('on')) {
-        $('#settings-fx-note').textContent = 'Turn on Apply setting to save this override.'; return;
-      }
-    }
-  }
-  btn.disabled = true;
+async function saveFxSetting(key, value, el) {
+  if (el) el.disabled = true;
   try {
-    const r = await fetch('/api/fx-settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: btn.dataset.fxKey, value }) });
+    const r = await fetch('/api/fx-settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, value }) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || 'That did not work.');
     $('#settings-fx').innerHTML = j.map(fxSettingRow).join('');
     $('#settings-fx-note').textContent = 'New sessions use it; an open one picks it up when it is resumed.';
-  } catch (err) { btn.disabled = false; $('#settings-fx-note').textContent = err.message; }
+  } catch (err) { if (el) el.disabled = false; $('#settings-fx-note').textContent = err.message; }
+}
+async function loadFxSettings() {
+  try {
+    const list = await (await fetch('/api/fx-settings')).json();
+    $('#settings-fx').innerHTML = list.map(fxSettingRow).join('');
+    markFxSeen = () => { // once its section is on screen: the dots show this time, not the next
+      for (const o of list) if (o.introduced) fxSettingsSeen.add(`${o.key}:${o.introduced}`);
+      try { localStorage.setItem('fox.fxSettingsSeen', JSON.stringify([...fxSettingsSeen])); } catch {}
+    };
+    if (settingsSectionShown('fx')) markFxSeen();
+  } catch {}
+}
+let markFxSeen = () => {};
+$('#settings-fx').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-fx-key]');
+  if (!btn || btn.disabled || btn.classList.contains('on') && 'fxTri' in btn.dataset) return;
+  const value = 'fxTri' in btn.dataset ? (btn.dataset.fxTri === 'default' ? null : btn.dataset.fxTri === 'on')
+    : 'fxValue' in btn.dataset ? btn.dataset.fxValue : !btn.classList.contains('on');
+  saveFxSetting(btn.dataset.fxKey, value, btn);
 });
+// A number saves when you leave the field or press Enter; empty gives it back to fx.
+$('#settings-fx').addEventListener('change', (e) => {
+  const input = e.target.closest('[data-fx-num]'); if (!input) return;
+  if (input.value.trim() && !input.reportValidity()) { $('#settings-fx-note').textContent = 'Enter a whole number in range.'; return; }
+  saveFxSetting(input.dataset.fxNum, input.value.trim() ? Number(input.value) : null, input);
+});
+$('#settings-fx').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.matches('[data-fx-num]')) e.target.blur(); });
 // Tools (MCP servers from fox's catalog), for every session of fx and, when installed, of Claude Code. For fx: a switch for the ones fx has (off keeps the
 // setup, fx skips it), Add for the rest, Sign in when one needs it. Nothing changes without a tap.
 // With Claude Code installed, each tool has a switch per agent, named; with fx alone it reads as before.
