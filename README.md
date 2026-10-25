@@ -20,12 +20,12 @@ fx is the coding agent from Vercel Labs. fox runs it on a VPS or a computer at h
 ## What's new
 
 <!-- changelog:start -->
+- **2026-10-25** Companion repos: compare real paths on both sides (tests fail on macOS) ([#44](https://github.com/jamarks/fox/pull/44))
+- **2026-10-25** Expose new fx settings as opt-in controls ([#52](https://github.com/jamarks/fox/pull/52))
+- **2026-10-24** Workspaces show their jobs and open PRs: counted under each one, one click filters Jobs or Pull requests ([#51](https://github.com/jamarks/fox/pull/51))
+- **2026-10-24** Record the exact inputs behind every job run ([#46](https://github.com/jamarks/fox/pull/46))
 - **2026-10-24** Expose new fx settings as opt-in controls ([#49](https://github.com/jamarks/fox/pull/49))
 - **2026-10-24** Keep an editable next-message draft per session ([#47](https://github.com/jamarks/fox/pull/47))
-- **2026-10-24** Show token footprint for a parent and its subagents ([#45](https://github.com/jamarks/fox/pull/45))
-- **2026-10-23** Expose new fx settings as opt-in controls ([#43](https://github.com/jamarks/fox/pull/43))
-- **2026-10-22** Insert installed fx skills from a small shelf ([#39](https://github.com/jamarks/fox/pull/39))
-- **2026-10-22** Skills for fx: see, install and remove them from Settings ([#35](https://github.com/jamarks/fox/pull/35))
 
 All of it: [CHANGELOG.md](CHANGELOG.md).
 <!-- changelog:end -->

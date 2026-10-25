@@ -2,8 +2,15 @@
 
 What changed in fox, newest first: one line per merged pull request. Written by a job from the pull requests; edit the PR title to change a line.
 
+## 2026-10-25
+
+- Companion repos: compare real paths on both sides (tests fail on macOS) ([#44](https://github.com/jamarks/fox/pull/44))
+- Expose new fx settings as opt-in controls ([#52](https://github.com/jamarks/fox/pull/52))
+
 ## 2026-10-24
 
+- Workspaces show their jobs and open PRs: counted under each one, one click filters Jobs or Pull requests ([#51](https://github.com/jamarks/fox/pull/51))
+- Record the exact inputs behind every job run ([#46](https://github.com/jamarks/fox/pull/46))
 - Expose new fx settings as opt-in controls ([#49](https://github.com/jamarks/fox/pull/49))
 - Keep an editable next-message draft per session ([#47](https://github.com/jamarks/fox/pull/47))
 - Show token footprint for a parent and its subagents ([#45](https://github.com/jamarks/fox/pull/45))
