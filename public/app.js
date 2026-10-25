@@ -2148,24 +2148,35 @@ $('#deploy-seg').addEventListener('click', async (e) => {
   const r = await fetch('/api/deploy', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ branch: b.dataset.deploy }) });
   if (r.ok) renderDeploy(await r.json()); else toast('Could not change it');
 });
-// On a wide screen Settings is an index of sections on the left and the chosen one on the right; on a phone,
-// one long list as before. A section with nothing to show (Deploy off a server, Devices without pairing) is left out.
+// On a wide screen Settings keeps an index of its sections on the left, always there: a click scrolls to one, and
+// scrolling marks where you are. All sections stay in one list, on a phone too (where the index is not shown).
+// A section with nothing to show (Deploy off a server, Devices without pairing) is left out of the index.
 let settingsSection = 'appearance';
 const settingsGroups = () => [...document.querySelectorAll('#settings-view .set-group')]
   .filter((g) => !g.classList.contains('hidden') && [...g.children].some((c) => c.tagName !== 'H3' && !c.classList.contains('hidden')));
-const settingsSectionShown = (id) => settingsOpen() && (mobileLayout.matches || settingsSection === id);
+const settingsSectionShown = () => settingsOpen();
 function renderSettingsNav() {
   const groups = settingsGroups();
   if (!groups.some((g) => g.dataset.set === settingsSection)) settingsSection = groups[0]?.dataset.set ?? 'appearance';
   $('#settings-nav').innerHTML = groups.map((g) => `<button type="button" class="${g.dataset.set === settingsSection ? 'on' : ''}" data-set-nav="${g.dataset.set}">${esc(g.dataset.name)}</button>`).join('');
-  for (const g of document.querySelectorAll('#settings-view .set-group')) g.classList.toggle('current', g.dataset.set === settingsSection);
-  if (settingsSectionShown('fx')) markFxSeen();
+  if (settingsSectionShown()) markFxSeen();
 }
+const markSettingsNav = () => { for (const b of $('#settings-nav').children) b.classList.toggle('on', b.dataset.setNav === settingsSection); };
 $('#settings-nav').addEventListener('click', (e) => {
   const b = e.target.closest('[data-set-nav]'); if (!b) return;
-  settingsSection = b.dataset.setNav; renderSettingsNav();
-  $('#settings-view .set-body').scrollTop = 0;
+  settingsSection = b.dataset.setNav; markSettingsNav();
+  settingsJump = Date.now();
+  document.querySelector(`#settings-view .set-group[data-set="${b.dataset.setNav}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 });
+// Where you are: the last section whose top has passed the top of the list (the last one at the very bottom).
+let settingsJump = 0;
+$('#settings-view .set-body').addEventListener('scroll', (e) => {
+  if (Date.now() - settingsJump < 700) return; // a click's smooth scroll keeps the section it chose
+  const box = e.currentTarget, top = box.getBoundingClientRect().top + 24, groups = settingsGroups();
+  const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 2;
+  const here = atEnd ? groups.at(-1) : groups.filter((g) => g.getBoundingClientRect().top <= top).at(-1) ?? groups[0];
+  if (here && here.dataset.set !== settingsSection) { settingsSection = here.dataset.set; markSettingsNav(); }
+}, { passive: true });
 // sync: false when another page takes its place, so that opening it is one step in the history, not two.
 function closeSettings({ sync = true } = {}) {
   if (!settingsOpen()) return;
@@ -2214,7 +2225,7 @@ async function loadFxSettings() {
       for (const o of list) if (o.introduced) fxSettingsSeen.add(`${o.key}:${o.introduced}`);
       try { localStorage.setItem('fox.fxSettingsSeen', JSON.stringify([...fxSettingsSeen])); } catch {}
     };
-    if (settingsSectionShown('fx')) markFxSeen();
+    if (settingsSectionShown()) markFxSeen();
   } catch {}
 }
 let markFxSeen = () => {};
