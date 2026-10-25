@@ -25,7 +25,9 @@ if (cmd === 'new-session') { s.sessions[args[args.indexOf('-s')+1]] = { cmd: arg
 if (cmd === 'set-option' && args.includes('-t')) { const x = s.sessions[args[args.indexOf('-t')+1]]; if (x) x.opts[args.at(-2)] = args.at(-1); }
 if (cmd === 'show-options' && args.includes('-t')) console.log(s.sessions[args[args.indexOf('-t')+1]]?.opts[args.at(-1)] ?? '');
 if (cmd === 'capture-pane') console.log('┃');
-writeFileSync(file, JSON.stringify(s));
+// Only what changes tmux writes its file: fox also reads tmux on its own (the restart watch), and a read that wrote
+// back what it had read could undo a session created meanwhile.
+if (cmd === 'new-session' || cmd === 'set-option') writeFileSync(file, JSON.stringify(s));
 `);
   await chmod(tmux, 0o755);
   await writeFile(tmuxState, JSON.stringify({ sessions: {} }));
