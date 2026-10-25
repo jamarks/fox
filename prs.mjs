@@ -56,6 +56,7 @@ export function summarize(repo, pr) {
 export function createPrs({ repos, tokensDir = null, gh = 'gh', run = null, ttlMs = 60_000, now = () => Date.now() }) {
   const exec = run ?? ((args, env) => execFileP(gh, args, { timeout: 30_000, maxBuffer: 8 << 20, env: { ...process.env, GH_PROMPT_DISABLED: '1', ...env } }).then((x) => x.stdout));
   const cache = new Map();
+  const detailCache = new Map();
   async function env(owner) {
     if (!tokensDir) return {};
     try { const t = (await readFile(join(tokensDir, owner.toLowerCase()), 'utf8')).trim(); return t ? { GH_TOKEN: t } : {}; } catch { return {}; }
@@ -86,6 +87,35 @@ export function createPrs({ repos, tokensDir = null, gh = 'gh', run = null, ttlM
       cache.set(key, { at: now(), value });
       return value;
     },
+    // Fetch only when opened. Each GitHub endpoint is capped independently so a busy PR cannot grow this panel without bound.
+    async detail(repo, n) {
+      const r = await known(repo), num = number(n);
+      if (!r || !num) throw Object.assign(new Error('unknown pull request'), { status: 404 });
+      const key = `${r}#${num}`, cached = detailCache.get(key);
+      if (cached && now() - cached.at < ttlMs) return cached.value;
+      const paths = [
+        ['issue', `repos/${r}/issues/${num}/comments?per_page=100`],
+        ['review', `repos/${r}/pulls/${num}/comments?per_page=100`],
+      ];
+      const results = await Promise.all(paths.map(async ([type, path]) => {
+        try { return { type, comments: JSON.parse(await exec(['api', path], await env(r.split('/')[0])) || '[]') }; }
+        catch (err) { return { type, error: String(err.stderr || err.message).trim().split('\n')[0].slice(0, 200) }; }
+      }));
+      const errors = results.filter((x) => x.error).map(({ type, error }) => ({ type, error }));
+      const issues = results.find((x) => x.type === 'issue')?.comments ?? [];
+      // A full first page may omit a later verdict; in that case do not claim any comment is newer than the last review.
+      const verdictAt = issues.length < 100 ? issues.filter((c) => /\*\*fox review\*\*/.test(c.body ?? '')).map((c) => c.created_at).sort().at(-1) ?? null : null;
+      const comments = results.flatMap(({ type, comments = [] }) => comments.slice(0, 100).map((c) => ({
+        type: type === 'issue' && /\*\*fox review\*\*/.test(c.body ?? '') ? 'job' : type,
+        author: String(c.user?.login ?? 'unknown').slice(0, 80), createdAt: c.created_at,
+        excerpt: String(c.body ?? '').replace(/<sub>[\s\S]*?<\/sub>/g, '').replace(/\*\*/g, '').replace(/\s+/g, ' ').trim().slice(0, 240),
+        url: c.html_url, path: type === 'review' ? String(c.path ?? '').slice(0, 160) : null,
+        afterVerdict: Boolean(verdictAt && c.created_at > verdictAt),
+      }))).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+      const value = { comments, errors, limited: results.some((x) => x.comments?.length >= 100) };
+      if (!errors.length) detailCache.set(key, { at: now(), value });
+      return value;
+    },
     // What opening a row shows: the files changed, with their lines.
     async files(repo, n) {
       const r = await known(repo), num = number(n);
@@ -97,7 +127,7 @@ export function createPrs({ repos, tokensDir = null, gh = 'gh', run = null, ttlM
       const r = await known(repo), num = number(n);
       if (!r || !num) throw Object.assign(new Error('unknown pull request'), { status: 404 });
       await gh_(r, ['pr', 'merge', num, '--merge']);
-      cache.clear();
+      cache.clear(); detailCache.clear();
       return { ok: true };
     },
     // Paused = a draft on GitHub: kept as it is, out of the agent's queue and the review job's, until resumed.
@@ -107,7 +137,7 @@ export function createPrs({ repos, tokensDir = null, gh = 'gh', run = null, ttlM
       const r = await known(repo), num = number(n);
       if (!r || !num) throw Object.assign(new Error('unknown pull request'), { status: 404 });
       await gh_(r, ['pr', 'ready', num, ...(draft ? ['--undo'] : [])]);
-      cache.clear();
+      cache.clear(); detailCache.clear();
       return { ok: true };
     },
     async close(repo, n, reason = '') {
@@ -115,7 +145,7 @@ export function createPrs({ repos, tokensDir = null, gh = 'gh', run = null, ttlM
       if (!r || !num) throw Object.assign(new Error('unknown pull request'), { status: 404 });
       const why = String(reason ?? '').trim().slice(0, 1000);
       await gh_(r, ['pr', 'close', num, ...(why ? ['--comment', why] : [])]);
-      cache.clear();
+      cache.clear(); detailCache.clear();
       return { ok: true };
     },
   };
