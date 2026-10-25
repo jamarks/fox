@@ -84,6 +84,26 @@ test('companion access accepts only distinct cloned sibling repos, never symlink
   await assert.rejects(ws.validateCompanions(api, [join(root, 'linked')]), (e) => e.status === 400);
 });
 
+test('companion access accepts a linked workspace parent but not a linked repo folder', async () => {
+  const { base } = await setup([['a', 'api'], ['b', 'web']]);
+  await symlink(base, join(base, 'alias'));
+  const ws = createWorkspaces({
+    stateDir: join(base, 'linked-state'), rootDir: join(base, 'alias', 'workspaces'),
+    remoteUrl: (r) => join(base, 'remotes', r.owner, `${r.name}.git`),
+  });
+  const created = await ws.create({ name: 'team', repos: [{ owner: 'a', name: 'api' }, { owner: 'b', name: 'web' }] });
+  await settle(ws, created.id);
+  const root = created.dir, api = join(root, 'api'), web = join(root, 'web');
+  assert.deepEqual((await ws.companions(api)).map((r) => r.dir), [web]);
+  assert.deepEqual(await ws.validateCompanions(api, [web]), [web]);
+  assert.deepEqual(await ws.companions(root), []);
+  await assert.rejects(ws.validateCompanions(join(base, 'remotes'), [web]), (e) => e.status === 400);
+  await ws.update(created.id, { add: [{ owner: 'b', name: 'linked' }] });
+  await symlink(web, join(root, 'linked'));
+  assert.deepEqual((await ws.companions(api)).map((r) => r.dir), [web]);
+  await assert.rejects(ws.validateCompanions(api, [join(root, 'linked')]), (e) => e.status === 400);
+});
+
 test('same repo name from two owners gets separate folders', async () => {
   const { ws } = await setup([['a', 'api'], ['b', 'api']]);
   const created = await ws.create({ name: 'two', repos: [{ owner: 'a', name: 'api' }, { owner: 'b', name: 'api' }] });
