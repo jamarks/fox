@@ -2160,7 +2160,15 @@ function renderSettingsNav() {
   if (!groups.some((g) => g.dataset.set === settingsSection)) settingsSection = groups[0]?.dataset.set ?? 'appearance';
   $('#settings-nav').innerHTML = groups.map((g) => `<button type="button" class="${g.dataset.set === settingsSection ? 'on' : ''}" data-set-nav="${g.dataset.set}">${esc(g.dataset.name)}</button>`).join('');
   if (settingsSectionShown()) markFxSeen();
+  requestAnimationFrame(fitSettingsEnd);
 }
+// Room after the last section, just enough for it to reach the top: otherwise a click on Tools or Server could not
+// bring its title up (the list ends first) and the index would point at a section halfway down the page.
+function fitSettingsEnd() {
+  const pane = $('#settings-view .set-pane'), body = $('#settings-view .set-body'), last = settingsGroups().at(-1);
+  pane.style.paddingBottom = !last || mobileLayout.matches || !settingsOpen() ? '' : `${Math.max(0, body.clientHeight - last.offsetHeight - 52)}px`;
+}
+window.addEventListener('resize', () => { if (settingsOpen()) fitSettingsEnd(); });
 const markSettingsNav = () => { for (const b of $('#settings-nav').children) b.classList.toggle('on', b.dataset.setNav === settingsSection); };
 $('#settings-nav').addEventListener('click', (e) => {
   const b = e.target.closest('[data-set-nav]'); if (!b) return;
