@@ -81,6 +81,7 @@ test('HTTPS passkey enrollment needs SSH code and exact origin; session has Secu
     const response = { id: b64(credentialID), rawId: b64(credentialID), type: 'public-key', clientExtensionResults: {},
       response: { clientDataJSON: b64(clientData), attestationObject: b64(cbor({ fmt: 'none', authData, attStmt: {} })) } };
     assert.equal((await post('/api/auth/register/verify', { id, code: 'wrong', response })).status, 403);
+    assert.equal((await post('/api/auth/register/verify', { id, code, response })).status, 403, 'a wrong code consumes the challenge');
     const next = await (await post('/api/auth/register/options', { code })).json();
     const signedClient = Buffer.from(JSON.stringify({ type: 'webauthn.create', challenge: next.options.challenge, origin }));
     response.response.clientDataJSON = b64(signedClient);

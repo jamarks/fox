@@ -24,6 +24,41 @@ const freePort = () => new Promise((resolve) => {
 });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+test('a flood of anonymous options requests neither pushes out nor blocks a sign-in in progress', async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'fox-pending-auth-'));
+  const post = async (auth, path, data = {}) => {
+    const req = { method: 'POST', url: path, headers: { host: 'localhost:3000', origin: 'http://localhost:3000' },
+      socket: { remoteAddress: '127.0.0.1' }, async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(data)); } };
+    let status, response;
+    const res = { writeHead(code) { status = code; }, end(text) { response = JSON.parse(text); } };
+    await auth.handle(req, res);
+    return { status, ...response };
+  };
+  try {
+    for (const setup of [true, false]) {
+      if (!setup) await writeFile(join(stateDir, 'passkey.json'), JSON.stringify({ id: 'test-credential', publicKey: 'AA', counter: 0 }));
+      const auth = await createAuth({ stateDir });
+      const path = setup ? '/api/auth/register' : '/api/auth/login';
+      const first = await post(auth, `${path}/options`);
+      const flood = await Promise.all(Array.from({ length: 250 }, () => post(auth, `${path}/options`)));
+      assert.ok([first, ...flood].every((result) => result.status === 200), 'nobody is turned away');
+      // Reaching the passkey check means the first challenge survived the flood.
+      const verify = await post(auth, `${path}/verify`, { id: first.id, response: {} });
+      assert.equal(verify.error, 'passkey verification failed');
+      assert.equal((await post(auth, `${path}/verify`, { id: first.id, response: {} })).error, 'challenge expired', 'failed verification consumes its challenge');
+      const [text, tag] = first.id.split('.');
+      const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(text, 'base64url')), expires: Date.now() + 1e9 })).toString('base64url');
+      for (const id of [`${forged}.${tag}`, `${text}.${tag.slice(0, -2)}`, `${text}.${tag}.x`, 'nonsense', undefined]) {
+        assert.equal((await post(auth, `${path}/verify`, { id, response: {} })).error, 'challenge expired', `rejects ${id}`);
+      }
+      const other = await createAuth({ stateDir });
+      assert.equal((await post(other, `${path}/verify`, { id: first.id, response: {} })).error, 'challenge expired', 'ids are signed per process');
+    }
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test('restored sessions close tracked terminal sockets at their original expiry', async () => {
   const stateDir = await mkdtemp(join(tmpdir(), 'fox-auth-restored-'));
   const token = 'restored-session-token';
@@ -107,6 +142,8 @@ test('local passkey gates HTTP and WebSocket, verifies signatures, keeps session
     assert.equal(await ws(cookie), 'open');
     assert.equal((await post('/api/auth/register/options', {}, cookie)).status, 403);
     const login = await (await post('/api/auth/login/options', {})).json();
+    // Anyone can ask for options; a flood of them must not cost the owner the sign-in already under way.
+    for (let i = 0; i < 150; i++) assert.equal((await post('/api/auth/login/options', {})).status, 200);
     const signedData = Buffer.from(JSON.stringify({ type: 'webauthn.get', challenge: login.options.challenge, origin: base }));
     const authData = Buffer.concat([hash('localhost'), Buffer.from([0x05, 0, 0, 0, 1])]);
     const assertion = { id: b64(credentialID), rawId: b64(credentialID), type: 'public-key', clientExtensionResults: {},
