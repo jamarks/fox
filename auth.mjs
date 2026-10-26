@@ -137,15 +137,21 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
         if (!await validEnrollment(stateDir, data.code, remote.origin)) return json(res, 403, { error: 'valid enrollment code required' });
       }
       for (const [key, item] of pending) if (item.expires < Date.now()) pending.delete(key);
-      // Keep live challenges intact; anonymous requests cannot displace an in-flight sign-in.
+      // Reserve before generating options so concurrent requests cannot all pass the limit.
       if (pending.size >= 100) return json(res, 429, { error: 'too many pending challenges' });
-      const rpID = remote?.hostname ?? 'localhost';
-      const options = setup
-        ? await generateRegistrationOptions({ rpName: 'fox', rpID, userName: 'owner', authenticatorSelection: { residentKey: 'required', userVerification: 'required' } })
-        : await generateAuthenticationOptions({ rpID, allowCredentials: [{ id: credential.id }], userVerification: 'required' });
       const id = nonce();
-      pending.set(id, { challenge: options.challenge, rpID, expires: Date.now() + 120000, setup, enrollment: setup && remote ? data.code : null });
-      return json(res, 200, { id, options });
+      pending.set(id, { expires: Date.now() + 120000 });
+      try {
+        const rpID = remote?.hostname ?? 'localhost';
+        const options = setup
+          ? await generateRegistrationOptions({ rpName: 'fox', rpID, userName: 'owner', authenticatorSelection: { residentKey: 'required', userVerification: 'required' } })
+          : await generateAuthenticationOptions({ rpID, allowCredentials: [{ id: credential.id }], userVerification: 'required' });
+        pending.set(id, { challenge: options.challenge, rpID, expires: Date.now() + 120000, setup, enrollment: setup && remote ? data.code : null });
+        return json(res, 200, { id, options });
+      } catch (error) {
+        pending.delete(id);
+        throw error;
+      }
     }
     if (!path.endsWith('/verify')) return json(res, 404, { error: 'not found' });
     let data;
