@@ -3055,7 +3055,7 @@ setInterval(loadJobs, 5000);
 // first arms the button for a few seconds, so nothing that deploys or throws work away happens on a stray click.
 const prKey = (p) => `${p.repo}#${p.number}`;
 const prFiles = new Map();
-const prActivity = new Map(), prActivityLoading = new Set();
+const prActivity = new Map(), prActivityLoading = new Map();
 let prFilter = 'open', prListHtml = '';
 const prLimits = { merged: 50, all: 50 };
 const prLoading = new Set(), prFailed = new Set();
@@ -3126,9 +3126,9 @@ function renderPrList() {
     const activityHtml = activity ? `<section class="pr-activity" aria-label="PR discussion"><div class="pr-activity-head"><b>Discussion</b><span>${activity.comments.length} ${activity.comments.length === 1 ? 'comment' : 'comments'}${activity.limited ? ' · first 100 per type' : ''}</span></div>
       ${activity.comments.length ? `<ol>${activity.comments.map((c) => {
         const url = /^https:\/\/github\.com\//.test(c.url ?? '') ? c.url : p.url;
-        return `<li class="${c.afterVerdict ? 'after-verdict' : ''}"><div class="pr-comment-meta"><span class="pr-comment-kind">${c.type === 'job' ? 'fox review' : c.type === 'review' ? 'diff' : 'comment'}</span><b>${esc(c.author)}</b><time datetime="${esc(c.createdAt ?? '')}">${esc(c.createdAt ? fmtTime(c.createdAt) : 'unknown time')}</time>${c.afterVerdict ? '<span class="pr-comment-new">after review</span>' : ''}</div><a href="${esc(url)}" target="_blank" rel="noopener" class="pr-comment-body">${c.path ? `<span class="pr-comment-path">${esc(c.path)}</span> ` : ''}${esc(c.excerpt || '(no text)')} ↗</a></li>`;
+        return `<li class="${c.afterVerdict ? 'after-verdict' : ''}"><div class="pr-comment-meta"><span class="pr-comment-kind">${c.type === 'job' ? 'fox review' : c.type === 'review' ? 'diff' : c.type === 'summary' ? 'review' : 'comment'}</span><b>${esc(c.author)}</b><time datetime="${esc(c.createdAt ?? '')}">${esc(c.createdAt ? fmtTime(c.createdAt) : 'unknown time')}</time>${c.afterVerdict ? '<span class="pr-comment-new">after review</span>' : ''}</div><a href="${esc(url)}" target="_blank" rel="noopener" class="pr-comment-body">${c.path ? `<span class="pr-comment-path">${esc(c.path)}</span> ` : ''}${esc(c.excerpt || '(no text)')} ↗</a></li>`;
       }).join('')}</ol>` : activity.errors?.length ? '' : '<div class="muted">No comments yet.</div>'}
-      ${(activity.errors ?? []).map((e) => `<div class="pr-activity-error" role="status">Could not load ${e.type === 'review' ? 'diff' : 'PR'} comments: ${esc(e.error)}</div>`).join('')}
+      ${(activity.errors ?? []).map((e) => `<div class="pr-activity-error" role="status">Could not load ${e.type === 'review' ? 'diff' : e.type === 'summary' ? 'review' : 'PR'} comments: ${esc(e.error)}</div>`).join('')}
       </section>` : '<section class="pr-activity" aria-label="PR discussion"><b>Discussion</b><div class="muted">Loading comments…</div></section>';
     // What the job's run kept: the screenshots fx took of the change, and the run itself (log, files).
     const runUrl = p.run ? `/api/jobs/${encodeURIComponent(p.run.job)}/runs/${encodeURIComponent(p.run.run)}/files/` : '';
@@ -3148,14 +3148,19 @@ function renderPrList() {
   if (state.prOpen && !prFiles.has(state.prOpen)) loadPrFiles(state.prOpen);
   if (state.prOpen && !prActivity.has(state.prOpen) && !prActivityLoading.has(state.prOpen)) loadPrActivity(state.prOpen);
 }
-async function loadPrActivity(key) {
-  prActivityLoading.add(key);
+async function loadPrActivity(key, force = false) {
+  const request = {};
+  prActivityLoading.set(key, request);
   const [repo, n] = key.split('#');
   try {
-    const response = await fetch(`/api/prs/${repo}/${n}/detail`);
+    const response = await fetch(`/api/prs/${repo}/${n}/detail${force ? '?fresh' : ''}`);
     if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'GitHub unavailable');
-    prActivity.set(key, { ...await response.json(), at: Date.now() });
-  } catch (err) { prActivity.set(key, { at: Date.now(), comments: [], errors: [{ type: 'discussion', error: err.message }] }); }
+    const detail = await response.json();
+    if (prActivityLoading.get(key) === request) prActivity.set(key, { ...detail, at: Date.now() });
+  } catch (err) {
+    if (prActivityLoading.get(key) === request) prActivity.set(key, { at: Date.now(), comments: [], errors: [{ type: 'discussion', error: err.message }] });
+  }
+  if (prActivityLoading.get(key) !== request) return;
   prActivityLoading.delete(key);
   if (state.prView && state.prOpen === key) renderPrList();
 }
@@ -3183,7 +3188,11 @@ function closePrs({ sync = true } = {}) {
 $('#prs-entry').addEventListener('click', () => { if (state.prView) return closePrs(); state.wsFilter = null; openPrs(); });
 $('#pr-ws').addEventListener('click', clearWsFilter);
 $('#pr-close').addEventListener('click', () => closePrs());
-$('#pr-refresh').addEventListener('click', () => { prFiles.clear(); prActivity.clear(); loadPrs(true, prFilter); });
+$('#pr-refresh').addEventListener('click', () => {
+  prFiles.clear(); prActivity.clear(); prActivityLoading.clear();
+  if (state.prOpen) loadPrActivity(state.prOpen, true);
+  loadPrs(true, prFilter);
+});
 $('#pr-filters').addEventListener('click', (e) => {
   const filter = e.target.closest('[data-pr-filter]')?.dataset.prFilter;
   if (!filter || filter === prFilter) return;

@@ -695,7 +695,7 @@ async function handlePanelRequest(req, res) {
       const [, owner, name, num, action] = m;
       try {
         if (action === 'files' && req.method === 'GET') return send(res, 200, await prs.files(`${owner}/${name}`, num));
-        if (action === 'detail' && req.method === 'GET') return send(res, 200, await prs.detail(`${owner}/${name}`, num));
+        if (action === 'detail' && req.method === 'GET') return send(res, 200, await prs.detail(`${owner}/${name}`, num, { force: url.searchParams.has('fresh') }));
         if (action === 'merge' && req.method === 'POST') return send(res, 200, await prs.merge(`${owner}/${name}`, num));
         if ((action === 'pause' || action === 'resume') && req.method === 'POST') return send(res, 200, await prs[action](`${owner}/${name}`, num));
         if (action === 'close' && req.method === 'POST') return send(res, 200, await prs.close(`${owner}/${name}`, num, JSON.parse(await readBody(req) || '{}').reason));
