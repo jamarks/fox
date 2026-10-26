@@ -7,6 +7,7 @@ import { mkdtemp, mkdir, writeFile, readFile, chmod, rm } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
+import { createAuth } from '../auth.mjs';
 
 const b64 = (buffer) => Buffer.from(buffer).toString('base64url');
 const hash = (buffer) => createHash('sha256').update(buffer).digest();
@@ -22,6 +23,35 @@ const freePort = () => new Promise((resolve) => {
   const server = createServer(); server.listen(0, '127.0.0.1', () => { const port = server.address().port; server.close(() => resolve(port)); });
 });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('restored sessions close tracked terminal sockets at their original expiry', async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'fox-auth-restored-'));
+  const token = 'restored-session-token';
+  const key = hash(token).toString('hex');
+  const until = Date.now() + 600;
+  const req = { headers: { host: 'localhost:3000', cookie: `fox_session=${token}` }, socket: { remoteAddress: '127.0.0.1' } };
+  try {
+    await writeFile(join(stateDir, 'passkey.json'), JSON.stringify({ id: 'passkey', publicKey: 'key', counter: 0 }));
+    await writeFile(join(stateDir, 'sessions.json'), JSON.stringify({ credential: 'passkey', sessions: { [key]: until } }));
+    const auth = await createAuth({ stateDir });
+    assert.equal(auth.active(req), true);
+    const closes = [];
+    auth.track(req, { once() {}, close(...args) { closes.push(args); } });
+    // No request touches this session between tracking the socket and the deadline.
+    await sleep(850);
+    assert.deepEqual(closes, [[4001, 'session expired']]);
+    assert.equal(auth.active(req), false);
+    let stored;
+    for (let i = 0; i < 50; i++) {
+      stored = JSON.parse(await readFile(join(stateDir, 'sessions.json'), 'utf8'));
+      if (!stored.sessions[key]) break;
+      await sleep(10);
+    }
+    assert.equal(stored.sessions[key], undefined);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
 
 test('local passkey gates HTTP and WebSocket, verifies signatures, keeps sessions across restarts and revokes on logout', async () => {
   const home = await mkdtemp(join(tmpdir(), 'fox-auth-'));

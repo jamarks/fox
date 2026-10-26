@@ -73,6 +73,15 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
     }).catch((error) => console.error(`Cannot save fox sessions: ${error.message}`));
     return persisting;
   };
+  const expire = (key) => {
+    if (!sessions.delete(key)) return;
+    persistSessions();
+    for (const ws of sockets.get(key) ?? []) ws.close(4001, 'session expired');
+    sockets.delete(key);
+  };
+  // Restored sessions must keep their original deadline even when no new request arrives.
+  const scheduleExpiry = (key, until) => setTimeout(() => expire(key), Math.max(0, until - Date.now())).unref();
+  for (const [key, until] of sessions) scheduleExpiry(key, until);
   // The signed-in session a request carries (its hash), or the first one it names.
   const sessionKey = (req) => { const keys = cookieTokens(req).slice(0, 10).map(digest); return keys.find((k) => sessions.has(k)) ?? keys[0] ?? digest(''); };
   const active = (req) => {
@@ -81,7 +90,7 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
     const key = sessionKey(req);
     const session = sessions.get(key);
     if (!session) return false;
-    if (session < Date.now()) { sessions.delete(key); for (const ws of sockets.get(key) ?? []) ws.close(4001, 'session expired'); sockets.delete(key); persistSessions(); return false; }
+    if (session <= Date.now()) { expire(key); return false; }
     return true;
   };
   const track = (req, ws) => {
@@ -103,15 +112,10 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
   function issue(res) {
     const token = nonce();
     const key = digest(token);
-    sessions.set(key, Date.now() + ttl);
+    const until = Date.now() + ttl;
+    sessions.set(key, until);
     persistSessions();
-    const expiry = setTimeout(() => {
-      sessions.delete(key);
-      persistSessions();
-      for (const ws of sockets.get(key) ?? []) ws.close(4001, 'session expired');
-      sockets.delete(key);
-    }, ttl);
-    expiry.unref();
+    scheduleExpiry(key, until);
     json(res, 200, { ok: true }, { 'set-cookie': `fox_session=${token}; HttpOnly; ${remote ? 'Secure; ' : ''}SameSite=Strict; Path=/; Max-Age=${ttl / 1000}` });
   }
   async function handle(req, res) {
