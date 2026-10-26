@@ -9,12 +9,10 @@
 // A paused app keeps its entry but stops answering (and its command stops).
 import http from 'node:http';
 import net from 'node:net';
-import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
-import { join, resolve, extname, sep } from 'node:path';
+import { readFile, writeFile, mkdir, rename, stat, realpath, open } from 'node:fs/promises';
+import { join, resolve, extname, sep, relative } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { stat } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 
 export const APP_NAME = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
@@ -102,12 +100,36 @@ export async function staticFile(dir, urlPath) {
   try { rel = decodeURIComponent(String(urlPath).split('?')[0]); } catch { return null; }
   const parts = rel.split('/').filter(Boolean);
   if (parts.some((p) => p.startsWith('.') || p.includes('\\') || p.includes('\0'))) return null;
-  let file = resolve(dir, ...parts);
-  if (file !== dir && !file.startsWith(dir + sep)) return null;
-  let st = await stat(file).catch(() => null);
-  if (st?.isDirectory()) { file = join(file, 'index.html'); st = await stat(file).catch(() => null); }
-  const type = STATIC_TYPES[extname(file).toLowerCase()];
-  return st?.isFile() && type ? { file, type, size: st.size } : null;
+  let handle;
+  try {
+    const root = await realpath(dir);
+    const inside = (path) => {
+      const sub = relative(root, path);
+      return sub !== '..' && !sub.startsWith('..' + sep) && !sub.split(sep).some((p) => p.startsWith('.'));
+    };
+    // Inspect the opened inode, not a path that may be replaced before the response is streamed.
+    const actual = (fd) => realpath(`/proc/self/fd/${fd}`);
+    handle = await open(resolve(dir, ...parts), 'r');
+    let path = await actual(handle.fd);
+    if (!inside(path)) return null;
+    let st = await handle.stat();
+    if (st.isDirectory()) {
+      // The index is opened relative to the validated directory descriptor, not its mutable name.
+      const folder = handle;
+      handle = null;
+      try { handle = await open(`/proc/self/fd/${folder.fd}/index.html`, 'r'); }
+      finally { await folder.close(); }
+      path = await actual(handle.fd);
+      if (!inside(path)) return null;
+      st = await handle.stat();
+    }
+    const type = STATIC_TYPES[extname(path).toLowerCase()];
+    if (!st.isFile() || !type) return null;
+    const result = { handle, type, size: st.size };
+    handle = null;
+    return result;
+  } catch { return null; }
+  finally { await handle?.close(); }
 }
 
 // The URL of an app from a template like https://{name}.example.com.
@@ -133,9 +155,16 @@ export function createAppRouter({ registry, domain, denyPorts = [], log = consol
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('This app is a folder of files: it only answers GET.\n'); }
     const f = await staticFile(t.dir, new URL(req.url, 'http://x').pathname);
     if (!f) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('Not found\n'); }
+    if (req.method === 'HEAD') {
+      await f.handle.close();
+      res.writeHead(200, { 'content-type': f.type, 'content-length': f.size, 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' });
+      return res.end();
+    }
+    const stream = f.handle.createReadStream();
+    stream.on('error', () => res.destroy());
+    res.on('close', () => stream.destroy());
     res.writeHead(200, { 'content-type': f.type, 'content-length': f.size, 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff' });
-    if (req.method === 'HEAD') return res.end();
-    createReadStream(f.file).pipe(res);
+    stream.pipe(res);
   }
   // Cloudflare Access proves who you are to the tunnel; the dev server gets no copy of that proof.
   const headersFor = (req) => {
