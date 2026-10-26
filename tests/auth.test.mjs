@@ -45,6 +45,7 @@ test('a flood of anonymous options requests neither pushes out nor blocks a sign
       // Reaching the passkey check means the first challenge survived the flood.
       const verify = await post(auth, `${path}/verify`, { id: first.id, response: {} });
       assert.equal(verify.error, 'passkey verification failed');
+      assert.equal((await post(auth, `${path}/verify`, { id: first.id, response: {} })).error, 'challenge expired', 'failed verification consumes its challenge');
       const [text, tag] = first.id.split('.');
       const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(text, 'base64url')), expires: Date.now() + 1e9 })).toString('base64url');
       for (const id of [`${forged}.${tag}`, `${text}.${tag.slice(0, -2)}`, `${text}.${tag}.x`, 'nonsense', undefined]) {

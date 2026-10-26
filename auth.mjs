@@ -52,8 +52,8 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
   }}
   const sessions = new Map(), sockets = new Map();
   // Challenges travel signed in their id instead of waiting in a server-side list, so no number of anonymous
-  // options requests can push out someone's sign-in or fill a limit that keeps them from starting one. Only
-  // challenges being verified, or verified once, are remembered (until they expire), so each works only once.
+  // options requests can push out someone's sign-in. Attempted challenges are remembered until expiry so
+  // even failed verifications cannot be replayed.
   const secret = randomBytes(32), used = new Map();
   const mac = (text) => createHmac('sha256', secret).update(text).digest();
   const sealChallenge = (item) => { const text = Buffer.from(JSON.stringify(item)).toString('base64url'); return `${text}.${mac(text).toString('base64url')}`; };
@@ -167,10 +167,9 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
     if (!item || used.has(item.challenge) || item.setup !== setup || !(item.expires >= Date.now()) || item.rpID !== (remote?.hostname ?? 'localhost')) {
       return json(res, 403, { error: 'challenge expired' });
     }
-    // Held before anything is awaited, so two copies of one response cannot both sign in; a failed attempt gives it back.
+    // Hold before awaiting verification so concurrent copies cannot both sign in.
     used.set(item.challenge, item.expires);
     if (setup && remote && (item.enrollment !== digest(String(data.code)) || !await validEnrollment(stateDir, data.code, remote.origin))) {
-      used.delete(item.challenge);
       return json(res, 403, { error: 'challenge expired' });
     }
     try {
@@ -194,7 +193,6 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
       }
       return issue(res);
     } catch {
-      used.delete(item.challenge);
       return json(res, 403, { error: 'passkey verification failed' });
     }
   }
