@@ -137,8 +137,8 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
         if (!await validEnrollment(stateDir, data.code, remote.origin)) return json(res, 403, { error: 'valid enrollment code required' });
       }
       for (const [key, item] of pending) if (item.expires < Date.now()) pending.delete(key);
-      // Full: the oldest challenge goes, so a flood of requests never keeps you from signing in.
-      while (pending.size >= 100) pending.delete(pending.keys().next().value);
+      // Keep live challenges intact; anonymous requests cannot displace an in-flight sign-in.
+      if (pending.size >= 100) return json(res, 429, { error: 'too many pending challenges' });
       const rpID = remote?.hostname ?? 'localhost';
       const options = setup
         ? await generateRegistrationOptions({ rpName: 'fox', rpID, userName: 'owner', authenticatorSelection: { residentKey: 'required', userVerification: 'required' } })

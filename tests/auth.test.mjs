@@ -7,6 +7,7 @@ import { mkdtemp, mkdir, writeFile, readFile, chmod, rm } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
+import { createAuth } from '../auth.mjs';
 
 const b64 = (buffer) => Buffer.from(buffer).toString('base64url');
 const hash = (buffer) => createHash('sha256').update(buffer).digest();
@@ -22,6 +23,37 @@ const freePort = () => new Promise((resolve) => {
   const server = createServer(); server.listen(0, '127.0.0.1', () => { const port = server.address().port; server.close(() => resolve(port)); });
 });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('pending passkey challenges remain usable when anonymous options reach capacity', async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'fox-pending-auth-'));
+  const post = async (auth, path, data = {}) => {
+    const req = { method: 'POST', url: path, headers: { host: 'localhost:3000', origin: 'http://localhost:3000' },
+      socket: { remoteAddress: '127.0.0.1' }, async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(data)); } };
+    let status, response;
+    const res = { writeHead(code) { status = code; }, end(text) { response = JSON.parse(text); } };
+    await auth.handle(req, res);
+    return { status, ...response };
+  };
+  try {
+    for (const setup of [true, false]) {
+      if (!setup) await writeFile(join(stateDir, 'passkey.json'), JSON.stringify({ id: 'test-credential', publicKey: 'AA', counter: 0 }));
+      const auth = await createAuth({ stateDir });
+      const path = setup ? '/api/auth/register' : '/api/auth/login';
+      const first = await post(auth, `${path}/options`);
+      assert.equal(first.status, 200);
+      for (let i = 0; i < 99; i++) assert.equal((await post(auth, `${path}/options`)).status, 200);
+      const full = await post(auth, `${path}/options`);
+      assert.equal(full.status, 429);
+      assert.equal(full.error, 'too many pending challenges');
+      const verify = await post(auth, `${path}/verify`, { id: first.id, response: {} });
+      assert.equal(verify.status, 403);
+      assert.equal(verify.error, 'passkey verification failed');
+      assert.equal((await post(auth, `${path}/options`)).status, 200, 'consuming a challenge frees capacity');
+    }
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
 
 test('local passkey gates HTTP and WebSocket, verifies signatures, keeps sessions across restarts and revokes on logout', async () => {
   const home = await mkdtemp(join(tmpdir(), 'fox-auth-'));
