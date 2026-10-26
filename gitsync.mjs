@@ -1,6 +1,6 @@
 // Keep a checkout current before fx or a job works in it, without ever touching local work: only a clean
-// repo, on its default branch, with no ignored untracked paths or unpushed commits, is fast-forwarded. Anything
-// else is left exactly as it is, and the reason is returned.
+// repo, on its default branch, with no unpushed commits, is fast-forwarded. Anything else is left as it is,
+// and the reason is returned.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -20,13 +20,12 @@ export async function fastForward(dir, { git = defaultGit } = {}) {
     const main = (await run(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']).catch(() => 'origin/main')).replace(/^origin\//, '');
     if (branch !== main) return { status: 'skipped', reason: `on branch ${branch}` };
     if (await run(['status', '--porcelain'])) return { status: 'skipped', reason: 'uncommitted changes' };
-    // An incoming tracked path can replace ignored local data without appearing in porcelain status.
-    if (await run(['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'])) return { status: 'skipped', reason: 'ignored local files' };
     await run(['fetch', '--quiet', '--end-of-options', 'origin', main]);
     if (Number(await run(['rev-list', '--count', `origin/${main}..HEAD`])) > 0) return { status: 'skipped', reason: 'local commits not pushed' };
     const from = await run(['rev-parse', '--short', 'HEAD']);
     if (Number(await run(['rev-list', '--count', `HEAD..origin/${main}`])) === 0) return { status: 'current', at: from };
-    await run(['merge', '--ff-only', '--quiet', `origin/${main}`]);
+    // Git normally overwrites ignored paths during merge; reject a collision even if it appears after status.
+    await run(['merge', '--ff-only', '--quiet', '--no-overwrite-ignore', `origin/${main}`]);
     return { status: 'updated', from, to: await run(['rev-parse', '--short', 'HEAD']) };
   } catch (err) {
     return { status: 'skipped', reason: String(err.stderr || err.message).trim().split('\n')[0].slice(0, 200) };

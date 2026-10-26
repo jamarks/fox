@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -44,7 +44,7 @@ test('a clean checkout on its default branch is fast-forwarded; work in progress
   assert.deepEqual(await fastForward(base), { status: 'skipped', reason: 'not a git repo' });
 });
 
-test('ignored local files prevent automatic updates and keep their bytes intact', async () => {
+test('ignored local files survive updates; collisions are refused without changing them', async () => {
   const base = await mkdtemp(join(tmpdir(), 'fox-sync-'));
   const origin = join(base, 'origin.git'), mine = join(base, 'mine'), other = join(base, 'other');
   await exec('git', ['init', '-q', '--bare', '-b', 'main', origin]);
@@ -54,14 +54,35 @@ test('ignored local files prevent automatic updates and keep their bytes intact'
   await git(other, 'push', '-q', 'origin', 'main');
   await exec('git', ['clone', '-q', origin, mine]);
 
-  await writeFile(join(mine, '.git', 'info', 'exclude'), 'scratch.txt\n');
+  await writeFile(join(mine, '.git', 'info', 'exclude'), 'scratch.txt\ncache/\n');
   await writeFile(join(mine, 'scratch.txt'), 'PERSONAL SCRATCH');
+  await mkdir(join(mine, 'cache'));
+  await writeFile(join(mine, 'cache', 'data'), 'LOCAL CACHE');
   assert.equal(await git(mine, 'status', '--porcelain'), '');
-  assert.deepEqual(await fastForward(mine), { status: 'skipped', reason: 'ignored local files' });
+  assert.equal((await fastForward(mine)).status, 'current');
+
+  await commit(other, 'b.txt', 'safe update');
+  await git(other, 'push', '-q', 'origin', 'main');
+  assert.equal((await fastForward(mine)).status, 'updated');
+  assert.equal(await readFile(join(mine, 'scratch.txt'), 'utf8'), 'PERSONAL SCRATCH');
+  assert.equal(await readFile(join(mine, 'cache', 'data'), 'utf8'), 'LOCAL CACHE');
 
   await commit(other, 'scratch.txt', 'upstream');
   await git(other, 'push', '-q', 'origin', 'main');
-  assert.deepEqual(await fastForward(mine), { status: 'skipped', reason: 'ignored local files' });
+  const before = await git(mine, 'rev-parse', 'HEAD');
+  const result = await fastForward(mine);
+  assert.equal(result.status, 'skipped');
+  assert.match(result.reason, /untracked working tree files would be overwritten/i);
+  assert.equal(await git(mine, 'rev-parse', 'HEAD'), before);
   assert.equal(await readFile(join(mine, 'scratch.txt'), 'utf8'), 'PERSONAL SCRATCH');
   assert.notEqual(await git(mine, 'rev-parse', 'HEAD'), await git(other, 'rev-parse', 'HEAD'));
+
+  await rm(join(mine, 'scratch.txt'));
+  await mkdir(join(other, 'cache'));
+  await commit(other, 'cache/data', 'upstream cache');
+  await git(other, 'push', '-q', 'origin', 'main');
+  const directoryResult = await fastForward(mine);
+  assert.equal(directoryResult.status, 'skipped');
+  assert.equal(await readFile(join(mine, 'cache', 'data'), 'utf8'), 'LOCAL CACHE');
+  assert.equal(await git(mine, 'rev-parse', 'HEAD'), before);
 });
