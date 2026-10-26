@@ -1,5 +1,5 @@
 import { readFile, mkdir, writeFile, rename, chmod } from 'node:fs/promises';
-import { randomBytes, createHash } from 'node:crypto';
+import { randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { join } from 'node:path';
 import { generateRegistrationOptions, verifyRegistrationResponse, generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
 import { parsePublicOrigin, validEnrollment, consumeEnrollment } from './enrollment.mjs';
@@ -50,7 +50,19 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
     } catch (error) {
       if (error.code !== 'ENOENT') throw new Error(`Cannot load Fox passkey: ${error.message}`);
   }}
-  const pending = new Map(), sessions = new Map(), sockets = new Map();
+  const sessions = new Map(), sockets = new Map();
+  // Challenges travel signed in their id instead of waiting in a server-side list, so no number of anonymous
+  // options requests can push out someone's sign-in or fill a limit that keeps them from starting one. Only
+  // challenges being verified, or verified once, are remembered (until they expire), so each works only once.
+  const secret = randomBytes(32), used = new Map();
+  const mac = (text) => createHmac('sha256', secret).update(text).digest();
+  const sealChallenge = (item) => { const text = Buffer.from(JSON.stringify(item)).toString('base64url'); return `${text}.${mac(text).toString('base64url')}`; };
+  const openChallenge = (id) => {
+    const [text, tag, extra] = typeof id === 'string' ? id.split('.') : [];
+    const given = Buffer.from(tag ?? '', 'base64url'), expected = mac(text ?? '');
+    if (extra !== undefined || given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+    try { return JSON.parse(Buffer.from(text, 'base64url').toString()); } catch { return null; }
+  };
   // Signed-in sessions survive a restart (a deploy must not sign you out). Only SHA-256 hashes of the cookie
   // tokens are stored, with their expiry, bound to the passkey that created them: replacing the passkey
   // (recovery) drops every old session.
@@ -140,30 +152,25 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
         try { data = await body(req); } catch { return json(res, 400, { error: 'invalid enrollment request' }); }
         if (!await validEnrollment(stateDir, data.code, remote.origin)) return json(res, 403, { error: 'valid enrollment code required' });
       }
-      for (const [key, item] of pending) if (item.expires < Date.now()) pending.delete(key);
-      // Reserve before generating options so concurrent requests cannot all pass the limit.
-      if (pending.size >= 100) return json(res, 429, { error: 'too many pending challenges' });
-      const id = nonce();
-      pending.set(id, { expires: Date.now() + 120000 });
-      try {
-        const rpID = remote?.hostname ?? 'localhost';
-        const options = setup
-          ? await generateRegistrationOptions({ rpName: 'fox', rpID, userName: 'owner', authenticatorSelection: { residentKey: 'required', userVerification: 'required' } })
-          : await generateAuthenticationOptions({ rpID, allowCredentials: [{ id: credential.id }], userVerification: 'required' });
-        pending.set(id, { challenge: options.challenge, rpID, expires: Date.now() + 120000, setup, enrollment: setup && remote ? data.code : null });
-        return json(res, 200, { id, options });
-      } catch (error) {
-        pending.delete(id);
-        throw error;
-      }
+      const rpID = remote?.hostname ?? 'localhost';
+      const options = setup
+        ? await generateRegistrationOptions({ rpName: 'fox', rpID, userName: 'owner', authenticatorSelection: { residentKey: 'required', userVerification: 'required' } })
+        : await generateAuthenticationOptions({ rpID, allowCredentials: [{ id: credential.id }], userVerification: 'required' });
+      const id = sealChallenge({ challenge: options.challenge, rpID, expires: Date.now() + 120000, setup, enrollment: setup && remote ? digest(String(data.code)) : null });
+      return json(res, 200, { id, options });
     }
     if (!path.endsWith('/verify')) return json(res, 404, { error: 'not found' });
     let data;
     try { data = await body(req); } catch { return json(res, 400, { error: 'invalid response' }); }
-    const item = pending.get(data.id);
-    pending.delete(data.id); // A challenge can be used only once, including failed attempts.
-    if (!item || item.setup !== setup || item.expires < Date.now() || item.rpID !== (remote?.hostname ?? 'localhost') ||
-        (setup && remote && (item.enrollment !== data.code || !await validEnrollment(stateDir, data.code, remote.origin)))) {
+    for (const [key, until] of used) if (until < Date.now()) used.delete(key);
+    const item = openChallenge(data.id);
+    if (!item || used.has(item.challenge) || item.setup !== setup || !(item.expires >= Date.now()) || item.rpID !== (remote?.hostname ?? 'localhost')) {
+      return json(res, 403, { error: 'challenge expired' });
+    }
+    // Held before anything is awaited, so two copies of one response cannot both sign in; a failed attempt gives it back.
+    used.set(item.challenge, item.expires);
+    if (setup && remote && (item.enrollment !== digest(String(data.code)) || !await validEnrollment(stateDir, data.code, remote.origin))) {
+      used.delete(item.challenge);
       return json(res, 403, { error: 'challenge expired' });
     }
     try {
@@ -186,7 +193,10 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
         credential = updated;
       }
       return issue(res);
-    } catch { return json(res, 403, { error: 'passkey verification failed' }); }
+    } catch {
+      used.delete(item.challenge);
+      return json(res, 403, { error: 'passkey verification failed' });
+    }
   }
   return { active, track, handle, accepts, validOrigin, get registered() { return Boolean(credential); } };
 }

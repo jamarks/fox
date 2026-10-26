@@ -141,16 +141,14 @@ test('local passkey gates HTTP and WebSocket, verifies signatures, keeps session
     assert.equal(await ws(cookie), 'open');
     assert.equal((await post('/api/auth/register/options', {}, cookie)).status, 403);
     const login = await (await post('/api/auth/login/options', {})).json();
-    // One unused registration challenge still occupies a slot after setup.
-    for (let i = 0; i < 98; i++) assert.equal((await post('/api/auth/login/options', {})).status, 200);
-    assert.equal((await post('/api/auth/login/options', {})).status, 429);
+    // Anyone can ask for options; a flood of them must not cost the owner the sign-in already under way.
+    for (let i = 0; i < 150; i++) assert.equal((await post('/api/auth/login/options', {})).status, 200);
     const signedData = Buffer.from(JSON.stringify({ type: 'webauthn.get', challenge: login.options.challenge, origin: base }));
     const authData = Buffer.concat([hash('localhost'), Buffer.from([0x05, 0, 0, 0, 1])]);
     const assertion = { id: b64(credentialID), rawId: b64(credentialID), type: 'public-key', clientExtensionResults: {},
       response: { clientDataJSON: b64(signedData), authenticatorData: b64(authData), signature: b64(sign('sha256', Buffer.concat([authData, hash(signedData)]), privateKey)) } };
     const authenticated = await post('/api/auth/login/verify', { id: login.id, response: assertion });
     assert.equal(authenticated.status, 200, await authenticated.text());
-    assert.equal((await post('/api/auth/login/options', {})).status, 200, 'successful verification frees capacity');
     const cookie2 = authenticated.headers.get('set-cookie').split(';')[0];
     assert.equal((await post('/api/auth/login/verify', { id: login.id, response: assertion })).status, 403);
     assert.equal((await post('/api/auth/logout', {}, cookie2)).status, 200);
