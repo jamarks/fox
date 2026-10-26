@@ -24,7 +24,7 @@ const freePort = () => new Promise((resolve) => {
 });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-test('pending passkey challenges remain usable when anonymous options reach capacity', async () => {
+test('a flood of anonymous options requests neither pushes out nor blocks a sign-in in progress', async () => {
   const stateDir = await mkdtemp(join(tmpdir(), 'fox-pending-auth-'));
   const post = async (auth, path, data = {}) => {
     const req = { method: 'POST', url: path, headers: { host: 'localhost:3000', origin: 'http://localhost:3000' },
@@ -39,15 +39,49 @@ test('pending passkey challenges remain usable when anonymous options reach capa
       if (!setup) await writeFile(join(stateDir, 'passkey.json'), JSON.stringify({ id: 'test-credential', publicKey: 'AA', counter: 0 }));
       const auth = await createAuth({ stateDir });
       const path = setup ? '/api/auth/register' : '/api/auth/login';
-      const [first, ...rest] = await Promise.all(Array.from({ length: 125 }, () => post(auth, `${path}/options`)));
-      assert.equal(first.status, 200);
-      assert.equal(rest.filter((result) => result.status === 200).length, 99, 'concurrent requests cannot exceed capacity');
-      assert.ok(rest.every((result) => result.status === 200 || (result.status === 429 && result.error === 'too many pending challenges')));
+      const first = await post(auth, `${path}/options`);
+      const flood = await Promise.all(Array.from({ length: 250 }, () => post(auth, `${path}/options`)));
+      assert.ok([first, ...flood].every((result) => result.status === 200), 'nobody is turned away');
+      // Reaching the passkey check means the first challenge survived the flood.
       const verify = await post(auth, `${path}/verify`, { id: first.id, response: {} });
-      assert.equal(verify.status, 403);
       assert.equal(verify.error, 'passkey verification failed');
-      assert.equal((await post(auth, `${path}/options`)).status, 200, 'consuming a challenge frees capacity');
+      const [text, tag] = first.id.split('.');
+      const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(text, 'base64url')), expires: Date.now() + 1e9 })).toString('base64url');
+      for (const id of [`${forged}.${tag}`, `${text}.${tag.slice(0, -2)}`, `${text}.${tag}.x`, 'nonsense', undefined]) {
+        assert.equal((await post(auth, `${path}/verify`, { id, response: {} })).error, 'challenge expired', `rejects ${id}`);
+      }
+      const other = await createAuth({ stateDir });
+      assert.equal((await post(other, `${path}/verify`, { id: first.id, response: {} })).error, 'challenge expired', 'ids are signed per process');
     }
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('restored sessions close tracked terminal sockets at their original expiry', async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'fox-auth-restored-'));
+  const token = 'restored-session-token';
+  const key = hash(token).toString('hex');
+  const until = Date.now() + 600;
+  const req = { headers: { host: 'localhost:3000', cookie: `fox_session=${token}` }, socket: { remoteAddress: '127.0.0.1' } };
+  try {
+    await writeFile(join(stateDir, 'passkey.json'), JSON.stringify({ id: 'passkey', publicKey: 'key', counter: 0 }));
+    await writeFile(join(stateDir, 'sessions.json'), JSON.stringify({ credential: 'passkey', sessions: { [key]: until } }));
+    const auth = await createAuth({ stateDir });
+    assert.equal(auth.active(req), true);
+    const closes = [];
+    auth.track(req, { once() {}, close(...args) { closes.push(args); } });
+    // No request touches this session between tracking the socket and the deadline.
+    await sleep(850);
+    assert.deepEqual(closes, [[4001, 'session expired']]);
+    assert.equal(auth.active(req), false);
+    let stored;
+    for (let i = 0; i < 50; i++) {
+      stored = JSON.parse(await readFile(join(stateDir, 'sessions.json'), 'utf8'));
+      if (!stored.sessions[key]) break;
+      await sleep(10);
+    }
+    assert.equal(stored.sessions[key], undefined);
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }

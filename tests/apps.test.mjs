@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createAppRegistry, createAppRouter, appUrl } from '../apps.mjs';
+import { createAppRegistry, createAppRouter, staticFile, appUrl } from '../apps.mjs';
 
 test('names are checked, fox and its ports stay out', async () => {
   const reg = createAppRegistry({ stateDir: await mkdtemp(join(tmpdir(), 'fox-apps-')), denyPorts: [4848, 4850] });
@@ -63,12 +64,19 @@ test('the router keeps Cloudflare Access proof from the app, and never reaches a
 
 test('an app can be a folder or a command; folders and working dirs stay inside home and out of hidden ones', async () => {
   const home = await mkdtemp(join(tmpdir(), 'fox-home-'));
-  const { mkdir } = await import('node:fs/promises');
+  const { mkdir, symlink } = await import('node:fs/promises');
   await mkdir(join(home, 'site'));
   await mkdir(join(home, '.ssh'));
+  const outside = await mkdtemp(join(tmpdir(), 'fox-outside-'));
+  await symlink(outside, join(home, 'external'));
+  await symlink(join(home, '.ssh'), join(home, 'private'));
+  await symlink(join(home, 'site'), join(home, 'linked'));
   const reg = createAppRegistry({ stateDir: join(home, 'state'), home });
   assert.deepEqual(Object.keys(await reg.set('site', { dir: join(home, 'site') })).sort(), ['createdAt', 'dir', 'name']);
   await assert.rejects(reg.set('keys', { dir: join(home, '.ssh') }), /hidden/);
+  await assert.rejects(reg.set('external', { dir: join(home, 'external') }), /inside your home/);
+  await assert.rejects(reg.set('private', { dir: join(home, 'private') }), /hidden/);
+  assert.equal((await reg.set('linked', { dir: join(home, 'linked') })).dir, join(home, 'site'));
   await assert.rejects(reg.set('root', { dir: '/etc' }), /inside your home/);
   await assert.rejects(reg.set('home', { dir: home }), /inside your home/);
   await assert.rejects(reg.set('nope', { dir: join(home, 'missing') }), /not a folder/);
@@ -81,12 +89,20 @@ test('an app can be a folder or a command; folders and working dirs stay inside 
 
 test('a folder app serves its files, index.html for a folder, and never hidden files or a way out', async () => {
   const home = await mkdtemp(join(tmpdir(), 'fox-home-'));
-  const { mkdir, writeFile } = await import('node:fs/promises');
+  const { mkdir, writeFile, symlink } = await import('node:fs/promises');
   await mkdir(join(home, 'site', 'docs'), { recursive: true });
+  await mkdir(join(home, 'site', '.private'));
+  await mkdir(join(home, 'outside'));
   await writeFile(join(home, 'site', 'index.html'), '<h1>hi</h1>');
   await writeFile(join(home, 'site', 'docs', 'index.html'), 'docs');
   await writeFile(join(home, 'site', '.env'), 'SECRET=1');
-  await writeFile(join(home, 'secret.txt'), 'outside');
+  await writeFile(join(home, 'site', '.private', 'secret.txt'), 'hidden');
+  await writeFile(join(home, 'outside', 'secret.txt'), 'outside');
+  await writeFile(join(home, 'secret.txt'), 'outside file');
+  await symlink(join(home, 'secret.txt'), join(home, 'site', 'public.txt'));
+  await symlink(join(home, 'outside'), join(home, 'site', 'external'));
+  await symlink(join(home, 'site', '.private'), join(home, 'site', 'private'));
+  await symlink(join(home, 'site', 'docs'), join(home, 'site', 'more'));
   const reg = createAppRegistry({ stateDir: join(home, 'state'), home });
   await reg.set('site', { dir: join(home, 'site') });
   await reg.set('off', { dir: join(home, 'site') });
@@ -99,11 +115,53 @@ test('a folder app serves its files, index.html for a folder, and never hidden f
   try {
     assert.deepEqual(await get('site.jwass.xyz'), { status: 200, body: '<h1>hi</h1>', type: 'text/html; charset=utf-8' });
     assert.equal((await get('site.jwass.xyz', '/docs/')).body, 'docs');
+    assert.equal((await get('site.jwass.xyz', '/more/')).body, 'docs');
+    assert.equal((await get('site.jwass.xyz', '/public.txt')).status, 404);
+    assert.equal((await get('site.jwass.xyz', '/external/secret.txt')).status, 404);
+    assert.equal((await get('site.jwass.xyz', '/private/secret.txt')).status, 404);
     assert.equal((await get('site.jwass.xyz', '/.env')).status, 404);
     assert.equal((await get('site.jwass.xyz', '/../secret.txt')).status, 404);
     assert.equal((await get('site.jwass.xyz', '/%2e%2e/secret.txt')).status, 404);
     assert.equal((await get('off.jwass.xyz')).status, 503);
   } finally { router.close(); }
+});
+
+test('a named pipe in a published folder does not hold a request open', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'fox-home-'));
+  const { mkdir } = await import('node:fs/promises');
+  const site = join(home, 'site');
+  await mkdir(join(site, 'docs'), { recursive: true });
+  execFileSync('mkfifo', [join(site, 'waiting.txt')]);
+  execFileSync('mkfifo', [join(site, 'docs', 'index.html')]);
+  const reg = createAppRegistry({ stateDir: join(home, 'state'), home });
+  await reg.set('site', { dir: site });
+  const router = createAppRouter({ registry: reg, domain: 'jwass.xyz' });
+  await new Promise((r) => router.listen(0, '127.0.0.1', r));
+  try {
+    for (const path of ['/waiting.txt', '/docs/']) {
+      const status = await new Promise((resolve, reject) => http.get({
+        host: '127.0.0.1', port: router.address().port, path,
+        headers: { host: 'site.jwass.xyz' }, signal: AbortSignal.timeout(2000),
+      }, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)); }).on('error', reject));
+      assert.equal(status, 404, path);
+    }
+  } finally { router.close(); }
+});
+
+test('static responses keep the validated open file when its name changes', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'fox-home-'));
+  const { mkdir, writeFile, rename, symlink } = await import('node:fs/promises');
+  const site = join(home, 'site');
+  await mkdir(site);
+  await writeFile(join(site, 'page.txt'), 'published');
+  await writeFile(join(home, 'private.txt'), 'private');
+  const f = await staticFile(site, '/page.txt');
+  assert.ok(f);
+  try {
+    await rename(join(site, 'page.txt'), join(site, 'old.txt'));
+    await symlink(join(home, 'private.txt'), join(site, 'page.txt'));
+    assert.equal(await f.handle.readFile({ encoding: 'utf8' }), 'published');
+  } finally { await f.handle.close(); }
 });
 
 test('reconcile keeps tmux matching the list: starts, restarts what changed, stops paused and removed', async () => {
