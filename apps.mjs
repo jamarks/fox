@@ -9,6 +9,7 @@
 // A paused app keeps its entry but stops answering (and its command stops).
 import http from 'node:http';
 import net from 'node:net';
+import { constants } from 'node:fs';
 import { readFile, writeFile, mkdir, rename, stat, realpath, open } from 'node:fs/promises';
 import { join, resolve, extname, sep, relative } from 'node:path';
 import { homedir } from 'node:os';
@@ -82,7 +83,10 @@ async function checkDir(value, home) {
   if (!(dir.startsWith(home + sep)) || dir.slice(home.length + 1).split(sep).some((p) => p.startsWith('.'))) throw fail('The folder must be inside your home, and not a hidden one.');
   const st = await stat(dir).catch(() => null);
   if (!st?.isDirectory()) throw fail(`${value} is not a folder.`);
-  return dir;
+  // Store the real folder so a linked directory cannot bypass the home/hidden check or be retargeted later.
+  const actual = await realpath(dir);
+  if (!actual.startsWith(home + sep) || actual.slice(home.length + 1).split(sep).some((p) => p.startsWith('.'))) throw fail('The folder must be inside your home, and not a hidden one.');
+  return actual;
 }
 export const appKind = (a) => (a.dir ? 'dir' : a.cmd ? 'cmd' : 'port');
 
@@ -109,7 +113,8 @@ export async function staticFile(dir, urlPath) {
     };
     // Inspect the opened inode, not a path that may be replaced before the response is streamed.
     const actual = (fd) => realpath(`/proc/self/fd/${fd}`);
-    handle = await open(resolve(dir, ...parts), 'r');
+    // A named pipe in the published folder must not hold a request open waiting for a writer.
+    handle = await open(resolve(dir, ...parts), constants.O_RDONLY | constants.O_NONBLOCK);
     let path = await actual(handle.fd);
     if (!inside(path)) return null;
     let st = await handle.stat();
@@ -117,7 +122,7 @@ export async function staticFile(dir, urlPath) {
       // The index is opened relative to the validated directory descriptor, not its mutable name.
       const folder = handle;
       handle = null;
-      try { handle = await open(`/proc/self/fd/${folder.fd}/index.html`, 'r'); }
+      try { handle = await open(`/proc/self/fd/${folder.fd}/index.html`, constants.O_RDONLY | constants.O_NONBLOCK); }
       finally { await folder.close(); }
       path = await actual(handle.fd);
       if (!inside(path)) return null;
