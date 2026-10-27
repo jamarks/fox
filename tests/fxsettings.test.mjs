@@ -24,6 +24,31 @@ test('fox changes only the fx settings it shows, and keeps the rest of the file'
   assert.throws(() => withFxSetting({}, 'effort', 'max'), /one of/);
 });
 
+test('concurrent settings updates preserve explicit overrides and return committed state', async () => {
+  const file = join(await mkdtemp(join(tmpdir(), 'fox-fxs-')), 'settings.json');
+  const first = createFxSettings(file);
+  const second = createFxSettings(file);
+  const entry = (rows, key) => rows.find((s) => s.key === key);
+  for (let i = 0; i < 30; i++) {
+    await writeFile(file, JSON.stringify({ provider: 'codex' }));
+    const [context, session] = await Promise.all([
+      first.set('context', false), second.set('statusLine.session', true),
+    ]);
+    assert.equal(entry(context, 'context').value, false);
+    assert.equal(entry(context, 'context').applied, true);
+    assert.equal(entry(session, 'statusLine.session').value, true);
+    assert.equal(entry(session, 'context').applied, true, 'second update sees the committed first update');
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), {
+      provider: 'codex', context: false, statusLine: { session: true },
+    });
+  }
+  const invalid = first.set('context', 'false');
+  const valid = second.set('statusLine.session', false);
+  await assert.rejects(invalid, { status: 400 });
+  assert.equal(entry(await valid, 'statusLine.session').value, false);
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).context, false, 'a rejected update does not block later writes');
+});
+
 test('step limit is opt-in, read-only until applied, and preserves existing settings', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'fox-fxs-'));
   const file = join(dir, 'settings.json');
