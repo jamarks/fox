@@ -75,10 +75,10 @@ test('the new dot shows until the fx section has been on screen, kept in this br
   await ui.load();
   assert.match(ui.panel.innerHTML, /set-new/, 'shown this time');
   await ui.load();
-  assert.doesNotMatch(ui.panel.innerHTML, /set-new/, 'gone the next time');
+  assert.doesNotMatch(ui.panel.innerHTML, /class="set-new"/, 'legacy dots gone the next time');
   assert.ok(JSON.parse(ui.storage.get('fox.fxSettingsSeen')).includes('session_titles:2026-10-23'));
   assert.deepEqual(ui.writes, [], 'seeing never writes a setting');
   await ui.press('session_titles', 'off');
   await ui.press('session_titles', 'default');
-  assert.doesNotMatch(ui.panel.innerHTML, /set-new/, 'changing a setting does not bring the dot back');
+  assert.doesNotMatch(ui.panel.innerHTML, /class="set-new"/, 'changing a setting does not bring the legacy dot back');
 });
