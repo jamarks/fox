@@ -159,7 +159,7 @@ export function createWorkspaces({
       await Promise.all(ws.repos.map((r) => existsSync(join(ws.dir, r.dir, '.git')) ? git(['-C', join(ws.dir, r.dir), 'fetch', '--quiet', '--prune'], { timeout: 60000 }).catch(() => {}) : null));
       return true;
     },
-    // What stops the folder from being deleted: dirty or unpushed repos, and any file that is not a repo.
+    // What stops the folder from being deleted: dirty, ignored or unpushed repos, and any file that is not a repo.
     async blockers(id) {
       const ws = await this.get(id);
       if (!ws) return null;
@@ -173,6 +173,10 @@ export function createWorkspaces({
         const run = (args) => git(['-C', dir, ...SAFE_GIT, ...args], { timeout: 10000 });
         const dirty = await run(['status', '--porcelain']).catch(() => 'unknown');
         if (dirty) out.push(`${r.dir}: uncommitted changes`);
+        // Ignored local files are absent from status but still must not be deleted.
+        const ignored = await run(['ls-files', '--others', '--ignored', '--exclude-standard']).catch(() => null);
+        if (ignored === null) out.push(`${r.dir}: unable to check ignored files`);
+        else if (ignored) out.push(`${r.dir}: ignored files`);
         // Commits on any ref (a detached HEAD and a stash too) that no remote has.
         const unpushed = await run(['log', '--all', '--not', '--remotes', '--oneline', '-n', '1']).catch(() => 'unknown');
         if (unpushed) out.push(`${r.dir}: commits not pushed`);

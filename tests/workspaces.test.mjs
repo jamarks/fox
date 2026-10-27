@@ -144,8 +144,43 @@ test('a clean workspace folder can be deleted', async () => {
   const { base, ws } = await setup([['jamarks', 'notes']]);
   const created = await ws.create({ name: 'gone', repos: [{ owner: 'jamarks', name: 'notes' }] });
   await settle(ws, created.id);
+  assert.deepEqual(await ws.blockers(created.id), []);
   await ws.remove(created.id, { deleteFolder: true });
   assert.ok(!existsSync(join(base, 'workspaces', 'gone')));
+});
+
+test('ignored local files block folder deletion even when the repo is clean and pushed', async () => {
+  const { ws } = await setup([['jamarks', 'notes']]);
+  const created = await ws.create({ name: 'keep', repos: [{ owner: 'jamarks', name: 'notes' }] });
+  await settle(ws, created.id);
+  const dir = join(created.dir, 'notes');
+  await writeFile(join(dir, '.gitignore'), '*.secret\n');
+  git(['add', '.gitignore'], dir);
+  git(['commit', '-q', '-m', 'ignore local files'], dir);
+  git(['push', '-q', 'origin', 'main'], dir);
+  const ignoredFile = join(dir, 'notes.secret');
+  await writeFile(ignoredFile, 'local');
+  assert.equal(git(['status', '--porcelain'], dir), '');
+  assert.deepEqual(await ws.blockers(created.id), ['notes: ignored files']);
+  await assert.rejects(ws.remove(created.id, { deleteFolder: true }), (e) => e.status === 409 && e.blockers.includes('notes: ignored files'));
+  assert.equal(await readFile(ignoredFile, 'utf8'), 'local');
+  assert.ok(await ws.get(created.id));
+});
+
+test('folder deletion is blocked if the ignored-file check fails', async () => {
+  const { base, ws } = await setup([['jamarks', 'notes']]);
+  const created = await ws.create({ name: 'keep', repos: [{ owner: 'jamarks', name: 'notes' }] });
+  await settle(ws, created.id);
+  const guarded = createWorkspaces({
+    stateDir: join(base, 'state'), rootDir: join(base, 'workspaces'),
+    git: async (args) => {
+      if (args.includes('ls-files')) throw new Error('git check failed');
+      return git(args);
+    },
+  });
+  assert.deepEqual(await guarded.blockers(created.id), ['notes: unable to check ignored files']);
+  await assert.rejects(guarded.remove(created.id, { deleteFolder: true }), (e) => e.status === 409);
+  assert.ok(existsSync(join(created.dir, 'notes', 'README.md')));
 });
 
 test('update adds repos; the name is the folder and does not change', async () => {
