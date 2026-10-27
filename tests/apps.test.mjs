@@ -80,6 +80,11 @@ test('an app can be a folder or a command; folders and working dirs stay inside 
   for (const [name, folder] of [['external', 'external'], ['private', 'private']]) {
     await assert.rejects(reg.set(`${name}-cmd`, { cmd: 'npm start', cwd: join(home, folder), port: 3002 }), /inside your home/);
   }
+  const sibling = `${home}-other`;
+  await mkdir(sibling);
+  await assert.rejects(reg.set('sibling', { dir: sibling }), /inside your home/);
+  await symlink(sibling, join(home, 'sibling-link'));
+  await assert.rejects(reg.set('sibling-link', { dir: join(home, 'sibling-link') }), /inside your home/);
   await assert.rejects(reg.set('root', { dir: '/etc' }), /inside your home/);
   await assert.rejects(reg.set('home', { dir: home }), /inside your home/);
   await assert.rejects(reg.set('nope', { dir: join(home, 'missing') }), /not a folder/);
