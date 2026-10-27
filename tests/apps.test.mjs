@@ -77,14 +77,31 @@ test('an app can be a folder or a command; folders and working dirs stay inside 
   await assert.rejects(reg.set('external', { dir: join(home, 'external') }), /inside your home/);
   await assert.rejects(reg.set('private', { dir: join(home, 'private') }), /hidden/);
   assert.equal((await reg.set('linked', { dir: join(home, 'linked') })).dir, join(home, 'site'));
+  for (const [name, folder] of [['external', 'external'], ['private', 'private']]) {
+    await assert.rejects(reg.set(`${name}-cmd`, { cmd: 'npm start', cwd: join(home, folder), port: 3002 }), /inside your home/);
+  }
   await assert.rejects(reg.set('root', { dir: '/etc' }), /inside your home/);
   await assert.rejects(reg.set('home', { dir: home }), /inside your home/);
   await assert.rejects(reg.set('nope', { dir: join(home, 'missing') }), /not a folder/);
   const app = await reg.set('board', { cmd: 'npm start', cwd: join(home, 'site'), port: 3002 });
   assert.equal(app.port, 3002);
+  assert.equal(app.cwd, join(home, 'site'));
+  assert.equal((await reg.set('linked-cmd', { cmd: 'npm start', cwd: join(home, 'linked'), port: 3003 })).cwd, join(home, 'site'));
   await assert.rejects(reg.set('two', { cmd: 'a\nb', cwd: join(home, 'site'), port: 3003 }), /one line/);
   assert.equal((await reg.setPaused('board', true)).paused, true);
   assert.equal((await reg.setPaused('board', false)).paused, undefined);
+});
+
+test('a linked home is resolved before checking and storing app roots', async () => {
+  const parent = await mkdtemp(join(tmpdir(), 'fox-apps-'));
+  const { mkdir, symlink } = await import('node:fs/promises');
+  const home = join(parent, 'home');
+  const alias = join(parent, 'alias');
+  await mkdir(join(home, 'site'), { recursive: true });
+  await symlink(home, alias);
+  const reg = createAppRegistry({ stateDir: join(parent, 'state'), home: alias });
+  assert.equal((await reg.set('site', { dir: join(alias, 'site') })).dir, join(home, 'site'));
+  assert.equal((await reg.set('board', { cmd: 'npm start', cwd: join(alias, 'site'), port: 3002 })).cwd, join(home, 'site'));
 });
 
 test('a folder app serves its files, index.html for a folder, and never hidden files or a way out', async () => {

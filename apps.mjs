@@ -79,13 +79,15 @@ export function createAppRegistry({ stateDir, denyPorts = [], home = homedir() }
 // way (~/.ssh, ~/.config with fox's own state), never the home itself.
 async function checkDir(value, home) {
   const fail = (message) => Object.assign(new Error(message), { status: 400 });
+  const root = await realpath(home);
   const dir = resolve(String(value ?? '').replace(/^~(?=\/|$)/, home));
-  if (!(dir.startsWith(home + sep)) || dir.slice(home.length + 1).split(sep).some((p) => p.startsWith('.'))) throw fail('The folder must be inside your home, and not a hidden one.');
+  const allowed = (path, base) => path.startsWith(base + sep) && !path.slice(base.length + 1).split(sep).some((p) => p.startsWith('.'));
+  if (!allowed(dir, resolve(home))) throw fail('The folder must be inside your home, and not a hidden one.');
   const st = await stat(dir).catch(() => null);
   if (!st?.isDirectory()) throw fail(`${value} is not a folder.`);
-  // Store the real folder so a linked directory cannot bypass the home/hidden check or be retargeted later.
+  // Compare resolved paths so a linked directory cannot bypass the home/hidden check or be retargeted later.
   const actual = await realpath(dir);
-  if (!actual.startsWith(home + sep) || actual.slice(home.length + 1).split(sep).some((p) => p.startsWith('.'))) throw fail('The folder must be inside your home, and not a hidden one.');
+  if (!allowed(actual, root)) throw fail('The folder must be inside your home, and not a hidden one.');
   return actual;
 }
 export const appKind = (a) => (a.dir ? 'dir' : a.cmd ? 'cmd' : 'port');
