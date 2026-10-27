@@ -167,6 +167,22 @@ test('ignored local files block folder deletion even when the repo is clean and 
   assert.ok(await ws.get(created.id));
 });
 
+test('an ignored whitespace-only filename cannot be trimmed away', async () => {
+  const { ws } = await setup([['jamarks', 'notes']]);
+  const created = await ws.create({ name: 'keep', repos: [{ owner: 'jamarks', name: 'notes' }] });
+  await settle(ws, created.id);
+  const dir = join(created.dir, 'notes');
+  await writeFile(join(dir, '.gitignore'), '*\n');
+  git(['add', '-f', '.gitignore'], dir);
+  git(['commit', '-q', '-m', 'ignore files'], dir);
+  git(['push', '-q', 'origin', 'main'], dir);
+  await writeFile(join(dir, ' '), 'local');
+  assert.equal(git(['status', '--porcelain'], dir), '');
+  assert.deepEqual(await ws.blockers(created.id), ['notes: ignored files']);
+  await assert.rejects(ws.remove(created.id, { deleteFolder: true }), (e) => e.status === 409);
+  assert.equal(await readFile(join(dir, ' '), 'utf8'), 'local');
+});
+
 test('folder deletion is blocked if the ignored-file check fails', async () => {
   const { base, ws } = await setup([['jamarks', 'notes']]);
   const created = await ws.create({ name: 'keep', repos: [{ owner: 'jamarks', name: 'notes' }] });

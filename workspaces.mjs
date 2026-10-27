@@ -174,7 +174,7 @@ export function createWorkspaces({
         const dirty = await run(['status', '--porcelain']).catch(() => 'unknown');
         if (dirty) out.push(`${r.dir}: uncommitted changes`);
         // Ignored local files are absent from status but still must not be deleted.
-        const ignored = await run(['ls-files', '--others', '--ignored', '--exclude-standard']).catch(() => null);
+        const ignored = await run(['ls-files', '-z', '--others', '--ignored', '--exclude-standard']).catch(() => null);
         if (ignored === null) out.push(`${r.dir}: unable to check ignored files`);
         else if (ignored) out.push(`${r.dir}: ignored files`);
         // Commits on any ref (a detached HEAD and a stash too) that no remote has.
