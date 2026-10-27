@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, stat, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createFxSettings, withFxSetting, fxSettingsView, FX_SETTINGS } from '../fxsettings.mjs';
 import { runInNewContext } from 'node:vm';
 
@@ -47,6 +47,23 @@ test('concurrent settings updates preserve explicit overrides and return committ
   await assert.rejects(invalid, { status: 400 });
   assert.equal(entry(await valid, 'statusLine.session').value, false);
   assert.equal(JSON.parse(await readFile(file, 'utf8')).context, false, 'a rejected update does not block later writes');
+
+  const alias = createFxSettings(`${dirname(file)}/./settings.json`);
+  const [removed, replaced] = await Promise.all([
+    first.set('context', null), alias.set('context', true),
+  ]);
+  assert.equal(entry(removed, 'context').applied, false);
+  assert.equal(entry(replaced, 'context').applied, true);
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).context, true, 'same-key updates follow call order across path aliases');
+
+  await writeFile(file, '{invalid json');
+  const failed = first.set('context', false);
+  const queued = second.set('statusLine.session', true);
+  await assert.rejects(failed, SyntaxError);
+  await assert.rejects(queued, SyntaxError);
+  await writeFile(file, JSON.stringify({ provider: 'codex' }));
+  await first.set('context', false);
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { provider: 'codex', context: false }, 'failed reads release the queue');
 });
 
 test('step limit is opt-in, read-only until applied, and preserves existing settings', async () => {
