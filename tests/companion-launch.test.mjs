@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { mkdtemp, mkdir, writeFile, readFile, rm, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -13,7 +13,11 @@ test('companion args reach only a fresh fx launch and persist on its session, no
   const root = join(home, 'workspaces', 'team'), api = join(root, 'api'), web = join(root, 'web');
   const stateDir = join(home, 'state'), sessionDir = join(home, '.fx', 'sessions', 'session-one');
   t.after(async () => rm(home, { recursive: true, force: true }));
-  for (const dir of [api, web, stateDir, sessionDir, join(api, '.git'), join(web, '.git')]) await mkdir(dir, { recursive: true });
+  for (const dir of [api, web, stateDir, sessionDir]) await mkdir(dir, { recursive: true });
+  for (const [dir, owner, name] of [[api, 'a', 'api'], [web, 'b', 'web']]) {
+    execFileSync('git', ['init', '-q', dir]);
+    execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', `https://github.com/${owner}/${name}.git`]);
+  }
   await writeFile(join(stateDir, 'workspaces.json'), JSON.stringify([{ id: 'team', name: 'team', dir: root, repos: [{ owner: 'a', name: 'api', dir: 'api' }, { owner: 'b', name: 'web', dir: 'web' }] }]));
   const tmuxState = join(home, 'tmux.json'), tmux = join(home, 'tmux.mjs'), fx = join(home, 'fx');
   await writeFile(tmux, `#!/usr/bin/env node

@@ -111,6 +111,36 @@ test('same repo name from two owners gets separate folders', async () => {
   assert.deepEqual(w.repos.map((r) => r.dir), ['api', 'api-b']);
 });
 
+test('adding another repo preserves a removed checkout and uses a free folder', async () => {
+  const { ws } = await setup([['alpha', 'api'], ['beta', 'api']]);
+  const created = await ws.create({ name: 'team', repos: [{ owner: 'alpha', name: 'api' }] });
+  await settle(ws, created.id);
+  const old = join(created.dir, 'api');
+  await writeFile(join(old, 'identity.txt'), 'alpha');
+  await ws.update(created.id, { remove: [{ owner: 'alpha', name: 'api' }] });
+  await ws.update(created.id, { add: [{ owner: 'beta', name: 'api' }] });
+  const listed = await settle(ws, created.id);
+  assert.deepEqual(listed.repos.map((r) => [r.owner, r.dir, r.status]), [['beta', 'api-beta', 'ready']]);
+  assert.equal(await readFile(join(old, 'identity.txt'), 'utf8'), 'alpha');
+  assert.match(git(['remote', 'get-url', 'origin'], old), /alpha\/api\.git$/);
+  assert.match(git(['remote', 'get-url', 'origin'], join(created.dir, 'api-beta')), /beta\/api\.git$/);
+});
+
+test('a checkout with a different origin is never ready or offered as a companion', async () => {
+  const { base, ws } = await setup([['alpha', 'api'], ['beta', 'api'], ['beta', 'web']]);
+  const created = await ws.create({ name: 'team', repos: [{ owner: 'beta', name: 'api' }, { owner: 'beta', name: 'web' }] });
+  await settle(ws, created.id);
+  const api = join(created.dir, 'api'), web = join(created.dir, 'web');
+  git(['remote', 'set-url', 'origin', join(base, 'remotes', 'alpha', 'api.git')], api);
+  assert.deepEqual((await ws.list())[0].repos.map((r) => r.status), ['error', 'ready']);
+  assert.match((await ws.list())[0].repos[0].error, /origin does not match/);
+  assert.deepEqual(await ws.companions(web), []);
+  await assert.rejects(ws.validateCompanions(web, [api]), (e) => e.status === 400);
+  await ws.retry(created.id);
+  assert.equal((await ws.list())[0].repos[0].status, 'error');
+  assert.match(git(['remote', 'get-url', 'origin'], api), /alpha\/api\.git$/);
+});
+
 test('a repo that fails to clone leaves the workspace and the others in place', async () => {
   const { ws } = await setup([['jamarks', 'notes']]);
   const created = await ws.create({ name: 'partial', repos: [{ owner: 'jamarks', name: 'notes' }, { owner: 'jamarks', name: 'missing' }] });
