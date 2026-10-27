@@ -139,6 +139,26 @@ test('a checkout with a different origin is never ready or offered as a companio
   await ws.retry(created.id);
   assert.equal((await ws.list())[0].repos[0].status, 'error');
   assert.match(git(['remote', 'get-url', 'origin'], api), /alpha\/api\.git$/);
+  await assert.rejects(ws.remove(created.id, { deleteFolder: true }), /api: checkout origin does not match/);
+  assert.ok(existsSync(api));
+  assert.equal(await ws.originMatches(created, created.repos[0]), false);
+});
+
+test('origin identity uses the configured URL even with a global insteadOf rewrite', async () => {
+  const { base, ws } = await setup([['beta', 'api']]);
+  const created = await ws.create({ name: 'team', repos: [{ owner: 'beta', name: 'api' }] });
+  await settle(ws, created.id);
+  const config = join(base, 'gitconfig');
+  await writeFile(config, `[url "ssh://example.invalid/"]\n\tinsteadOf = ${join(base, 'remotes')}/\n`);
+  const previous = process.env.GIT_CONFIG_GLOBAL;
+  try {
+    process.env.GIT_CONFIG_GLOBAL = config;
+    assert.equal(await ws.originMatches(created, created.repos[0]), true);
+    assert.equal((await ws.list())[0].repos[0].status, 'ready');
+  } finally {
+    if (previous === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+    else process.env.GIT_CONFIG_GLOBAL = previous;
+  }
 });
 
 test('a repo that fails to clone leaves the workspace and the others in place', async () => {

@@ -1053,9 +1053,11 @@ passHyperlinks(); // for sessions that already run (a browser attaching later pi
 async function updateWorkspaceRepos(cwd) {
   const ws = await workspaces.forPath(cwd).catch(() => null);
   if (!ws?.repos?.length) return;
-  const all = Promise.all(ws.repos.map((r) => fastForward(join(ws.dir, r.dir)).then((x) => {
+  const all = Promise.all(ws.repos.map(async (r) => {
+    if (!(await workspaces.originMatches(ws, r))) return;
+    const x = await fastForward(join(ws.dir, r.dir));
     if (x.status === 'updated') console.log(`fox: ${ws.name}/${r.dir} updated ${x.from}..${x.to}`);
-  })));
+  }));
   await Promise.race([all, new Promise((r) => setTimeout(r, 8000))]);
 }
 

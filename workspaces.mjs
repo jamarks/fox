@@ -53,7 +53,8 @@ export function createWorkspaces({
   async function originMatches(ws, repo) {
     const dir = join(ws.dir, repo.dir);
     if (!existsSync(join(dir, '.git'))) return false;
-    const origin = await git(['-C', dir, ...SAFE_GIT, 'remote', 'get-url', 'origin'], { timeout: 5000 }).catch(() => null);
+    // Read the configured URL, not get-url's insteadOf-expanded transport URL.
+    const origin = await git(['-C', dir, ...SAFE_GIT, 'config', '--local', '--get', 'remote.origin.url'], { timeout: 5000 }).catch(() => null);
     return origin === remoteUrl(repo);
   }
   async function cloneOne(ws, repo) {
@@ -121,6 +122,7 @@ export function createWorkspaces({
       return Promise.all(all.map(async (ws) => ({ ...ws, repos: await Promise.all(ws.repos.map((r) => repoState(ws, r))) })));
     },
     async get(id) { return (await load()).find((w) => w.id === id) ?? null; },
+    originMatches,
     // Creates the entry and the folder, answers at once and clones in the background (poll list()).
     // No repos is fine: an empty folder to start something from scratch. The name is the folder, for good.
     async create({ name, repos = [] }) {
@@ -183,6 +185,7 @@ export function createWorkspaces({
         if (!existsSync(dir)) continue; // never cloned: nothing to lose
         // A repo folder without .git (a failed clone, or .git removed) is plain files: nothing says they are pushed.
         if (!existsSync(join(dir, '.git'))) { if ((await readdir(dir).catch(() => [])).length) out.push(`${r.dir}: files outside git`); continue; }
+        if (!(await originMatches(ws, r))) { out.push(`${r.dir}: checkout origin does not match`); continue; }
         const run = (args) => git(['-C', dir, ...SAFE_GIT, ...args], { timeout: 10000 });
         const dirty = await run(['status', '--porcelain']).catch(() => 'unknown');
         if (dirty) out.push(`${r.dir}: uncommitted changes`);

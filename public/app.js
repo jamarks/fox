@@ -223,7 +223,7 @@ const workspaceFor = (path) => (state.workspaces ?? []).find((w) => path === w.d
 function wsRepoLine(r, wsId = null) {
   const stateHtml = r.status === 'cloning' ? '<span class="ws-state">cloning…</span>'
     : r.status === 'missing' ? '<span class="ws-state">waiting to clone</span>'
-    : r.status === 'error' ? `<span class="ws-state err" title="${esc(r.error ?? '')}">clone failed</span>`
+    : r.status === 'error' ? `<span class="ws-state err" title="${esc(r.error ?? '')}">${r.error === 'Checkout origin does not match this repo.' ? 'origin mismatch' : 'clone failed'}</span>`
     : `<span class="ws-state ${r.changed ? 'warn' : ''}">${[r.changed ? `±${r.changed}` : '', r.behind ? `↓${r.behind}` : '', r.ahead ? `↑${r.ahead}` : ''].filter(Boolean).join(' ')}</span>`;
   // The branch is the workspace copy's, shared by its sessions: a button to change it (branches.mjs) when fox knows the workspace.
   const off = r.branch && r.default && r.branch !== r.default;
