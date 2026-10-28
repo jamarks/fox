@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, stat, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createFxSettings, withFxSetting, fxSettingsView, FX_SETTINGS } from '../fxsettings.mjs';
 import { runInNewContext } from 'node:vm';
 
@@ -22,6 +22,48 @@ test('fox changes only the fx settings it shows, and keeps the rest of the file'
   assert.throws(() => withFxSetting({}, 'provider', 'grok'), /does not manage/);
   assert.throws(() => withFxSetting({}, 'fast_mode', 'yes'), /on or off/);
   assert.throws(() => withFxSetting({}, 'effort', 'max'), /one of/);
+});
+
+test('concurrent settings updates preserve explicit overrides and return committed state', async () => {
+  const file = join(await mkdtemp(join(tmpdir(), 'fox-fxs-')), 'settings.json');
+  const first = createFxSettings(file);
+  const second = createFxSettings(file);
+  const entry = (rows, key) => rows.find((s) => s.key === key);
+  for (let i = 0; i < 30; i++) {
+    await writeFile(file, JSON.stringify({ provider: 'codex' }));
+    const [context, session] = await Promise.all([
+      first.set('context', false), second.set('statusLine.session', true),
+    ]);
+    assert.equal(entry(context, 'context').value, false);
+    assert.equal(entry(context, 'context').applied, true);
+    assert.equal(entry(session, 'statusLine.session').value, true);
+    assert.equal(entry(session, 'context').applied, true, 'second update sees the committed first update');
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), {
+      provider: 'codex', context: false, statusLine: { session: true },
+    });
+  }
+  const invalid = first.set('context', 'false');
+  const valid = second.set('statusLine.session', false);
+  await assert.rejects(invalid, { status: 400 });
+  assert.equal(entry(await valid, 'statusLine.session').value, false);
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).context, false, 'a rejected update does not block later writes');
+
+  const alias = createFxSettings(`${dirname(file)}/./settings.json`);
+  const [removed, replaced] = await Promise.all([
+    first.set('context', null), alias.set('context', true),
+  ]);
+  assert.equal(entry(removed, 'context').applied, false);
+  assert.equal(entry(replaced, 'context').applied, true);
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).context, true, 'same-key updates follow call order across path aliases');
+
+  await writeFile(file, '{invalid json');
+  const failed = first.set('context', false);
+  const queued = second.set('statusLine.session', true);
+  await assert.rejects(failed, SyntaxError);
+  await assert.rejects(queued, SyntaxError);
+  await writeFile(file, JSON.stringify({ provider: 'codex' }));
+  await first.set('context', false);
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { provider: 'codex', context: false }, 'failed reads release the queue');
 });
 
 test('step limit is opt-in, read-only until applied, and preserves existing settings', async () => {

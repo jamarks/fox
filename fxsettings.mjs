@@ -2,6 +2,10 @@
 // Settings. Only these keys are read or written; everything else in the file (models, provider…) stays as fx left it.
 import { readFile, writeFile, rename, stat, chmod } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
+import { resolve } from 'node:path';
+
+// Serialize each file's read through rename, even across separate createFxSettings callers.
+const pendingWrites = new Map();
 
 export const FX_SETTINGS = [
   { key: 'prompt_history.enabled', label: 'Save prompt history', description: 'Recall prompts and slash commands in fox’s terminal view', type: 'bool', default: false, introduced: '2026-10-27', documentation: 'https://fx.sh/docs/configure-fx/configuration.md#interface-and-update-settings', upstreamDefault: 'on', managedOverride: true },
@@ -66,13 +70,20 @@ export function createFxSettings(file) {
   return {
     async list() { return fxSettingsView(await read()); },
     async set(key, value) {
-      const next = withFxSetting(await read(), key, value);
-      const mode = await stat(file).then((s) => s.mode & 0o777, () => 0o600);
-      const tmp = `${file}.${randomBytes(6).toString('hex')}.tmp`;
-      await writeFile(tmp, JSON.stringify(next, null, 2) + '\n', { mode });
-      await chmod(tmp, mode); // writeFile's mode is filtered by the process umask
-      await rename(tmp, file); // whole file at once: fx never reads half of it
-      return fxSettingsView(next);
+      const path = resolve(file);
+      const previous = pendingWrites.get(path) ?? Promise.resolve();
+      const committed = previous.catch(() => {}).then(async () => {
+        const next = withFxSetting(await read(), key, value);
+        const mode = await stat(file).then((s) => s.mode & 0o777, () => 0o600);
+        const tmp = `${file}.${randomBytes(6).toString('hex')}.tmp`;
+        await writeFile(tmp, JSON.stringify(next, null, 2) + '\n', { mode });
+        await chmod(tmp, mode); // writeFile's mode is filtered by the process umask
+        await rename(tmp, file); // whole file at once: fx never reads half of it
+        return fxSettingsView(next);
+      });
+      pendingWrites.set(path, committed);
+      try { return await committed; }
+      finally { if (pendingWrites.get(path) === committed) pendingWrites.delete(path); }
     },
   };
 }
