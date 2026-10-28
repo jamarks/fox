@@ -43,17 +43,28 @@ export function createWorkspaces({
     const real = await realpath(dir).catch(() => resolve(dir));
     return real === root || real.startsWith(root + sep);
   }
-  // Folder name for a repo: its name, or name-owner if another owner's repo already took it.
-  function folderFor(ws, repo) {
-    const taken = new Set(ws.repos.filter((r) => key(r) !== key(repo)).map((r) => r.dir.toLowerCase()));
-    const plain = repo.name;
-    return taken.has(plain.toLowerCase()) ? `${repo.name}-${repo.owner}` : plain;
+  // Removed repos keep their folders, so names must also be free on disk before assigning them.
+  async function folderFor(ws, repo) {
+    const taken = new Set([...ws.repos.map((r) => r.dir), ...await readdir(ws.dir).catch(() => [])].map((dir) => dir.toLowerCase()));
+    const plain = repo.name, owned = `${repo.name}-${repo.owner}`;
+    for (const candidate of [plain, owned]) if (!taken.has(candidate.toLowerCase())) return candidate;
+    for (let n = 2; ; n++) if (!taken.has(`${owned}-${n}`.toLowerCase())) return `${owned}-${n}`;
+  }
+  async function originMatches(ws, repo) {
+    const dir = join(ws.dir, repo.dir);
+    if (!existsSync(join(dir, '.git'))) return false;
+    // Read the configured URL, not get-url's insteadOf-expanded transport URL.
+    const origin = await git(['-C', dir, ...SAFE_GIT, 'config', '--local', '--get', 'remote.origin.url'], { timeout: 5000 }).catch(() => null);
+    return origin === remoteUrl(repo);
   }
   async function cloneOne(ws, repo) {
     const k = `${ws.id}|${key(repo)}`;
     if (cloning.has(k)) return;
     const dir = join(ws.dir, repo.dir);
-    if (existsSync(join(dir, '.git'))) return;
+    if (existsSync(join(dir, '.git'))) {
+      if (!(await originMatches(ws, repo))) errors.set(k, 'Checkout origin does not match this repo.');
+      return;
+    }
     cloning.set(k, true); errors.delete(k);
     try {
       if (!(await inside(ws.dir))) throw new Error('workspace folder is outside ~/workspaces');
@@ -87,6 +98,7 @@ export function createWorkspaces({
     const base = { owner: r.owner, name: r.name, dir: r.dir };
     if (cloning.has(k)) return { ...base, status: 'cloning' };
     if (!existsSync(join(dir, '.git'))) return { ...base, status: errors.has(k) ? 'error' : 'missing', error: errors.get(k) ?? null };
+    if (!(await originMatches(ws, r))) return { ...base, status: 'error', error: 'Checkout origin does not match this repo.' };
     const run = (args) => git(['-C', dir, ...SAFE_GIT, ...args], { timeout: 5000 }).catch(() => '');
     const [branch, porcelain, counts, def] = await Promise.all([
       run(['rev-parse', '--abbrev-ref', 'HEAD']), run(['status', '--porcelain']),
@@ -110,6 +122,7 @@ export function createWorkspaces({
       return Promise.all(all.map(async (ws) => ({ ...ws, repos: await Promise.all(ws.repos.map((r) => repoState(ws, r))) })));
     },
     async get(id) { return (await load()).find((w) => w.id === id) ?? null; },
+    originMatches,
     // Creates the entry and the folder, answers at once and clones in the background (poll list()).
     // No repos is fine: an empty folder to start something from scratch. The name is the folder, for good.
     async create({ name, repos = [] }) {
@@ -126,7 +139,7 @@ export function createWorkspaces({
       for (const r of repos) {
         if (ws.repos.some((x) => key(x) === key(r))) continue;
         const repo = { owner: String(r.owner), name: String(r.name) };
-        ws.repos.push({ ...repo, dir: folderFor(ws, { ...repo, dir: '' }) });
+        ws.repos.push({ ...repo, dir: await folderFor(ws, repo) });
       }
       await ensureNotes(ws).catch(() => {}); noted.add(ws.id);
       all.push(ws); await save(all);
@@ -144,7 +157,7 @@ export function createWorkspaces({
       for (const r of add) {
         if (ws.repos.some((x) => key(x) === key(r))) continue;
         const repo = { owner: String(r.owner), name: String(r.name) };
-        ws.repos.push({ ...repo, dir: folderFor(ws, { ...repo, dir: '' }) });
+        ws.repos.push({ ...repo, dir: await folderFor(ws, repo) });
       }
       await ensureNotes(ws).catch(() => {});
       await save(all);
@@ -156,7 +169,9 @@ export function createWorkspaces({
     async fetch(id) {
       const ws = await this.get(id);
       if (!ws) return false;
-      await Promise.all(ws.repos.map((r) => existsSync(join(ws.dir, r.dir, '.git')) ? git(['-C', join(ws.dir, r.dir), 'fetch', '--quiet', '--prune'], { timeout: 60000 }).catch(() => {}) : null));
+      await Promise.all(ws.repos.map(async (r) => {
+        if (await originMatches(ws, r)) await git(['-C', join(ws.dir, r.dir), 'fetch', '--quiet', '--prune'], { timeout: 60000 }).catch(() => {});
+      }));
       return true;
     },
     // What stops the folder from being deleted: dirty, ignored or unpushed repos, and any file that is not a repo.
@@ -170,6 +185,7 @@ export function createWorkspaces({
         if (!existsSync(dir)) continue; // never cloned: nothing to lose
         // A repo folder without .git (a failed clone, or .git removed) is plain files: nothing says they are pushed.
         if (!existsSync(join(dir, '.git'))) { if ((await readdir(dir).catch(() => [])).length) out.push(`${r.dir}: files outside git`); continue; }
+        if (!(await originMatches(ws, r))) { out.push(`${r.dir}: checkout origin does not match`); continue; }
         const run = (args) => git(['-C', dir, ...SAFE_GIT, ...args], { timeout: 10000 });
         const dirty = await run(['status', '--porcelain']).catch(() => 'unknown');
         if (dirty) out.push(`${r.dir}: uncommitted changes`);
@@ -220,7 +236,7 @@ export function createWorkspaces({
         const dir = join(ws.dir, r.dir), realDir = join(root, r.dir);
         // Do not expose links, missing clones or folders without git, even if listed in workspaces.json.
         if (await realpath(dir).catch(() => null) !== realDir || !(await stat(dir).catch(() => null))?.isDirectory() ||
-            !(await stat(join(dir, '.git')).catch(() => null))) continue;
+            !(await stat(join(dir, '.git')).catch(() => null)) || !(await originMatches(ws, r))) continue;
         if (current === realDir || current.startsWith(realDir + sep)) continue;
         repos.push({ owner: r.owner, name: r.name, dir });
       }
