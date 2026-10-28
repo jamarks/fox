@@ -20,12 +20,12 @@ fx is the coding agent from Vercel Labs. fox runs it on a VPS or a computer at h
 ## What's new
 
 <!-- changelog:start -->
+- **2026-10-26** Preserve in-flight passkey challenges under load ([#58](https://github.com/jamarks/fox/pull/58))
+- **2026-10-26** Keep static app files inside their published directory ([#57](https://github.com/jamarks/fox/pull/57))
+- **2026-10-26** Preserve ignored local files during automatic fast-forward ([#56](https://github.com/jamarks/fox/pull/56))
+- **2026-10-26** Expire terminal sockets for restored sessions ([#55](https://github.com/jamarks/fox/pull/55))
 - **2026-10-25** Companion repos: compare real paths on both sides (tests fail on macOS) ([#44](https://github.com/jamarks/fox/pull/44))
 - **2026-10-25** Expose new fx settings as opt-in controls ([#52](https://github.com/jamarks/fox/pull/52))
-- **2026-10-24** Workspaces show their jobs and open PRs: counted under each one, one click filters Jobs or Pull requests ([#51](https://github.com/jamarks/fox/pull/51))
-- **2026-10-24** Record the exact inputs behind every job run ([#46](https://github.com/jamarks/fox/pull/46))
-- **2026-10-24** Expose new fx settings as opt-in controls ([#49](https://github.com/jamarks/fox/pull/49))
-- **2026-10-24** Keep an editable next-message draft per session ([#47](https://github.com/jamarks/fox/pull/47))
 
 All of it: [CHANGELOG.md](CHANGELOG.md).
 <!-- changelog:end -->

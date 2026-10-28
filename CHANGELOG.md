@@ -2,6 +2,13 @@
 
 What changed in fox, newest first: one line per merged pull request. Written by a job from the pull requests; edit the PR title to change a line.
 
+## 2026-10-26
+
+- Preserve in-flight passkey challenges under load ([#58](https://github.com/jamarks/fox/pull/58))
+- Keep static app files inside their published directory ([#57](https://github.com/jamarks/fox/pull/57))
+- Preserve ignored local files during automatic fast-forward ([#56](https://github.com/jamarks/fox/pull/56))
+- Expire terminal sockets for restored sessions ([#55](https://github.com/jamarks/fox/pull/55))
+
 ## 2026-10-25
 
 - Companion repos: compare real paths on both sides (tests fail on macOS) ([#44](https://github.com/jamarks/fox/pull/44))
