@@ -2201,12 +2201,14 @@ window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && settingsOp
 const fxSettingsSeen = new Set();
 try { for (const id of JSON.parse(localStorage.getItem('fox.fxSettingsSeen') ?? '[]')) fxSettingsSeen.add(id); } catch {}
 // fx's newer options are one choice each: Default leaves fx's own value (fox writes nothing), On or Off writes
-// it; a number is typed and saved with Enter, emptied (or Default) to give it back to fx. The dot marks one you
-// have not seen yet and goes once the fx section has been shown.
+// it; a number is typed and saved with Enter, emptied (or Default) to give it back to fx. Older dots go once the
+// section is shown. Explicit managed overrides keep their New label until dismissed, independently of activation.
 function fxSettingRow(o) {
-  const fresh = o.introduced && !fxSettingsSeen.has(`${o.key}:${o.introduced}`) ? '<span class="set-new" title="New"></span>' : '';
+  const unseen = o.introduced && !fxSettingsSeen.has(`${o.key}:${o.introduced}`);
+  const fresh = unseen ? (o.managedOverride ? `<span class="set-new-label">New</span> <button type="button" class="set-act" data-fx-seen="${o.key}:${o.introduced}">Mark as seen</button>` : '<span class="set-new" title="New"></span>') : '';
   const more = o.introduced ? ` · fx default: ${esc(o.upstreamDefault)}${o.documentation ? ` · <a href="${esc(o.documentation)}" target="_blank" rel="noopener noreferrer">docs</a>` : ''}` : '';
   const main = `<span class="set-main">${esc(o.label)}${fresh}<span class="set-sub">${esc(o.description)}${more}</span></span>`;
+  if (o.managedOverride) return `<div class="set-row fx-override">${main}<div class="fx-override-controls"><label>Apply setting <button type="button" class="switch-btn ${o.applied ? 'on' : ''}" data-fx-key="${o.key}" data-fx-apply="${o.applied}" role="switch" aria-checked="${o.applied}" aria-label="Apply ${esc(o.label)}"><span class="switch"></span></button></label><label>Save prompts <button type="button" class="switch-btn ${o.value ? 'on' : ''}" data-fx-key="${o.key}" ${o.applied ? '' : 'disabled'} role="switch" aria-checked="${o.value}" aria-label="${esc(o.label)}"><span class="switch"></span></button></label><span class="set-sub">${o.applied ? 'Personal override applied.' : 'No fox override; fx defaults to on.'} Changes apply to new or resumed sessions.</span></div></div>`;
   if (o.type === 'integer') return `<div class="set-row">${main}<div class="set-num"><input type="number" min="${o.min}" max="${o.max}" step="1" value="${o.applied ? esc(o.value) : ''}" placeholder="fx default" aria-label="${esc(o.label)}" data-fx-num="${o.key}">${o.applied ? `<button type="button" class="set-act" data-fx-key="${o.key}" data-fx-tri="default" title="Give it back to fx">Default</button>` : ''}</div></div>`;
   if (o.type === 'bool' && o.introduced) {
     const now = !o.applied ? 'default' : o.value ? 'on' : 'off';
@@ -2230,7 +2232,7 @@ async function loadFxSettings() {
     const list = await (await fetch('/api/fx-settings')).json();
     $('#settings-fx').innerHTML = list.map(fxSettingRow).join('');
     markFxSeen = () => { // once its section is on screen: the dots show this time, not the next
-      for (const o of list) if (o.introduced) fxSettingsSeen.add(`${o.key}:${o.introduced}`);
+      for (const o of list) if (o.introduced && !o.managedOverride) fxSettingsSeen.add(`${o.key}:${o.introduced}`);
       try { localStorage.setItem('fox.fxSettingsSeen', JSON.stringify([...fxSettingsSeen])); } catch {}
     };
     if (settingsSectionShown()) markFxSeen();
@@ -2238,9 +2240,17 @@ async function loadFxSettings() {
 }
 let markFxSeen = () => {};
 $('#settings-fx').addEventListener('click', (e) => {
+  const seen = e.target.closest('[data-fx-seen]');
+  if (seen) {
+    fxSettingsSeen.add(seen.dataset.fxSeen);
+    try { localStorage.setItem('fox.fxSettingsSeen', JSON.stringify([...fxSettingsSeen])); } catch {}
+    loadFxSettings();
+    return;
+  }
   const btn = e.target.closest('[data-fx-key]');
   if (!btn || btn.disabled || btn.classList.contains('on') && 'fxTri' in btn.dataset) return;
-  const value = 'fxTri' in btn.dataset ? (btn.dataset.fxTri === 'default' ? null : btn.dataset.fxTri === 'on')
+  const value = 'fxApply' in btn.dataset ? (btn.dataset.fxApply === 'true' ? null : false)
+    : 'fxTri' in btn.dataset ? (btn.dataset.fxTri === 'default' ? null : btn.dataset.fxTri === 'on')
     : 'fxValue' in btn.dataset ? btn.dataset.fxValue : !btn.classList.contains('on');
   saveFxSetting(btn.dataset.fxKey, value, btn);
 });

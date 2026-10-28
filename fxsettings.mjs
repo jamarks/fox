@@ -4,6 +4,7 @@ import { readFile, writeFile, rename, stat, chmod } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 
 export const FX_SETTINGS = [
+  { key: 'prompt_history.enabled', label: 'Save prompt history', description: 'Recall prompts and slash commands in fox’s terminal view', type: 'bool', default: false, introduced: '2026-10-27', documentation: 'https://fx.sh/docs/configure-fx/configuration.md#interface-and-update-settings', upstreamDefault: 'on', managedOverride: true },
   { key: 'collapse_tool_calls', label: 'Summarize tool calls', description: 'One line per group of reads, edits and commands', type: 'bool', default: false },
   { key: 'statusLine.context', label: 'Context in the footer', description: 'How full the session is, to know when to start a new one', type: 'bool', default: false },
   { key: 'statusLine.session', label: 'Session title in the footer', description: 'Identify the session in fox’s terminal view', type: 'bool', default: false, introduced: '2026-10-24', documentation: 'https://fx.sh/docs/configure-fx/configuration.md#interface-and-update-settings', upstreamDefault: 'off' },
