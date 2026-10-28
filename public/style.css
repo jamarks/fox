@@ -758,6 +758,25 @@ a.pr-chip { color: var(--accent); } a.pr-chip:hover { border-color: var(--accent
 .pr-review > b { display: block; margin-bottom: 2px; }
 .pr-review.needs-you { border-left-color: var(--warn); }
 .pr-review b { font-weight: 600; }
+/* A restrained timeline keeps chronology legible without giving every comment another card. */
+.pr-activity { display: block; background: transparent; border-right: 0; overflow: visible; min-width: 0; border-top: 1px solid var(--border); padding-top: 8px; }
+.pr-activity-head { display: flex; gap: 12px; align-items: baseline; margin-bottom: 5px; }
+.pr-activity-head > span { color: var(--muted); font-size: 11px; }
+.pr-activity ol { list-style: none; margin: 0; padding: 0 0 0 8px; max-height: 340px; overflow-y: auto; }
+.pr-activity li { border-left: 1px solid var(--border); padding: 5px 8px 9px 13px; position: relative; min-width: 0; }
+.pr-activity li::before { content: ''; position: absolute; left: -3px; top: 12px; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }
+.pr-activity li.after-verdict { border-left-color: var(--warn); }
+.pr-activity li.after-verdict::before { background: var(--warn); }
+.pr-comment-meta { display: flex; flex-wrap: wrap; gap: 3px 8px; align-items: baseline; font-size: 11px; }
+.pr-comment-meta b { color: var(--text); font-weight: 600; }
+.pr-comment-kind, .pr-comment-meta time { color: var(--muted); }
+.pr-comment-kind { font-family: var(--mono); min-width: 69px; }
+.pr-comment-new { color: var(--warn); }
+.pr-comment-body { display: block; color: var(--text); text-decoration: none; overflow-wrap: anywhere; font-size: 12px; max-width: 75ch; }
+.pr-comment-body:hover { color: var(--accent); text-decoration: underline; }
+.pr-comment-body:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pr-comment-path { font-family: var(--mono); color: var(--muted); font-size: 11px; }
+.pr-activity-error { color: var(--err); font-size: 11px; padding: 5px 0; }
 .pr-shots { display: flex; gap: 10px; overflow-x: auto; }
 .pr-shots figure { margin: 0; flex: none; } .pr-shots figcaption { font-size: 11px; color: var(--muted); margin-top: 4px; }
 .pr-shots img { display: block; height: 180px; width: auto; max-width: 420px; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }

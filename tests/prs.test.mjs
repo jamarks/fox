@@ -75,6 +75,79 @@ test('all PRs include open, merged and closed, ordered by creation date with mor
   assert.deepEqual(calls[0].args.slice(0, 6), ['pr', 'list', '--state', 'all', '--limit', '3']);
 });
 
+test('detail combines bounded issue and diff comments by creation time, distinguishes verdicts and caches briefly', async () => {
+  let clock = 0;
+  const issue = [
+    { body: '✅ **fox review**: Looks good', user: { login: 'fox-bot' }, created_at: '2026-10-19T10:00:00Z', html_url: 'https://github.com/o/r/pull/12#issuecomment-1' },
+    { body: 'Please fix the edge case\nnext line', user: { login: 'alex' }, created_at: '2026-10-19T11:00:00Z', html_url: 'https://github.com/o/r/pull/12#issuecomment-2' },
+  ];
+  const diff = [{ body: 'What about the retry?', user: { login: 'sam' }, created_at: '2026-10-19T10:30:00Z', path: 'src/retry.js', html_url: 'https://github.com/o/r/pull/12#discussion_r1' }];
+  const reviews = [{ body: 'Please address the retry', user: { login: 'pat' }, submitted_at: '2026-10-19T10:45:00Z', html_url: 'https://github.com/o/r/pull/12#pullrequestreview-1' }, { body: '', submitted_at: '2026-10-19T11:00:00Z' }];
+  const { run, calls } = fake((args) => JSON.stringify(args[1].includes('/issues/') ? issue : args[1].includes('/reviews?') ? reviews : diff));
+  const prs = createPrs({ repos: async () => ['o/r'], run, now: () => clock, ttlMs: 1000 });
+  const detail = await prs.detail('O/R', 12);
+  assert.deepEqual(detail.comments.map((c) => [c.type, c.author, c.afterVerdict]), [['job', 'fox-bot', false], ['review', 'sam', true], ['summary', 'pat', true], ['issue', 'alex', true]]);
+  assert.equal(detail.comments[3].excerpt, 'Please fix the edge case next line');
+  assert.equal(detail.comments[1].path, 'src/retry.js');
+  assert.deepEqual(calls.map((x) => x.args), [
+    ['api', 'repos/o/r/issues/12/comments?per_page=100'],
+    ['api', 'repos/o/r/pulls/12/comments?per_page=100'],
+    ['api', 'repos/o/r/pulls/12/reviews?per_page=100'],
+  ]);
+  await prs.detail('o/r', 12);
+  assert.equal(calls.length, 3);
+  await prs.detail('o/r', 12, { force: true });
+  assert.equal(calls.length, 6, 'refresh bypasses the server cache');
+  clock = 1001;
+  await prs.detail('o/r', 12);
+  assert.equal(calls.length, 9);
+  await assert.rejects(prs.detail('other/r', 12), /unknown pull request/);
+  await assert.rejects(prs.detail('o/r', '12;rm'), /unknown pull request/);
+});
+
+test('full comment pages are labeled as partial and never infer a later-than-last-review marker', async () => {
+  const comments = Array.from({ length: 100 }, (_, i) => ({ body: i === 0 ? '✅ **fox review**: good' : 'question', created_at: `2026-10-19T${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}:00Z` }));
+  const prs = createPrs({ repos: async () => ['o/r'], run: async (args) => JSON.stringify(args[1].includes('/issues/') ? comments : []) });
+  const out = await prs.detail('o/r', 12);
+  assert.equal(out.comments.length, 100);
+  assert.equal(out.limited, true);
+  assert.equal(out.comments.some((c) => c.afterVerdict), false);
+});
+
+test('detail reports each gh failure without hiding the other source or caching partial results', async () => {
+  const { run, calls } = fake((args) => args[1].includes('/issues/') ? Object.assign(new Error('failed'), { stderr: 'HTTP 403: rate limit\nextra' }) : JSON.stringify([{ body: '<script>hello</script>', created_at: '2026-10-19T12:00:00Z', user: { login: 'dev' } }]));
+  const prs = createPrs({ repos: async () => ['o/r'], run });
+  const out = await prs.detail('o/r', 12);
+  assert.deepEqual(out.errors, [{ type: 'issue', error: 'HTTP 403: rate limit' }]);
+  assert.equal(out.comments[0].afterVerdict, false, 'without the verdict source, do not claim newness');
+  await prs.detail('o/r', 12);
+  assert.equal(calls.length, 6, 'retry errors');
+});
+
+test('an older in-flight fetch cannot overwrite a forced refresh', async () => {
+  let release;
+  let count = 0;
+  const prs = createPrs({ repos: async () => ['o/r'], run: async (args) => {
+    if (!args[1].includes('/issues/')) return '[]';
+    if (++count === 1) return new Promise((resolve) => { release = () => resolve(JSON.stringify([{ body: 'old' }])); });
+    return JSON.stringify([{ body: 'new' }]);
+  } });
+  const older = prs.detail('o/r', 12);
+  while (!release) await new Promise((resolve) => setImmediate(resolve));
+  const newer = await prs.detail('o/r', 12, { force: true });
+  assert.equal(newer.comments[0].excerpt, 'new');
+  release();
+  await older;
+  assert.equal((await prs.detail('o/r', 12)).comments[0].excerpt, 'new');
+});
+
+test('malformed comment source fails independently of other sources', async () => {
+  const prs = createPrs({ repos: async () => ['o/r'], run: async (args) => args[1].includes('/issues/') ? '{"message":"bad response"}' : '[]' });
+  const out = await prs.detail('o/r', 12);
+  assert.deepEqual(out.errors, [{ type: 'issue', error: 'Invalid GitHub response' }]);
+  assert.deepEqual(out.comments, []);
+});
+
 test('merge and close act only on known repos and real numbers, and drop the cache', async () => {
   const { run, calls } = fake((args) => (args[1] === 'list' ? '[]' : ''));
   const prs = createPrs({ repos: async () => ['o/r'], run, tokensDir: null });

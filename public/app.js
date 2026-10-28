@@ -3055,6 +3055,7 @@ setInterval(loadJobs, 5000);
 // first arms the button for a few seconds, so nothing that deploys or throws work away happens on a stray click.
 const prKey = (p) => `${p.repo}#${p.number}`;
 const prFiles = new Map();
+const prActivity = new Map(), prActivityLoading = new Map();
 let prFilter = 'open', prListHtml = '';
 const prLimits = { merged: 50, all: 50 };
 const prLoading = new Set(), prFailed = new Set();
@@ -3120,12 +3121,21 @@ function renderPrList() {
     const filesHtml = files ? `<div class="pr-files">${files.map((x) => `<span class="pf" title="${esc(x.path)}">${esc(x.path)}</span><span class="pr-add">+${x.additions}</span><span class="pr-del">−${x.deletions}</span>`).join('')}</div>` : '<div class="muted">Loading files…</div>';
     const review = p.review ? `<div class="pr-review md ${esc(p.review.verdict)}"><b>fox review</b> ${renderMarkdown(p.review.text.replace(ANSI, ''))}</div>` : '';
     const text = prText(p.body);
+    if (open && prActivity.has(key) && Date.now() - prActivity.get(key).at > (prActivity.get(key).errors?.length ? 15_000 : 60_000)) prActivity.delete(key);
+    const activity = prActivity.get(key);
+    const activityHtml = activity ? `<section class="pr-activity" aria-label="PR discussion"><div class="pr-activity-head"><b>Discussion</b><span>${activity.comments.length} ${activity.comments.length === 1 ? 'comment' : 'comments'}${activity.limited ? ' · first 100 per type' : ''}</span></div>
+      ${activity.comments.length ? `<ol>${activity.comments.map((c) => {
+        const url = /^https:\/\/github\.com\//.test(c.url ?? '') ? c.url : p.url;
+        return `<li class="${c.afterVerdict ? 'after-verdict' : ''}"><div class="pr-comment-meta"><span class="pr-comment-kind">${c.type === 'job' ? 'fox review' : c.type === 'review' ? 'diff' : c.type === 'summary' ? 'review' : 'comment'}</span><b>${esc(c.author)}</b><time datetime="${esc(c.createdAt ?? '')}">${esc(c.createdAt ? fmtTime(c.createdAt) : 'unknown time')}</time>${c.afterVerdict ? '<span class="pr-comment-new">after review</span>' : ''}</div><a href="${esc(url)}" target="_blank" rel="noopener" class="pr-comment-body">${c.path ? `<span class="pr-comment-path">${esc(c.path)}</span> ` : ''}${esc(c.excerpt || '(no text)')} ↗</a></li>`;
+      }).join('')}</ol>` : activity.errors?.length ? '' : '<div class="muted">No comments yet.</div>'}
+      ${(activity.errors ?? []).map((e) => `<div class="pr-activity-error" role="status">Could not load ${e.type === 'review' ? 'diff' : e.type === 'summary' ? 'review' : 'PR'} comments: ${esc(e.error)}</div>`).join('')}
+      </section>` : '<section class="pr-activity" aria-label="PR discussion"><b>Discussion</b><div class="muted">Loading comments…</div></section>';
     // What the job's run kept: the screenshots fx took of the change, and the run itself (log, files).
     const runUrl = p.run ? `/api/jobs/${encodeURIComponent(p.run.job)}/runs/${encodeURIComponent(p.run.run)}/files/` : '';
     // screenshot-option-a.png… are the alternatives fx mocked up; the others show what it built.
     const shotLabel = (n) => { const o = n.match(/^screenshot-option-([a-z0-9]+)\./i); return o ? `Option ${o[1].toUpperCase()}` : 'Built'; };
     const shots = p.run?.shots?.length ? `<div class="pr-shots">${p.run.shots.map((n) => `<figure><a href="${runUrl}${encodeURIComponent(n)}" target="_blank" rel="noopener"><img src="${runUrl}${encodeURIComponent(n)}" alt="${esc(n)}" loading="lazy" /></a><figcaption>${shotLabel(n)}</figcaption></figure>`).join('')}</div>` : '';
-    return row + `<div class="pr-open">${text ? `<div class="pbody md">${renderMarkdown(text)}</div>` : ''}${shots}${filesHtml}${review}`
+    return row + `<div class="pr-open">${text ? `<div class="pbody md">${renderMarkdown(text)}</div>` : ''}${shots}${filesHtml}${review}${activityHtml}`
       + `<div class="pr-links">${p.linear ? `<a class="pr-chip" href="${esc(p.linear)}" target="_blank" rel="noopener">${esc(p.issue ?? 'Linear')} ↗</a>` : ''}<a class="pr-chip" href="${esc(p.url)}" target="_blank" rel="noopener">GitHub ↗</a><a class="pr-chip" href="${esc(p.url)}/files" target="_blank" rel="noopener">diff ↗</a>${p.run ? `<a class="pr-chip" href="/?job=${encodeURIComponent(p.run.job)}&run=${encodeURIComponent(p.run.run)}">job run</a>` : ''}`
       + `${done ? '' : '<input class="pr-reason" placeholder="Why close it? Optional, it goes on the PR" maxlength="1000" />'}</div></div>`;
   });
@@ -3136,6 +3146,23 @@ function renderPrList() {
   const typing = document.activeElement?.classList.contains('pr-reason') && box.contains(document.activeElement);
   if (html !== prListHtml && !typing) { box.innerHTML = html; prListHtml = html; }
   if (state.prOpen && !prFiles.has(state.prOpen)) loadPrFiles(state.prOpen);
+  if (state.prOpen && !prActivity.has(state.prOpen) && !prActivityLoading.has(state.prOpen)) loadPrActivity(state.prOpen);
+}
+async function loadPrActivity(key, force = false) {
+  const request = {};
+  prActivityLoading.set(key, request);
+  const [repo, n] = key.split('#');
+  try {
+    const response = await fetch(`/api/prs/${repo}/${n}/detail${force ? '?fresh' : ''}`);
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'GitHub unavailable');
+    const detail = await response.json();
+    if (prActivityLoading.get(key) === request) prActivity.set(key, { ...detail, at: Date.now() });
+  } catch (err) {
+    if (prActivityLoading.get(key) === request) prActivity.set(key, { at: Date.now(), comments: [], errors: [{ type: 'discussion', error: err.message }] });
+  }
+  if (prActivityLoading.get(key) !== request) return;
+  prActivityLoading.delete(key);
+  if (state.prView && state.prOpen === key) renderPrList();
 }
 async function loadPrFiles(key) {
   const [repo, n] = key.split('#');
@@ -3161,7 +3188,11 @@ function closePrs({ sync = true } = {}) {
 $('#prs-entry').addEventListener('click', () => { if (state.prView) return closePrs(); state.wsFilter = null; openPrs(); });
 $('#pr-ws').addEventListener('click', clearWsFilter);
 $('#pr-close').addEventListener('click', () => closePrs());
-$('#pr-refresh').addEventListener('click', () => { prFiles.clear(); loadPrs(true, prFilter); });
+$('#pr-refresh').addEventListener('click', () => {
+  prFiles.clear(); prActivity.clear(); prActivityLoading.clear();
+  if (state.prOpen) loadPrActivity(state.prOpen, true);
+  loadPrs(true, prFilter);
+});
 $('#pr-filters').addEventListener('click', (e) => {
   const filter = e.target.closest('[data-pr-filter]')?.dataset.prFilter;
   if (!filter || filter === prFilter) return;
@@ -3201,7 +3232,7 @@ $('#pr-list').addEventListener('click', async (e) => {
   if (!r.ok) { toast(out.error || `Could not ${act} #${p.number}`); btn.disabled = false; btn.classList.remove('armed'); btn.textContent = { merge: 'Merge', close: 'Close', pause: 'Later', resume: 'Resume' }[act]; return; }
   toast({ merge: `Merged #${p.number}`, close: `Closed #${p.number}`, pause: `#${p.number} paused for later`, resume: `#${p.number} back in the queue` }[act]);
   if (state.prOpen === key) state.prOpen = null;
-  prFiles.delete(key);
+  prFiles.delete(key); prActivity.delete(key);
   await loadPrs(true, prFilter);
   if (prFilter !== 'open') loadPrs(true);
   syncUrl();

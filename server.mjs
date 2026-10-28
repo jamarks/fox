@@ -691,10 +691,11 @@ async function handlePanelRequest(req, res) {
       }
       catch (err) { return send(res, err.status ?? 500, { error: err.message }); }
     }
-    if ((m = p.match(/^\/api\/prs\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)\/(\d+)(?:\/(files|merge|close|pause|resume))$/))) {
+    if ((m = p.match(/^\/api\/prs\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)\/(\d+)(?:\/(files|detail|merge|close|pause|resume))$/))) {
       const [, owner, name, num, action] = m;
       try {
         if (action === 'files' && req.method === 'GET') return send(res, 200, await prs.files(`${owner}/${name}`, num));
+        if (action === 'detail' && req.method === 'GET') return send(res, 200, await prs.detail(`${owner}/${name}`, num, { force: url.searchParams.has('fresh') }));
         if (action === 'merge' && req.method === 'POST') return send(res, 200, await prs.merge(`${owner}/${name}`, num));
         if ((action === 'pause' || action === 'resume') && req.method === 'POST') return send(res, 200, await prs[action](`${owner}/${name}`, num));
         if (action === 'close' && req.method === 'POST') return send(res, 200, await prs.close(`${owner}/${name}`, num, JSON.parse(await readBody(req) || '{}').reason));
