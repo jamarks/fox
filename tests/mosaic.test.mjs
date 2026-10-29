@@ -62,24 +62,33 @@ test('mosaic snapshot is bounded, plain text and only for a live fox session', a
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, 'session.json'), JSON.stringify({ title: 'One', workspace_root: home, model: 'openai/gpt-5', updated_at_ms: 10 }));
   await writeFile(join(dir, 'events.jsonl'), [
-    { event: { assistant: { text: 'Last answer' } } }, { event: { turn_completed: {} } },
+    { event: { assistant: { text: 'Last answer', provider_replay: { source: { model: 'openai/saved-model' } } } } }, { event: { turn_completed: {} } },
   ].map(JSON.stringify).join('\n'));
   const working = join(home, '.fx', 'sessions', 'session-two');
   await mkdir(working, { recursive: true });
   await writeFile(join(working, 'session.json'), JSON.stringify({ title: 'Answering', workspace_root: home, model: 'openai/old-default', updated_at_ms: 20 }));
   await writeFile(join(working, 'events.jsonl'), '');
+  for (const id of ['session-three', 'session-four']) {
+    const dir = join(home, '.fx', 'sessions', id);
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, 'session.json'), JSON.stringify({ title: id, workspace_root: home, model: 'openai/default', updated_at_ms: 30 }));
+    await writeFile(join(dir, 'events.jsonl'), [
+      { event: { assistant: { text: 'Earlier answer', provider_replay: { source: { model: 'openai/saved-model' } } } } },
+      { event: { turn_completed: {} } },
+    ].map(JSON.stringify).join('\n'));
+  }
   const script = join(home, 'tmux.mjs'), log = join(home, 'captures.log');
   await writeFile(script, `#!/usr/bin/env node
 import { appendFileSync } from 'node:fs';
 const [cmd, ...args] = process.argv.slice(2);
-if (cmd === 'list-sessions') console.log('fx-session-one|1|0\\nfx-session-two|2|0');
-else if (cmd === 'show-options') { if (!['fx-session-one', 'fx-session-two'].some((s) => args.includes(s))) process.exit(1); console.log(args.at(-1) === '@fx_resume' ? args.find((s) => s.startsWith('fx-')).replace('fx-', '') : ${JSON.stringify(home)}); }
+if (cmd === 'list-sessions') console.log('fx-session-one|1|0\\nfx-session-two|2|0\\nfx-session-three|3|0\\nfx-session-four|4|0');
+else if (cmd === 'show-options') { if (!['fx-session-one', 'fx-session-two', 'fx-session-three', 'fx-session-four'].some((s) => args.includes(s))) process.exit(1); console.log(args.at(-1) === '@fx_resume' ? args.find((s) => s.startsWith('fx-')).replace('fx-', '') : ${JSON.stringify(home)}); }
 else if (cmd === 'capture-pane') {
   appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
   const two = args.includes('fx-session-two');
   if (args.includes('-E')) console.log('old history banner');
   else if (args.includes('-S')) console.log([...Array.from({length: 36}, (_, i) => 'line-' + i), two ? 'Live assistant answer' : '\\x1b[31mLAST\\x1b[0m\\x00', two ? 'codex · gpt-6-sol · tokens' : 'auto · gpt-6-sol · tokens', '', ''].join('\\n'));
-  else console.log(two ? 'Live assistant answer\\n• Thinking (4s)\\ncodex · gpt-6-sol · tokens' : 'LAST\\nauto · gpt-6-sol · tokens');
+  else console.log(args.includes('fx-session-three') ? '• Thinking (4s)\\ncodex · gpt-6-sol · tokens' : args.includes('fx-session-four') ? '• Thinking (4s)\\nfooter unavailable' : two ? 'Live assistant answer\\n• Thinking (4s)\\ncodex · gpt-6-sol · tokens' : 'LAST\\nauto · gpt-6-sol · tokens');
 }
 `);
   await chmod(script, 0o755);
@@ -93,14 +102,28 @@ else if (cmd === 'capture-pane') {
       await new Promise((r) => setTimeout(r, 50));
     }
     assert.ok(ready, 'server started');
+    const before = (await readFile(log, 'utf8')).trim().split('\n').length;
     const overview = await (await fetch(`${base}/api/overview`)).json();
+    const overviewCaptures = (await readFile(log, 'utf8')).trim().split('\n').slice(before).map(JSON.parse);
+    assert.deepEqual(overviewCaptures, [
+      ...['one', 'two', 'three', 'four'].map((id) => ['-p', '-t', `fx-session-${id}`]),
+    ], 'overview shares one visible screen per terminal for activity and model');
     const answered = overview.sessions.find((s) => s.id === 'session-one');
     const answering = overview.sessions.find((s) => s.id === 'session-two');
     assert.equal(answered.terminal, 'fx-session-one');
     assert.equal(answered.latestReply.text, 'Last answer');
+    assert.equal(answered.model, 'openai/saved-model');
+    assert.equal(answered.activeModel, null, 'waiting sessions use the saved reply, not a stale footer');
     assert.equal(answering.state, 'working');
     assert.equal(answering.latestReply, null);
-    assert.equal(answering.model, 'gpt-6-sol');
+    assert.equal(answering.model, 'openai/old-default');
+    assert.equal(answering.activeModel, 'gpt-6-sol');
+    const switched = overview.sessions.find((s) => s.id === 'session-three');
+    assert.equal(switched.model, 'openai/saved-model');
+    assert.equal(switched.activeModel, 'gpt-6-sol', 'current footer wins over the previous answer during work');
+    const missingFooter = overview.sessions.find((s) => s.id === 'session-four');
+    assert.equal(missingFooter.model, 'openai/saved-model');
+    assert.equal(missingFooter.activeModel, null, 'missing footer preserves the saved answer');
     const response = await fetch(`${base}/api/terminals/fx-session-one/snapshot`);
     assert.equal(response.status, 200);
     const { text } = await response.json();

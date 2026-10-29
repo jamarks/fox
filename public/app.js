@@ -340,6 +340,7 @@ function sessionCard(s, index = null) {
   // Sidebar state as a dot: green and still when fx waits for you, orange and breathing while it works.
   // Only needs-input (and another terminal) still say it in words; no process, nothing.
   const quiet = s.state === 'ready' || s.state === 'working';
+  const model = s.state === 'working' && !s.parentId ? s.activeModel ?? s.model : s.model;
   const asleep = foxConfig.remote && s.state === 'idle' && !s.archived;
   const stateHtml = asleep ? '<span class="st asleep" title="Asleep: its tools are off to save memory. Opening it wakes it up in a few seconds." aria-label="asleep"><i></i></span>' : s.state !== 'idle' ? `<span class="st ${s.state}" title="${s.state === 'external' ? `open in another terminal; ${esc(agentName(s))} allows one process per session` : STATE_LABEL[s.state]}"><i></i>${quiet ? '' : STATE_LABEL[s.state]}</span>` : '';
   el.innerHTML = `
@@ -354,7 +355,7 @@ function sessionCard(s, index = null) {
     </div>
     <div class="sub">
       ${stateHtml}
-      <span class="model mono" title="${esc(s.model ?? '')} via ${esc(providerLabel(s.provider))}">${esc(modelShort(s.model))}${providerTag(s.provider)}</span>
+      <span class="model mono" title="${esc(model ?? '')} via ${esc(providerLabel(s.provider))}">${esc(modelShort(model))}${providerTag(s.provider)}</span>
       <span>${fmtTime(s.updatedAt)}</span>
       ${s.resumedAfterRestart && Date.now() - s.resumedAfterRestart < 6 * 3600_000 ? `<span class="restarted" title="The server went down mid-turn; fox resumed this session ${esc(fmtTime(s.resumedAfterRestart))} and told it to continue">resumed after restart</span>` : ''}
     </div>
@@ -1500,7 +1501,7 @@ function agentsBoard(parent, { selectedId = null } = {}) {
     const task = c.task ?? child?.firstPrompt ?? '';
     const elapsed = c.phase === 'running' && c.startedAt ? fmtDur(Date.now() - c.startedAt) : child?.usage.wallMs ? fmtDur(child.usage.wallMs) : '';
     const open = expandedAgents.has(c.id);
-    const head = `<div class="agent-head"><span class="idx">${i + 1}</span>${model ? vendorDot(model) : ''}<span class="agent-name">${model ? esc(modelShort(model)) : 'failed to start'}</span>${c.phase === 'running' ? '<span class="st working"><i></i></span>' : ''}${flag ? `<span class="flag ${flag[1]}">${flag[0]}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>`;
+    const head = `<div class="agent-head"><span class="idx">${i + 1}</span>${model ? vendorDot(model) : ''}<span class="agent-name">${model ? esc(modelShort(model)) : c.failure ? 'failed to start' : 'model unknown'}</span>${c.phase === 'running' ? '<span class="st working"><i></i></span>' : ''}${flag ? `<span class="flag ${flag[1]}">${flag[0]}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>`;
     const failure = c.failure ? (typeof c.failure === 'string' ? c.failure : (c.failure.message ?? c.failure.reason ?? JSON.stringify(c.failure))) : '';
     // Open: the whole answer it returned to the parent (every round for a named agent), or why there is none.
     const rounds = c.name ? (cachedResults.id === parent.id ? cachedResults.byAgent.get(c.name) ?? [] : []) : [];

@@ -60,6 +60,16 @@ test('only expanded named rows get one follow-up; all rounds remain visible, inc
   }
 });
 
+test('child rows never borrow the parent live model and a running child without evidence is unknown', () => {
+  const f = fixture({ working: true, phase: 'running' });
+  f.parent.activeModel = 'parent-live';
+  assert.match(f.run('agentsBoard(parent)'), /model unknown/);
+  assert.doesNotMatch(f.run('agentsBoard(parent)'), /parent-live|failed to start/);
+  f.state.sessions.push({ id: f.child.id, model: 'child-saved', usage: {} });
+  assert.match(f.run('agentsBoard(parent)'), /child-saved/);
+  assert.doesNotMatch(f.run('agentsBoard(parent)'), /parent-live/);
+});
+
 test('board shows saved family usage as a compact expandable estimate only when available', () => {
   const f = fixture();
   assert.doesNotMatch(f.run('agentsBoard(parent)'), /family-usage/);
