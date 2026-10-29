@@ -83,6 +83,8 @@ function modelBadge(model) {
 const providerLabel = (p) => ({ gateway: 'Vercel AI Gateway (pay per use)', codex: 'ChatGPT subscription', grok: 'Grok subscription', claude: 'Claude Code (your Claude sign-in)' })[p] ?? (p || 'unknown provider');
 const providerTag = (p) => !p ? '' : p === 'gateway' ? '<span class="prov gw">▲ gateway</span>' : `<span class="prov">${esc(p)}</span>`;
 const modelShort = (model) => String(model ?? '').replace(/^[a-z0-9-]+\//i, '');
+// Only the parent's visible terminal can identify a model while its answer is still being written.
+const displayedModel = (s) => s.state === 'working' && !s.parentId && !s.subagentChild ? s.activeModel ?? s.model : s.model;
 const STATE_LABEL = { working: 'working', ready: 'waiting', needs_input: 'needs input', external: 'other terminal', done: 'done', idle: '' };
 const STATE_ORDER = { needs_input: 0, working: 1, ready: 2, external: 3, done: 4, idle: 5 };
 
@@ -340,7 +342,7 @@ function sessionCard(s, index = null) {
   // Sidebar state as a dot: green and still when fx waits for you, orange and breathing while it works.
   // Only needs-input (and another terminal) still say it in words; no process, nothing.
   const quiet = s.state === 'ready' || s.state === 'working';
-  const model = s.state === 'working' && !s.parentId ? s.activeModel ?? s.model : s.model;
+  const model = displayedModel(s);
   const asleep = foxConfig.remote && s.state === 'idle' && !s.archived;
   const stateHtml = asleep ? '<span class="st asleep" title="Asleep: its tools are off to save memory. Opening it wakes it up in a few seconds." aria-label="asleep"><i></i></span>' : s.state !== 'idle' ? `<span class="st ${s.state}" title="${s.state === 'external' ? `open in another terminal; ${esc(agentName(s))} allows one process per session` : STATE_LABEL[s.state]}"><i></i>${quiet ? '' : STATE_LABEL[s.state]}</span>` : '';
   el.innerHTML = `
@@ -1133,7 +1135,7 @@ function renderMosaic() {
   if (mounted.length !== state.mosaicIds.length || mounted.some((el, i) => el.dataset.tile !== state.mosaicIds[i])) {
     tiles.innerHTML = state.mosaicIds.length ? state.mosaicIds.map((id) => {
       const s = sessionById(id);
-      return `<article class="mosaic-tile" data-tile="${esc(id)}"><header><span class="st ${esc(s.state)}" title="${esc(STATE_LABEL[s.state] ?? s.state)}"><i></i></span><strong title="${esc(displayTitle(s))}">${esc(displayTitle(s))}</strong><button type="button" data-remove="${esc(id)}" aria-label="Remove ${esc(displayTitle(s))} from mosaic" title="Remove">×</button></header><div class="mosaic-meta" title="${esc(s.workspace)}">${esc(shortPath(s.workspace))} · ${esc(modelShort(s.model) || 'model unknown')}</div><pre class="mosaic-screen" aria-label="Recent terminal output">${s.terminal ? 'Loading…' : 'Waking up…'}</pre><div class="mosaic-reply"><span>${s.latestReply ? 'Last reply' : 'Current turn'}</span><div class="md mosaic-reply-text">${renderMarkdown(s.latestReply?.text ?? (s.terminal && s.state === 'working' ? 'Working…' : 'No completed reply yet'))}</div></div><button type="button" class="mosaic-open" data-expand="${esc(id)}">Open terminal ↗</button></article>`;
+      return `<article class="mosaic-tile" data-tile="${esc(id)}"><header><span class="st ${esc(s.state)}" title="${esc(STATE_LABEL[s.state] ?? s.state)}"><i></i></span><strong title="${esc(displayTitle(s))}">${esc(displayTitle(s))}</strong><button type="button" data-remove="${esc(id)}" aria-label="Remove ${esc(displayTitle(s))} from mosaic" title="Remove">×</button></header><div class="mosaic-meta" title="${esc(s.workspace)}">${esc(shortPath(s.workspace))} · ${esc(modelShort(displayedModel(s)) || 'model unknown')}</div><pre class="mosaic-screen" aria-label="Recent terminal output">${s.terminal ? 'Loading…' : 'Waking up…'}</pre><div class="mosaic-reply"><span>${s.latestReply ? 'Last reply' : 'Current turn'}</span><div class="md mosaic-reply-text">${renderMarkdown(s.latestReply?.text ?? (s.terminal && s.state === 'working' ? 'Working…' : 'No completed reply yet'))}</div></div><button type="button" class="mosaic-open" data-expand="${esc(id)}">Open terminal ↗</button></article>`;
     }).join('') : '<p class="mosaic-empty">Choose up to four sessions above to watch here.</p>';
   }
   for (const tile of tiles.querySelectorAll('[data-tile]')) {
@@ -1149,7 +1151,7 @@ function renderMosaic() {
     if (pre.dataset.terminal !== (s.terminal ?? '')) { pre.dataset.terminal = s.terminal ?? ''; pre.dataset.model = ''; }
     const meta = tile.querySelector('.mosaic-meta');
     meta.title = s.workspace ?? '';
-    meta.textContent = `${shortPath(s.workspace)} · ${modelShort(pre.dataset.model || s.model) || 'model unknown'}`;
+    meta.textContent = `${shortPath(s.workspace)} · ${modelShort(pre.dataset.model || displayedModel(s)) || 'model unknown'}`;
     const reply = tile.querySelector('.mosaic-reply');
     reply.querySelector('span').textContent = s.latestReply ? 'Last reply' : 'Current turn';
     const formatted = renderMarkdown(s.latestReply?.text ?? (s.terminal && s.state === 'working' ? 'Working…' : 'No completed reply yet'));
@@ -1871,7 +1873,7 @@ async function loadTranscript(id, quiet = false) {
   const [events, files, timing] = await Promise.all([fetch(`/api/sessions/${id}/events`).then((r) => r.json()), fetch(`/api/sessions/${id}/files`).then((r) => r.json()).catch(() => []), parent?.children?.length ? fetch(`/api/sessions/${id}/timeline`).then((r) => r.ok ? r.json() : null).catch(() => null) : null]);
   if (state.selected !== id) return; // selection changed while we were fetching: drop this render
   const termOpenKey = Boolean(s.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
-  const key = id + ':' + events.length + ':' + (s.updatedAt ?? 0) + ':' + (parent?.children ?? []).map((c) => c.phase).join(',') + ':' + termOpenKey + ':' + Math.floor(Date.now() / 5000);
+  const key = id + ':' + events.length + ':' + (s.updatedAt ?? 0) + ':' + displayedModel(s) + ':' + (parent?.children ?? []).map((c) => c.phase).join(',') + ':' + termOpenKey + ':' + Math.floor(Date.now() / 5000);
   if (quiet && key === lastTranscriptKey) return;
   lastTranscriptKey = key;
 
@@ -1882,7 +1884,8 @@ async function loadTranscript(id, quiet = false) {
     : mobileLayout.matches ? esc(displayTitle(s)) : '';
   const u = s.usage;
   const tokens = u.input + u.output ? `${fmtTokens(u.input)} in · ${fmtTokens(u.output)} out · ${fmtTokens(u.cacheRead)} cache` : '';
-  $('#transcript-meta').innerHTML = `<span title="${esc([tokens, s.workspace].filter(Boolean).join('\n'))}">${s.model ? vendorDot(s.model) + esc(modelShort(s.model)) : ''}${s.provider ? ` · <span title="${esc(providerLabel(s.provider))}">${s.provider === 'gateway' ? '▲ gateway' : esc(s.provider)}</span>` : ''}${u.wallMs ? ' · ' + fmtDur(u.wallMs) : ''}${isChild ? ' · billed to parent' : u.cost ? ' · $' + u.cost.toFixed(2) : ''}</span>`;
+  const model = displayedModel(s);
+  $('#transcript-meta').innerHTML = `<span title="${esc([tokens, s.workspace].filter(Boolean).join('\n'))}">${model ? vendorDot(model) + esc(modelShort(model)) : ''}${s.provider ? ` · <span title="${esc(providerLabel(s.provider))}">${s.provider === 'gateway' ? '▲ gateway' : esc(s.provider)}</span>` : ''}${u.wallMs ? ' · ' + fmtDur(u.wallMs) : ''}${isChild ? ' · billed to parent' : u.cost ? ' · $' + u.cost.toFixed(2) : ''}</span>`;
 
   const html = [];
   if (!isChild && s.addDirs?.length) html.push(`<div class="session-access"><div class="section-title">fx file access · chosen at launch</div><div class="session-access-path">${esc(s.workspace)}</div>${s.addDirs.map((dir) => `<div class="session-access-path">+ ${esc(dir)}</div>`).join('')}</div>`);

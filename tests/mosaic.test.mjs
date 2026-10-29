@@ -17,7 +17,7 @@ test('screen model reads the footer regardless of fx mode', () => {
 test('mosaic marks a first unfinished turn as working, not an absent reply', async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const markdown = await readFile(new URL('../public/markdown.js', import.meta.url), 'utf8');
-  const render = `${markdown}\n${source.slice(source.indexOf('let mosaicCapture = 0;'), source.indexOf('function setMosaic(on)'))}\nrenderMosaic()`;
+  const render = `${source.slice(source.indexOf('const displayedModel ='), source.indexOf('const STATE_LABEL'))}\n${markdown}\n${source.slice(source.indexOf('let mosaicCapture = 0;'), source.indexOf('function setMosaic(on)'))}\nrenderMosaic()`;
   const pre = { isConnected: true, dataset: {}, textContent: 'Loading…', scrollTop: 0, scrollHeight: 300, clientHeight: 300 };
   const meta = { textContent: '' };
   const replyText = { innerHTML: '' };

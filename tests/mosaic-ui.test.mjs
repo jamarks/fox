@@ -24,7 +24,7 @@ test('mosaic renders count-based tiles and formatted, escaped last replies', () 
     displayTitle: (s) => s.title, shortPath: (s) => s, modelShort: (s) => s,
     STATE_LABEL: { ready: 'waiting' }, sessionById: (id) => sessions.find((s) => s.id === id),
   };
-  runInNewContext(`${markdown}\n${mosaic}\nthis.render = renderMosaic`, context);
+  runInNewContext(`${app.slice(app.indexOf('const displayedModel ='), app.indexOf('const STATE_LABEL'))}\n${markdown}\n${mosaic}\nthis.render = renderMosaic`, context);
   for (const count of [0, 1, 2, 3, 4]) {
     state.mosaicIds = sessions.slice(0, count).map((s) => s.id);
     context.render();
