@@ -62,6 +62,33 @@ test('focus isolates a workspace without changing selection, collapse or order; 
   assert.deepEqual(groupOrder, [folder, workspace.dir]);
 });
 
+test('a sidebar render before the first overview does not discard saved focus', () => {
+  const { context, state, data, root } = harness(workspace.dir);
+  state.workspaces = undefined;
+  state.sessions = [];
+  context.render();
+  assert.equal(data.get('fox.focusedGroup'), workspace.dir);
+  state.workspaces = [workspace];
+  context.render();
+  assert.deepEqual(root.children.map((g) => g.dataset.ws), [workspace.dir]);
+});
+
+test('focused workspace keeps its archived sessions accessible without showing other workspaces', () => {
+  const { context, state, root } = harness();
+  state.sessions.push(
+    { id: 'fox-archived', workspace: workspace.dir, archived: true },
+    { id: 'notes-archived', workspace: folder, archived: true },
+  );
+  context.focusClick(workspace.dir);
+  assert.equal(root.children.length, 2);
+  assert.match(root.children[1].innerHTML, /archived · 1/);
+  context.showArchived.value = true;
+  context.render();
+  assert.deepEqual(root.children[1].children.map((s) => s.id), ['fox-archived']);
+  context.clearClick();
+  assert.match(root.children[2].innerHTML, /archived · 2/);
+});
+
 test('focus works for plain folders and stale stored paths clear on poll', () => {
   const { context, root, data, state, clear } = harness(folder);
   context.render();

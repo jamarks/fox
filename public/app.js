@@ -298,8 +298,8 @@ function renderSessions() {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(s);
   }
-  // An old focus may point at a removed workspace or a folder whose last session disappeared.
-  if (focusedGroup && !groups.has(focusedGroup)) {
+  // Other sidebar data can render before the first overview; only clear stale focus after it arrives.
+  if (focusedGroup && state.workspaces && !groups.has(focusedGroup)) {
     focusedGroup = null;
     try { localStorage.removeItem('fox.focusedGroup'); } catch {}
   }
@@ -338,11 +338,12 @@ function renderSessions() {
     if (!isCollapsed) list.forEach((s, i) => g.appendChild(sessionCard(s, i + 1)));
     root.appendChild(g);
   }
-  if (archived.length && !focusedGroup) {
+  const visibleArchived = focusedGroup ? archived.filter((s) => (workspaceFor(s.workspace)?.dir ?? s.workspace) === focusedGroup) : archived;
+  if (visibleArchived.length) {
     const g = document.createElement('div');
     g.className = 'group archived';
-    g.innerHTML = `<h3 class="clickable" data-toggle-archived><span>${showArchived.value ? '▾' : '▸'} archived · ${archived.length}</span></h3>`;
-    if (showArchived.value) for (const s of archived) g.appendChild(sessionCard(s));
+    g.innerHTML = `<h3 class="clickable" data-toggle-archived><span>${showArchived.value ? '▾' : '▸'} archived · ${visibleArchived.length}</span></h3>`;
+    if (showArchived.value) for (const s of visibleArchived) g.appendChild(sessionCard(s));
     root.appendChild(g);
   }
 }
