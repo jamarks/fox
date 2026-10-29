@@ -7,23 +7,24 @@
 # itself, so an agent pushing to the repo cannot change a script that runs as root.
 set -euo pipefail
 
-install_metadata() { # $1=build, $2=original directory identity, $3=release, $4=root-owned staging file
-  local build="$1" identity="$2" release="$3" metadata="$4"
+install_metadata() ( # $1=build, $2=original directory identity, $3=release, $4=root-owned staging file
+  local build="$1" identity="$2" release="$3" metadata="$4" stage
   # A build can keep running code after npm exits. Move only the directory we created into the root-owned releases tree.
   [ -d "$build" ] && [ ! -L "$build" ] && [ "$(stat -c '%d:%i' -- "$build")" = "$identity" ] || fail "unsafe build directory"
   # A cross-filesystem mv copies the tree instead of moving its verified directory.
   [ "$(stat -c '%d' -- "$build")" = "$(stat -c '%d' -- "$(dirname -- "$release")")" ] || fail "build and releases must share a filesystem"
   [ ! -e "$release" ] && [ ! -L "$release" ] || fail "release already exists"
-  mv -T -- "$build" "$release"
-  if [ ! -d "$release" ] || [ -L "$release" ] || [ "$(stat -c '%d:%i' -- "$release")" != "$identity" ]; then
-    rm -rf -- "$release"
-    fail "unsafe moved build directory"
-  fi
-  chown -R root:root "$release"
-  chmod -R u+rwX,go+rX,go-w "$release"
+  # A failed install must not leave a release that the next update would trust as already built.
+  stage=$(mktemp -d "$(dirname -- "$release")/.install.XXXXXXXX")
+  trap 'rm -rf -- "$stage"' EXIT
+  mv -T -- "$build" "$stage/tree"
+  [ -d "$stage/tree" ] && [ ! -L "$stage/tree" ] && [ "$(stat -c '%d:%i' -- "$stage/tree")" = "$identity" ] || fail "unsafe moved build directory"
+  chown -R root:root "$stage/tree"
+  chmod -R u+rwX,go+rX,go-w "$stage/tree"
   # Both paths now live on the release filesystem; mv replaces a symlink instead of opening its target.
-  mv -fT -- "$metadata" "$release/VERSION.json"
-}
+  mv -fT -- "$metadata" "$stage/tree/VERSION.json"
+  mv -T -- "$stage/tree" "$release"
+)
 
 # Sourcing exposes the same deployment step to an isolated, unprivileged regression test.
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi

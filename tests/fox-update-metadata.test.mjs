@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, mkdir, writeFile, readFile, symlink, rename, lstat, rm, chmod } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, symlink, rename, lstat, rm, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -34,6 +34,14 @@ test('deploy metadata replaces a build symlink without writing to its target', (
   assert.equal(await readFile(sentinel, 'utf8'), 'protected original\n');
   assert.equal(await readFile(join(release, 'VERSION.json'), 'utf8'), '{"commit":"new"}\n');
   assert.equal((await lstat(join(release, 'VERSION.json'))).isFile(), true);
+}));
+
+test('failed metadata install leaves no release for the next update to trust', () => fixture(async ({ dir, build, identity, release, metadata }) => {
+  await mkdir(join(build, 'VERSION.json'));
+  await assert.rejects(install(build, identity, release, metadata), /VERSION.json/);
+  await assert.rejects(lstat(release), { code: 'ENOENT' });
+  assert.equal((await readFile(metadata, 'utf8')), '{"commit":"new"}\n');
+  assert.deepEqual(await readdir(join(dir, 'releases')), []);
 }));
 
 test('deploy refuses symlinked and replaced build directories', () => fixture(async ({ dir, build, identity, release, metadata, sentinel }) => {
