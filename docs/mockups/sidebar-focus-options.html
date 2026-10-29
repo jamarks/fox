@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sidebar focus · alternatives</title>
+<link rel="stylesheet" href="../../public/style.css">
+<style>
+body { grid-template-columns: 300px 1fr; }
+#sidebar { min-width: 0; }
+#session-groups { flex: 1; }
+#summary { display: none; }
+.brand-mark { color: #f0883e; font-size: 22px; line-height: 1; }
+#reply-inbox { padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--accent); font-weight: 600; }
+.group h3 .gname { color: var(--text); }
+.session .sub { margin-top: 4px; }
+.session .title { font-size: 12px; }
+#center { display: grid; place-content: center; color: var(--muted); text-align: center; }
+#center h2 { color: var(--text); font-size: 17px; font-weight: 500; margin: 0 0 6px; }
+#center p { margin: 0; }
+.focus-pill { color: var(--accent); border: 1px solid var(--border); border-radius: 4px; font-size: 10px; padding: 4px 6px; }
+.focus-pill:hover { border-color: var(--accent); }
+.focus-strip { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text); font-size: 11px; }
+.focus-strip button { color: var(--accent); }
+.focus-eye { color: var(--accent); width: 22px; height: 22px; font-size: 16px; }
+.option-b { display: none; }
+body.variant-b .option-a { display: none; }
+body.variant-b .option-b { display: contents; }
+</style>
+</head>
+<body>
+<aside id="sidebar">
+  <header class="side-head"><span class="brand-mark">◈</span><div class="row"><span class="option-a"><button title="Show all groups" aria-label="Show all groups">×</button></span><button class="icon" aria-label="New workspace">▱</button><button class="icon" aria-label="Search all sessions">⌕</button><button class="icon" aria-label="Settings">⚙</button></div></header>
+  <div id="reply-inbox">● 16 new replies <span style="float:right">▾</span></div>
+  <div class="option-b"><div class="focus-strip"><span>Fox</span><button>Show all groups</button></div></div>
+  <div id="session-groups"><div class="group workspace">
+    <h3><span class="caret">▾</span><span class="gname">Fox</span><span class="gcount">3</span><span class="option-a"><button class="focus-pill">Focused ×</button></span><span class="option-b"><button class="focus-eye" title="Stop focusing">◉</button></span><button class="icon" title="New session">+</button></h3>
+    <div class="session"><span class="idx">1</span><div class="title">Fix mobile scrolling</div><div class="sub"><span>gpt-6.1-sol</span><span>waiting</span></div></div>
+    <div class="session"><span class="idx">2</span><div class="title">Redirect after creating a session</div><div class="sub"><span>gpt-6-sol</span><span>working</span></div></div>
+    <div class="session"><span class="idx">3</span><div class="title">Review pull request conflicts</div><div class="sub"><span>gpt-6-sol</span><span>2 subagents</span></div></div>
+  </div></div>
+  <button type="button" id="jobs-entry">Jobs</button><button type="button" id="prs-entry">Pull requests</button><button type="button" id="skills-entry">Skills</button>
+  <footer class="sidebar-footer">fox · 29% memory</footer>
+</aside>
+<main id="center"><h2>No terminal open</h2><p>Click a session on the left, or create a workspace with + at the top.</p></main>
+<script>if (new URLSearchParams(location.search).get('option') === 'b') document.body.classList.add('variant-b');</script>
+</body>
+</html>
