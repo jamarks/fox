@@ -23,6 +23,20 @@ export function latestCompletedReply(raw) {
   return latest;
 }
 
+// A child result is only a saved turn or a recorded failure, never the assistant's live partial text.
+// User-turn count distinguishes failed follow-up rounds even if no assistant answer was saved.
+export function childCompletion(child, relation) {
+  if (relation.phase === 'running') return null;
+  const failure = relation.failure || (relation.outcome === 'failed' ? 'Subagent failed' : null);
+  if (failure) {
+    const text = typeof failure === 'string' ? failure : failure.message ?? failure.reason ?? 'Subagent failed';
+    return { marker: `failed:${child.turns}`, failed: true, text: String(text).replace(/\s+/g, ' ').slice(0, 180), at: child.updatedAt ?? null, messageIndex: null };
+  }
+  const reply = child.latestReply;
+  if (!reply) return null;
+  return { ...reply, marker: `turn:${reply.turn}`, failed: false };
+}
+
 // The model of the newest reply: fx records it on each assistant event (provider_replay.source.model).
 export function lastAnswerModel(lines) {
   for (let i = lines.length - 1; i >= 0; i--) {
