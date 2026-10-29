@@ -7,6 +7,28 @@
 # itself, so an agent pushing to the repo cannot change a script that runs as root.
 set -euo pipefail
 
+install_metadata() ( # $1=build, $2=original directory identity, $3=release, $4=root-owned staging file
+  local build="$1" identity="$2" release="$3" metadata="$4" stage
+  # A build can keep running code after npm exits. Move only the directory we created into the root-owned releases tree.
+  [ -d "$build" ] && [ ! -L "$build" ] && [ "$(stat -c '%d:%i' -- "$build")" = "$identity" ] || fail "unsafe build directory"
+  # A cross-filesystem mv copies the tree instead of moving its verified directory.
+  [ "$(stat -c '%d' -- "$build")" = "$(stat -c '%d' -- "$(dirname -- "$release")")" ] || fail "build and releases must share a filesystem"
+  [ ! -e "$release" ] && [ ! -L "$release" ] || fail "release already exists"
+  # A failed install must not leave a release that the next update would trust as already built.
+  stage=$(mktemp -d "$(dirname -- "$release")/.install.XXXXXXXX")
+  trap 'rm -rf -- "$stage"' EXIT
+  mv -T -- "$build" "$stage/tree"
+  [ -d "$stage/tree" ] && [ ! -L "$stage/tree" ] && [ "$(stat -c '%d:%i' -- "$stage/tree")" = "$identity" ] || fail "unsafe moved build directory"
+  chown -R root:root "$stage/tree"
+  chmod -R u+rwX,go+rX,go-w "$stage/tree"
+  # Both paths now live on the release filesystem; mv replaces a symlink instead of opening its target.
+  mv -fT -- "$metadata" "$stage/tree/VERSION.json"
+  mv -T -- "$stage/tree" "$release"
+)
+
+# Sourcing exposes the same deployment step to an isolated, unprivileged regression test.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then return 0; fi
+
 # Which repo: /etc/fox/update.conf (FOX_REPO=https://github.com/<you>/fox.git) for a fork.
 FOX_REPO="https://github.com/jamarks/fox.git"
 [ -f /etc/fox/update.conf ] && . /etc/fox/update.conf
@@ -95,17 +117,22 @@ if [ -d "$RELEASES/$NEW" ]; then
 else
   BUILD="$BUILD_ROOT/$NEW"
   rm -rf "$BUILD"; install -d -o foxbuild -g foxbuild -m 755 "$BUILD"
+  BUILD_ID=$(stat -c '%d:%i' -- "$BUILD")
   git -C "$MIRROR" archive "$NEW" | runuser -u foxbuild -- tar -x -C "$BUILD"
   if ! runuser -u foxbuild -- bash -c "cd '$BUILD' && npm ci --no-audit --no-fund --loglevel=error && npm test" >"$STATE/build-${NEW:0:12}.log" 2>&1; then
     log "ERROR: npm ci or npm test failed on ${NEW:0:12}; not deploying (log: $STATE/build-${NEW:0:12}.log)"
     echo "$NEW" >> "$BAD"; rm -rf "$BUILD"; exit 1
   fi
   # Which version this is: a release folder has no .git, so fox reads it from here (sidebar footer).
+  # Keep root's redirection out of the tree that ran build-controlled code.
+  METADATA_DIR=$(mktemp -d "$RELEASES/.metadata.XXXXXXXX")
+  trap 'rm -rf -- "$METADATA_DIR"' EXIT
   REPO_NAME=$(sed -E 's#^https://github.com/##; s#\.git$##' <<<"$FOX_REPO")
-  git -C "$MIRROR" log -1 --format='%H%n%cI%n%s' "$NEW" | BRANCH="$BRANCH" REPO_NAME="$REPO_NAME" python3 -c 'import json, os, sys, datetime; c, d, s = sys.stdin.read().split("\n")[:3]; print(json.dumps({"commit": c, "date": d, "subject": s, "branch": os.environ["BRANCH"], "repo": os.environ["REPO_NAME"], "deployedAt": datetime.datetime.now(datetime.timezone.utc).isoformat()}))' > "$BUILD/VERSION.json"
-  mv "$BUILD" "$RELEASES/$NEW"
-  chown -R root:root "$RELEASES/$NEW"
-  chmod -R u+rwX,go+rX,go-w "$RELEASES/$NEW"
+  git -C "$MIRROR" log -1 --format='%H%n%cI%n%s' "$NEW" | BRANCH="$BRANCH" REPO_NAME="$REPO_NAME" python3 -c 'import json, os, sys, datetime; c, d, s = sys.stdin.read().split("\n")[:3]; print(json.dumps({"commit": c, "date": d, "subject": s, "branch": os.environ["BRANCH"], "repo": os.environ["REPO_NAME"], "deployedAt": datetime.datetime.now(datetime.timezone.utc).isoformat()}))' > "$METADATA_DIR/VERSION.json"
+  chmod 644 "$METADATA_DIR/VERSION.json"
+  install_metadata "$BUILD" "$BUILD_ID" "$RELEASES/$NEW" "$METADATA_DIR/VERSION.json"
+  rmdir "$METADATA_DIR"
+  trap - EXIT
 fi
 
 [ -n "$CUR" ] && ln -sfn "$RELEASES/$CUR" "$BASE/previous"

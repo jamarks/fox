@@ -239,6 +239,7 @@ test('folder deletion is blocked if the ignored-file check fails', async () => {
   await settle(ws, created.id);
   const guarded = createWorkspaces({
     stateDir: join(base, 'state'), rootDir: join(base, 'workspaces'),
+    remoteUrl: (r) => join(base, 'remotes', r.owner, `${r.name}.git`),
     git: async (args) => {
       if (args.includes('ls-files')) throw new Error('git check failed');
       return git(args);
