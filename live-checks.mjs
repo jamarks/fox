@@ -25,9 +25,9 @@ export function commandArgs(text) {
 export async function declaredCommand(dir) {
   try {
     const p = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'));
-    const script = ['lint', 'typecheck', 'check'].find((name) => typeof p.scripts?.[name] === 'string' && p.scripts[name].trim());
-    return script ?? null;
-  } catch { return null; }
+    const scripts = ['lint', 'typecheck'].filter((name) => typeof p.scripts?.[name] === 'string' && p.scripts[name].trim());
+    return scripts.length ? scripts : typeof p.scripts?.check === 'string' && p.scripts.check.trim() ? ['check'] : [];
+  } catch { return []; }
 }
 export function runCheck(bin, args, cwd, { timeout = TIMEOUT } = {}) {
   return new Promise((done) => {
@@ -50,18 +50,27 @@ export function createLiveChecks({ workspaces, filesFor, eventsFor, run = runChe
     if (!ws?.liveCheck?.enabled) return null;
     const events = await eventsFor(session.id);
     const end = events.findLastIndex((e) => e.kind === 'turn_completed');
-    if (end < 0 || events.slice(end + 1).some((e) => e.kind === 'user' || e.kind === 'tool_call')) return null;
+    if (end < 0 || (ws.liveCheck.enabledAt && events[end].ts < ws.liveCheck.enabledAt) || events.slice(end + 1).some((e) => e.kind === 'user' || e.kind === 'tool_call')) return null;
     const start = events.slice(0, end).findLastIndex((e) => e.kind === 'turn_completed');
-    const changed = new Set(events.slice(start + 1, end).filter((e) => e.kind === 'tool_call' && ['write', 'edit'].includes(e.effect) && !/error|fail/i.test(e.result?.status ?? '')).map((e) => resolve(session.workspace, e.path ?? '')));
-    const key = `${ws.id}:${end}:${ws.liveCheck.command ?? ''}`;
+    const key = `${ws.id}:${end}:${events[end]?.ts}:${ws.liveCheck.command ?? ''}`;
     const old = results.get(session.id);
     if (old?.key === key) return old.result;
-    // Subagents have their own event streams; their file mtimes place their writes inside the parent's turn.
+    const writes = (stream) => stream.filter((e) => e.kind === 'tool_call' && e.path && ['write', 'edit'].includes(e.effect) && !/error|fail/i.test(e.result?.status ?? ''));
+    const changed = new Set(writes(events.slice(start + 1, end)).map((e) => resolve(session.workspace, e.path)));
+    // A subagent's file mtime can change after this turn; use its recorded writes instead.
     const from = events[start + 1]?.ts, to = events[end]?.ts;
+    if (Number.isFinite(from) && Number.isFinite(to)) {
+      for (const child of session.children ?? []) {
+        const stream = await eventsFor(child.id);
+        for (const e of writes(stream).filter((e) => e.ts >= from && e.ts <= to)) {
+          const path = resolve(child.workspace ?? session.workspace, e.path);
+          changed.add(await realpath(path).catch(() => path));
+        }
+      }
+    }
     // Never follow a repo symlink or run from an unconfigured checkout.
     const root = await realpath(ws.dir).catch(() => null);
-    const files = (await filesFor(session.id)).filter((f) => f.exists && ['write', 'edit'].includes(f.action) &&
-      (changed.has(f.path) || (f.by?.some((n) => n > 0) && Number.isFinite(from) && Number.isFinite(to) && f.mtime >= from && f.mtime <= to + 2000)));
+    const files = (await filesFor(session.id)).filter((f) => f.exists && ['write', 'edit'].includes(f.action) && changed.has(f.path));
     if (!files.length) return null;
     const groups = [];
     for (const repo of ws.repos) {
@@ -79,18 +88,24 @@ export function createLiveChecks({ workspaces, filesFor, eventsFor, run = runChe
     const task = (async () => {
       const problems = [], general = [];
       for (const { dir, selected } of groups) {
-        const script = ws.liveCheck.command ? null : await declaredCommand(dir);
-        if (!script && !ws.liveCheck.command) continue;
-        const [bin, args] = script ? ['npm', ['run', script, ...(script === 'lint' ? ['--', ...selected.map((f) => f.rel)] : [])]] : [commandArgs(ws.liveCheck.command)[0], commandArgs(ws.liveCheck.command).slice(1)];
-        const outcome = await run(bin, args, dir);
-        if (outcome.status === 'passed') continue;
-        const lines = outcome.output.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 80);
-        let matched = false;
-        for (const f of selected) {
-          const hits = lines.filter((line) => line.includes(f.rel) || (selected.filter((x) => x.rel.endsWith('/' + f.rel.split('/').pop()) || x.rel === f.rel).length === 1 && line.includes(f.rel.split('/').pop()))).slice(0, 3);
-          if (hits.length) { problems.push({ path: f.path, lines: hits }); matched = true; }
+        const commands = ws.liveCheck.command ? [commandArgs(ws.liveCheck.command)] : (await declaredCommand(dir)).map((script) => ['npm', 'run', script]);
+        for (const [bin, ...args] of commands) {
+          // Package scripts can run whole-project checks; not all lint commands accept file arguments.
+          const outcome = await run(bin, args, dir);
+          if (outcome.status === 'passed') continue;
+          const lines = outcome.output.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 80);
+          let matched = false;
+          for (const f of selected) {
+            const hits = lines.flatMap((line, i) => line.includes(f.rel) ? [line, ...lines.slice(i + 1, i + 3).filter((next) => /^\d+:\d+\s|^\d+\s|^error\s/i.test(next))] : []).slice(0, 3);
+            if (hits.length) {
+              const problem = problems.find((p) => p.path === f.path);
+              if (problem) problem.lines.push(...hits);
+              else problems.push({ path: f.path, lines: hits });
+              matched = true;
+            }
+          }
+          if (!matched) general.push(`${relative(ws.dir, dir)}: ${outcome.status === 'timeout' ? 'check timed out' : lines.slice(0, 3).join('\n') || 'check failed'}`);
         }
-        if (!matched) general.push(`${relative(ws.dir, dir)}: ${outcome.status === 'timeout' ? 'check timed out' : lines.slice(0, 3).join('\n') || 'check failed'}`);
       }
       return { problems, general, count: problems.length + general.length };
     })();

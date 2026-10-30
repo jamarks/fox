@@ -22,7 +22,7 @@ import { TOOLS, isInstalled, isEnabled, withEnabled, addArgs, findServer } from 
 import { createSkills } from './skills.mjs';
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
-import { createLiveChecks, commandArgs } from './live-checks.mjs';
+import { createLiveChecks } from './live-checks.mjs';
 import { createAppRegistry, createAppRouter, reconcileApps, appKind, appUrl, APP_SESSION } from './apps.mjs';
 import { createFxSettings } from './fxsettings.mjs';
 import { listSkills } from './skill-shelf.mjs';
@@ -815,9 +815,7 @@ async function handlePanelRequest(req, res) {
       try {
         if (action && req.method === 'POST') { const ok = action === 'fetch' ? await workspaces.fetch(id) : await workspaces.retry(id); return send(res, ok ? 200 : 404, ok ? { ok } : { error: 'Workspace not found.' }); }
         if (!action && req.method === 'PATCH') {
-          const body = JSON.parse(await readBody(req) || '{}');
-          if (body.liveCheck?.command) commandArgs(body.liveCheck.command);
-          return send(res, 200, await workspaces.update(id, body));
+          return send(res, 200, await workspaces.update(id, JSON.parse(await readBody(req) || '{}')));
         }
         if (!action && req.method === 'DELETE') { await workspaces.remove(id, { deleteFolder: url.searchParams.get('folder') === '1' }); return send(res, 200, { ok: true }); }
         return send(res, 405, { error: 'method not allowed' });

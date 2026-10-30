@@ -68,10 +68,13 @@ test('workspace checks are off until explicitly enabled and persist per workspac
   assert.equal((await ws.get(created.id)).liveCheck, undefined);
   await ws.update(created.id, { liveCheck: { enabled: true, command: 'npm run lint' } });
   assert.equal(await ws.anyLiveChecks(), true);
-  assert.deepEqual((await ws.get(created.id)).liveCheck, { enabled: true, command: 'npm run lint' });
+  assert.equal((await ws.get(created.id)).liveCheck.command, 'npm run lint');
+  assert.ok((await ws.get(created.id)).liveCheck.enabledAt > 0);
   await ws.update(created.id, { liveCheck: { enabled: false, command: '' } });
   assert.equal(await ws.anyLiveChecks(), false);
   await assert.rejects(ws.update(created.id, { liveCheck: { enabled: 'yes', command: '' } }), /Invalid check settings/);
+  await assert.rejects(ws.update(created.id, { liveCheck: { enabled: true, command: 'npm run lint; echo bad' } }), (e) => e.status === 400);
+  assert.equal(await ws.anyLiveChecks(), false);
 });
 
 test('companion access accepts only distinct cloned sibling repos, never symlinks or outside paths', async () => {

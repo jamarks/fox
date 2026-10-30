@@ -9,6 +9,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID, createHash } from 'node:crypto';
 import { SAFE_GIT } from './gitsync.mjs';
+import { commandArgs } from './live-checks.mjs';
 const execFileP = promisify(execFile);
 
 export const WORKSPACE_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
@@ -156,7 +157,8 @@ export function createWorkspaces({
       if (liveCheck !== undefined) {
         if (!liveCheck || typeof liveCheck.enabled !== 'boolean' || typeof liveCheck.command !== 'string' || liveCheck.command.length > 300)
           throw Object.assign(new Error('Invalid check settings.'), { status: 400 });
-        ws.liveCheck = { enabled: liveCheck.enabled, command: liveCheck.command.trim() };
+        if (liveCheck.command.trim()) commandArgs(liveCheck.command);
+        ws.liveCheck = { enabled: liveCheck.enabled, command: liveCheck.command.trim(), enabledAt: liveCheck.enabled ? (ws.liveCheck?.enabled && ws.liveCheck.command === liveCheck.command.trim() ? ws.liveCheck.enabledAt : Date.now()) : null };
       }
       const drop = new Set(remove.map(key));
       ws.repos = ws.repos.filter((r) => !drop.has(key(r))); // leaves its folder on disk
