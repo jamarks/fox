@@ -50,6 +50,7 @@ test('history badge persists until explicitly seen, independent of override acti
       if (opts) { const { key, value } = JSON.parse(opts.body); writes.push([key, value]); saved = withFxSetting(saved, key, value); }
       return { ok: true, json: async () => fxSettingsView(saved) };
     } };
+  const row = () => runInNewContext(`fxSettingRow(${JSON.stringify(entry(fxSettingsView({})))})`, context);
   const load = () => runInNewContext('loadFxSettings()', context);
   runInNewContext(source, context);
   await load(); await load();
@@ -67,12 +68,12 @@ test('history badge persists until explicitly seen, independent of override acti
   assert.deepEqual(writes.at(-1), [key, true]);
   await click({ fxSeen: `${key}:2026-10-27` });
   assert.equal(writes.length, 2);
-  assert.doesNotMatch(panel.innerHTML, /Mark as seen/);
+  assert.doesNotMatch(row(), /Mark as seen/);
   await click({ fxKey: key, fxApply: 'true' }, true);
   assert.deepEqual(writes.at(-1), [key, null]);
-  assert.doesNotMatch(panel.innerHTML, /Mark as seen/);
+  assert.doesNotMatch(row(), /Mark as seen/);
   assert.ok(JSON.parse(storage.get('fox.fxSettingsSeen')).includes(`${key}:2026-10-27`));
   runInNewContext(source, { ...context });
   await load();
-  assert.doesNotMatch(panel.innerHTML, /Mark as seen/);
+  assert.doesNotMatch(row(), /Mark as seen/);
 });
