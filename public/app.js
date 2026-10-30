@@ -1754,8 +1754,9 @@ function showArtifactMatch(viewer, step = 0) {
 }
 async function openArtifact(button) {
   const row = button.closest('.tool'), slot = row.querySelector('.artifact-slot');
-  if (slot.childElementCount) { slot.replaceChildren(); return; }
+  if (slot.hasChildNodes()) { if (!slot.dataset.loading) slot.replaceChildren(); return; }
   const id = state.selected, name = button.dataset.artifact;
+  slot.dataset.loading = '1';
   const url = `/api/sessions/${encodeURIComponent(id)}/artifact/${encodeURIComponent(name)}`;
   button.disabled = true;
   slot.textContent = 'Loading full output…';
@@ -1766,13 +1767,16 @@ async function openArtifact(button) {
       throw new Error(response.status === 413 ? `Output too large to open (${Number(detail.size).toLocaleString()} bytes).` : response.status === 404 ? 'Saved output is missing or no longer belongs to this session.' : 'Could not load saved output.');
     }
     const text = await response.text();
-    if (state.selected !== id || !row.isConnected) return;
+    if (state.selected !== id || !slot.isConnected) return;
     slot.innerHTML = `<div class="artifact-viewer"><div class="artifact-controls"><span>${esc(Number(response.headers.get('x-artifact-bytes')).toLocaleString())} bytes</span><input type="search" aria-label="Find in full output" placeholder="Find in output"><span class="artifact-count" aria-live="polite"></span><button type="button" data-artifact-step="-1" aria-label="Previous match" title="Previous match">↑</button><button type="button" data-artifact-step="1" aria-label="Next match" title="Next match">↓</button><a href="${url}?download=1" download="${esc(name)}">download</a></div><pre class="artifact-text"></pre></div>`;
     const viewer = slot.firstElementChild;
     viewer._text = text; viewer._matchIndex = 0;
     viewer.querySelector('.artifact-text').textContent = text;
-  } catch (err) { if (row.isConnected) slot.innerHTML = `<div class="artifact-error" role="alert">${esc(err.message)}</div>`; }
-  finally { if (row.isConnected) button.disabled = false; }
+  } catch (err) { if (slot.isConnected && state.selected === id) slot.innerHTML = `<div class="artifact-error" role="alert">${esc(err.message)}</div>`; }
+  finally {
+    delete slot.dataset.loading;
+    slot.parentElement?.querySelector('.artifact-open')?.removeAttribute('disabled');
+  }
 }
 $('#transcript').addEventListener('input', (e) => {
   if (!e.target.matches('.artifact-viewer input')) return;
@@ -1992,15 +1996,18 @@ async function loadTranscript(id, quiet = false) {
   const openRows = new Map();
   if (sameSession) for (const row of body.querySelectorAll('.tool[open]')) {
     const slot = row.querySelector('.artifact-slot');
-    openRows.set(row.dataset.toolIndex, slot?.firstElementChild ?? null);
+    if (slot) openRows.set(row.dataset.toolIndex, slot);
   }
   const focusedTool = sameSession ? document.activeElement?.closest('.tool')?.dataset.toolIndex : null;
   const wasAtBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
   body.innerHTML = html.join('');
   for (const row of body.querySelectorAll('.tool')) if (openRows.has(row.dataset.toolIndex)) {
     row.open = true;
-    const viewer = openRows.get(row.dataset.toolIndex);
-    if (viewer) row.querySelector('.artifact-slot')?.append(viewer);
+    const slot = openRows.get(row.dataset.toolIndex);
+    if (slot) {
+      row.querySelector('.artifact-slot')?.replaceWith(slot);
+      if (slot.dataset.loading) row.querySelector('.artifact-open').disabled = true;
+    }
   }
   if (focusedTool !== null && focusedTool !== undefined) body.querySelector(`.tool[data-tool-index="${focusedTool}"] .artifact-viewer input`)?.focus({ preventScroll: true });
   // Scroll: top when you switch sessions; stay pinned to the end only if you were already there.

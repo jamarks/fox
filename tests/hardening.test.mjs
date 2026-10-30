@@ -58,6 +58,13 @@ test('without a passkey fox still refuses foreign names, keeps previews in their
   await writeFile(join(dir, 'tool-results', 'unlisted.txt'), 'private');
   await writeFile(join(dir, 'tool-results', 'huge.txt'), 'x'.repeat(512 * 1024 + 1));
   await symlink(join(outside, 'secret.txt'), join(dir, 'tool-results', 'linked.txt'));
+  const linkedDir = join(home, '.fx', 'sessions', 'linked-results');
+  await mkdir(linkedDir);
+  await writeFile(join(linkedDir, 'events.jsonl'), [
+    { event: { tool_call: { call_id: 'one', tool_name: 'shell', arguments_json: '{}' } } },
+    { event: { tool_result: { call_id: 'one', artifact_ref: 'secret.txt' } } },
+  ].map(JSON.stringify).join('\n') + '\n');
+  await symlink(outside, join(linkedDir, 'tool-results'));
   await mkdir(join(home, '.fx', 'sessions', 'constructor'));
   await writeFile(join(home, '.fx', 'sessions', 'constructor', 'session.json'), JSON.stringify({ title: 'odd' }));
   await writeFile(join(home, '.fx', 'settings.json'), JSON.stringify({ provider: 'local', providers: { local: { base_url: 'http://127.0.0.1:1234', auth: { env: 'SECRET' } } }, models: { local: 'qwen:7b' } }));
@@ -96,6 +103,7 @@ test('without a passkey fox still refuses foreign names, keeps previews in their
     assert.equal((await get(port, '/api/sessions/constructor/artifact/exact.txt')).status, 404);
     assert.deepEqual(JSON.parse((await get(port, artifact + 'missing.txt')).body), { error: 'artifact file missing' });
     assert.equal((await get(port, artifact + 'linked.txt')).status, 404);
+    assert.equal((await get(port, '/api/sessions/linked-results/artifact/secret.txt')).status, 404);
     assert.equal((await get(port, artifact + 'huge.txt')).status, 413);
     assert.equal((await get(port, artifact + 'huge.txt?download=1')).status, 413);
     assert.match((await get(port, artifact + 'huge.txt')).body, /too large/);

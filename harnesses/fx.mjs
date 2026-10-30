@@ -1,8 +1,8 @@
 // fx as a harness: everything fox knows about fx's files on disk (~/.fx/sessions) and its screen lives here.
 // The rest of fox sees sessions and events in fox's own shape (see docs/harnesses.md); nothing outside this
 // file reads session.json, events.jsonl or children.json.
-import { readFile, readdir, stat, lstat } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { readFile, readdir, stat, lstat, open } from 'node:fs/promises';
+import { existsSync, constants } from 'node:fs';
 import { join } from 'node:path';
 import { latestCompletedReply, lastAnswerModel, screenModel } from '../inbox.mjs';
 import { parseTimeline } from '../timeline.mjs';
@@ -169,13 +169,29 @@ export function createFx({ sessionsDir, bin }) {
     timing,
     async artifact(id, name) {
       if (!/^[A-Za-z0-9._-]+$/.test(name)) return null;
-      const path = join(sessionsDir, id, 'tool-results', name);
+      const dir = join(sessionsDir, id);
+      const results = join(dir, 'tool-results');
+      const limit = 512 * 1024;
+      let file;
       try {
-        const info = await lstat(path);
-        if (!info.isFile()) return null; // an artifact link must not escape the session's own results
-        if (info.size > 512 * 1024) return { tooLarge: true, size: info.size };
-        return { buffer: await readFile(path), size: info.size };
+        // Do not follow a linked session, results directory, or artifact out of fx's session store.
+        if (!(await lstat(dir)).isDirectory() || !(await lstat(results)).isDirectory()) return null;
+        file = await open(join(results, name), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+        const info = await file.stat();
+        if (!info.isFile()) return null;
+        if (info.size > limit) return { tooLarge: true, size: info.size };
+        // The file may grow after stat: read at most one byte past the viewer limit.
+        const buffer = Buffer.alloc(limit + 1);
+        let length = 0;
+        while (length < buffer.length) {
+          const { bytesRead } = await file.read(buffer, length, buffer.length - length, length);
+          if (!bytesRead) break;
+          length += bytesRead;
+        }
+        if (length > limit) return { tooLarge: true, size: length };
+        return { buffer: buffer.subarray(0, length), size: length };
       } catch { return null; }
+      finally { await file?.close(); }
     },
     // fx's id appears only after it starts, so a new terminal is matched to its session later (see listTerminals).
     launch: ({ resume, flags = [] }) => ({ argv: [bin, ...(resume ? ['session', 'resume', resume] : flags)], id: resume ?? null }),
