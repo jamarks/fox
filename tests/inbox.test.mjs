@@ -27,6 +27,8 @@ test('a child result uses only a completed turn or a recorded failure, not an un
   assert.equal(childCompletion(child, { phase: 'running', outcome: null, failure: 'old failure' }), null);
   assert.deepEqual(childCompletion(child, { phase: 'idle', outcome: 'failed', failure: { message: 'Timed out' } }),
     { marker: 'failed:2', failed: true, text: 'Timed out', at: 4, messageIndex: null });
+  assert.deepEqual(childCompletion(child, { phase: 'finished', outcome: 'cancelled' }),
+    { marker: 'failed:2', failed: true, text: 'Subagent cancelled', at: 4, messageIndex: null });
   const unfinished = first + record({ user: { text: 'follow up' } }, 4) + record({ assistant: { text: 'Still writing' } }, 5);
   assert.equal(latestCompletedReply(unfinished).turn, 1);
   assert.equal(childCompletion({ ...child, latestReply: latestCompletedReply(unfinished) }, { phase: 'running' }), null);
@@ -113,14 +115,14 @@ test('child rounds appear under the parent without duplicate parent alerts or te
   assert.equal(notifications.length, 2, 'two child outcomes, no duplicate parent state notification');
   assert.match(elements['#reply-inbox-list'].innerHTML, /reviewer.*Parser.*New review/s);
   assert.match(elements['#reply-inbox-list'].innerHTML, /tester.*failed.*Timed out/s);
-  assert.equal(elements['#reply-inbox-count'].textContent, 2, 'the simultaneous parent reply is not a second alert');
-  assert.equal(JSON.parse(storage.get('fox.inbox.seen')).parent, 2);
+  assert.equal(elements['#reply-inbox-count'].textContent, 3, 'a distinct parent answer must remain unread even if a child finished in the same poll');
+  assert.equal(JSON.parse(storage.get('fox.inbox.seen')).parent, 1);
   vm.runInNewContext('renderReplyInbox(); detectTransitions()', ctx);
   assert.equal(notifications.length, 2, 'repeat poll does not notify again');
   handlers['#reply-inbox-list:click']({ target: { closest: () => ({ dataset: { reply: 'child' } }) } });
   assert.equal(state.selected, 'child'); assert.equal(ctx.globalMessage.index, 3); assert.deepEqual(opened, []);
   assert.equal(JSON.parse(storage.get('fox.inbox.seen'))['child:child'], 'turn:2');
-  assert.equal(elements['#reply-inbox-count'].textContent, 1, 'the other child result remains unread');
+  assert.equal(elements['#reply-inbox-count'].textContent, 2, 'the parent answer and other child result remain unread');
   ctx.mobileLayout.matches = true;
   handlers['#reply-inbox-list:click']({ target: { closest: () => ({ dataset: { reply: 'child2' } }) } });
   assert.equal(state.selected, 'child2'); assert.equal(ctx.mobileView, 'read'); assert.deepEqual(opened, [], 'phone also stays in Read, never the parent terminal');

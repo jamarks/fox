@@ -27,7 +27,7 @@ export function latestCompletedReply(raw) {
 // User-turn count distinguishes failed follow-up rounds even if no assistant answer was saved.
 export function childCompletion(child, relation) {
   if (relation.phase === 'running') return null;
-  const failure = relation.failure || (relation.outcome === 'failed' ? 'Subagent failed' : null);
+  const failure = relation.failure || ({ failed: 'Subagent failed', cancelled: 'Subagent cancelled' })[relation.outcome];
   if (failure) {
     const text = typeof failure === 'string' ? failure : failure.message ?? failure.reason ?? 'Subagent failed';
     return { marker: `failed:${child.turns}`, failed: true, text: String(text).replace(/\s+/g, ' ').slice(0, 180), at: child.updatedAt ?? null, messageIndex: null };

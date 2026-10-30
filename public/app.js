@@ -4,7 +4,7 @@ const $ = (sel) => document.querySelector(sel);
 const state = {
   sessions: [], terminals: [], selected: null,
   tabs: new Map(), // tmux name -> { term, fit, ws, wrap, label, closed }
-  activeTab: null, pollTimer: null, prevStates: new Map(), prevChildResults: new Map(), prevReplyTurns: new Map(), sound: false,
+  activeTab: null, pollTimer: null, prevStates: new Map(), prevChildResults: new Map(), sound: false,
   renaming: null, // keep the inline editor mounted while overview polling updates the rest of the UI
   pinned: new Set(), // tmux names pinned as tabs; restored after reload. Everything else is a preview or runs unseen.
   preview: null,     // the one unpinned terminal currently shown; replaced when you click another session
@@ -123,7 +123,6 @@ function detectTransitions() {
       notify(`${displayTitle(s)}: ${STATE_LABEL[s.state]}`, s.firstPrompt);
     }
     state.prevStates.set(s.id, s.state);
-    if (!s.parentId) state.prevReplyTurns.set(s.id, s.latestReply?.turn ?? 0);
   }
 }
 
@@ -173,15 +172,6 @@ function renderReplyInbox() {
       inboxSeen['@children'] = true;
       saveInboxSeen();
     }
-  }
-  // A parent reply saved in the same poll as its child's result is the same handoff, not two alerts.
-  for (const child of state.sessions.filter((s) => s.parentId && s.childCompletion && !s.archived)) {
-    const result = child.childCompletion, parent = sessionById(child.parentId);
-    if (!parent?.latestReply || parent.archived || state.prevChildResults.get(child.id) === result.marker
-      || result.marker === inboxSeen[`child:${child.id}`] || parent.latestReply.turn <= (state.prevReplyTurns.get(parent.id) ?? parent.latestReply.turn)
-      || !result.at || !parent.latestReply.at || parent.latestReply.at < result.at) continue;
-    inboxSeen[parent.id] = parent.latestReply.turn;
-    saveInboxSeen();
   }
   const unread = state.sessions.filter((s) => !s.archived && (!s.parentId
     ? s.latestReply && s.latestReply.turn > (inboxSeen[s.id] ?? 0)
