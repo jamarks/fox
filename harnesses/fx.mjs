@@ -1,7 +1,7 @@
 // fx as a harness: everything fox knows about fx's files on disk (~/.fx/sessions) and its screen lives here.
 // The rest of fox sees sessions and events in fox's own shape (see docs/harnesses.md); nothing outside this
 // file reads session.json, events.jsonl or children.json.
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir, stat, lstat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { latestCompletedReply, lastAnswerModel, screenModel } from '../inbox.mjs';
@@ -169,7 +169,13 @@ export function createFx({ sessionsDir, bin }) {
     timing,
     async artifact(id, name) {
       if (!/^[A-Za-z0-9._-]+$/.test(name)) return null;
-      try { return await readFile(join(sessionsDir, id, 'tool-results', name), 'utf8'); } catch { return null; }
+      const path = join(sessionsDir, id, 'tool-results', name);
+      try {
+        const info = await lstat(path);
+        if (!info.isFile()) return null; // an artifact link must not escape the session's own results
+        if (info.size > 512 * 1024) return { tooLarge: true, size: info.size };
+        return { buffer: await readFile(path), size: info.size };
+      } catch { return null; }
     },
     // fx's id appears only after it starts, so a new terminal is matched to its session later (see listTerminals).
     launch: ({ resume, flags = [] }) => ({ argv: [bin, ...(resume ? ['session', 'resume', resume] : flags)], id: resume ?? null }),

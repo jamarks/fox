@@ -586,8 +586,17 @@ async function handlePanelRequest(req, res) {
     if ((m = p.match(/^\/api\/sessions\/([^/]+)\/artifact\/([^/]+)$/))) {
       const id = safeSessionId(m[1]);
       if (!id) return send(res, 400, { error: 'bad id' });
-      const text = await readArtifact(id, m[2]);
-      return text === null ? send(res, 404, { error: 'not found' }) : send(res, 200, text, 'text/plain; charset=utf-8');
+      const name = m[2];
+      if (!/^[A-Za-z0-9._-]+$/.test(name) || !(await readEvents(id)).some((e) => e.kind === 'tool_call' && e.result?.artifact === name)) return send(res, 404, { error: 'artifact not referenced by this session' });
+      const artifact = await readArtifact(id, name);
+      if (!artifact) return send(res, 404, { error: 'artifact file missing' });
+      if (artifact.tooLarge) return send(res, 413, { error: 'artifact too large to open', size: artifact.size });
+      res.setHeader('x-artifact-bytes', String(artifact.size));
+      res.setHeader('cache-control', 'no-store');
+      res.setHeader('x-content-type-options', 'nosniff');
+      if (url.searchParams.has('download')) res.setHeader('content-disposition', `attachment; filename="${name}"`);
+      res.writeHead(200, { ...BASE_HEADERS, 'content-type': url.searchParams.has('download') ? 'application/octet-stream' : 'text/plain; charset=utf-8' });
+      return res.end(artifact.buffer);
     }
     if (req.method === 'POST' && (m = p.match(/^\/api\/sessions\/([^/]+)\/(archive|unarchive|rename)$/))) {
       const id = safeSessionId(m[1]);

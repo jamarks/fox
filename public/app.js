@@ -1728,7 +1728,62 @@ function filesSection(id, files) {
   const head = `<a href="#" class="section-title fold ${filesCollapsed ? 'closed' : ''}" data-toggle-files>files <span class="fold-n">${shown.length}</span></a>`;
   return filesCollapsed ? head : `${head}<div class="files">${shown.map(fileRow).join('')}</div>`;
 }
+// Artifact content is requested only after opening its own tool row; polling reuses the mounted viewer.
+function artifactMatches(text, query) {
+  const hits = [];
+  if (!query) return hits;
+  const haystack = text.toLocaleLowerCase(), needle = query.toLocaleLowerCase();
+  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + needle.length)) hits.push(at);
+  return hits;
+}
+function showArtifactMatch(viewer, step = 0) {
+  const text = viewer._text, query = viewer.querySelector('input').value;
+  const hits = artifactMatches(text, query);
+  const current = hits.length ? (viewer._matchIndex + step + hits.length) % hits.length : 0;
+  viewer._matchIndex = current;
+  viewer.querySelector('.artifact-count').textContent = query ? `${hits.length ? current + 1 : 0} / ${hits.length}` : '';
+  const pre = viewer.querySelector('.artifact-text');
+  if (!hits.length) { pre.textContent = text; return; }
+  const body = $('#transcript-body'), scroll = body.scrollTop;
+  const at = hits[current];
+  pre.innerHTML = esc(text.slice(0, at)) + '<mark>' + esc(text.slice(at, at + query.length)) + '</mark>' + esc(text.slice(at + query.length));
+  const mark = pre.querySelector('mark');
+  pre.scrollTop = Math.max(0, mark.offsetTop - pre.offsetTop - pre.clientHeight / 2);
+  pre.scrollLeft = Math.max(0, mark.offsetLeft - pre.offsetLeft - 40);
+  body.scrollTop = scroll;
+}
+async function openArtifact(button) {
+  const row = button.closest('.tool'), slot = row.querySelector('.artifact-slot');
+  if (slot.childElementCount) { slot.replaceChildren(); return; }
+  const id = state.selected, name = button.dataset.artifact;
+  const url = `/api/sessions/${encodeURIComponent(id)}/artifact/${encodeURIComponent(name)}`;
+  button.disabled = true;
+  slot.textContent = 'Loading full output…';
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(response.status === 413 ? `Output too large to open (${Number(detail.size).toLocaleString()} bytes).` : response.status === 404 ? 'Saved output is missing or no longer belongs to this session.' : 'Could not load saved output.');
+    }
+    const text = await response.text();
+    if (state.selected !== id || !row.isConnected) return;
+    slot.innerHTML = `<div class="artifact-viewer"><div class="artifact-controls"><span>${esc(Number(response.headers.get('x-artifact-bytes')).toLocaleString())} bytes</span><input type="search" aria-label="Find in full output" placeholder="Find in output"><span class="artifact-count" aria-live="polite"></span><button type="button" data-artifact-step="-1" aria-label="Previous match" title="Previous match">↑</button><button type="button" data-artifact-step="1" aria-label="Next match" title="Next match">↓</button><a href="${url}?download=1" download="${esc(name)}">download</a></div><pre class="artifact-text"></pre></div>`;
+    const viewer = slot.firstElementChild;
+    viewer._text = text; viewer._matchIndex = 0;
+    viewer.querySelector('.artifact-text').textContent = text;
+  } catch (err) { if (row.isConnected) slot.innerHTML = `<div class="artifact-error" role="alert">${esc(err.message)}</div>`; }
+  finally { if (row.isConnected) button.disabled = false; }
+}
+$('#transcript').addEventListener('input', (e) => {
+  if (!e.target.matches('.artifact-viewer input')) return;
+  const viewer = e.target.closest('.artifact-viewer'); viewer._matchIndex = 0;
+  showArtifactMatch(viewer);
+});
 $('#transcript').addEventListener('click', (e) => {
+  const artifact = e.target.closest('[data-artifact]');
+  if (artifact) { e.preventDefault(); return openArtifact(artifact); }
+  const step = e.target.closest('[data-artifact-step]');
+  if (step) { e.preventDefault(); return showArtifactMatch(step.closest('.artifact-viewer'), Number(step.dataset.artifactStep)); }
   const opener = e.target.closest('[data-open-file]');
   if (opener) { e.preventDefault(); return post(`/api/sessions/${state.selected}/open-file`, { path: opener.dataset.openFile }); }
   const full = e.target.closest('[data-full-view]');
@@ -1897,7 +1952,7 @@ async function loadTranscript(id, quiet = false) {
   const showConvo = isChild || convoShown.has(id) || mobileLayout.matches;
   if (mobileLayout.matches) html.push('<div class="section-title">conversation</div>');
   else if (!isChild && showConvo) html.push(`<div class="section-title">conversation · <a href="#" data-hide-convo="${esc(id)}">hide</a></div>`);
-  let messageIndex = 0;
+  let messageIndex = 0, toolIndex = 0;
   for (const ev of showConvo ? events : []) {
     if (mobileLayout.matches && ev.kind !== 'user' && ev.kind !== 'assistant') continue;
     if (!isChild && ev.kind === 'tool_call' && ev.name === 'subagent' && parent.children?.length) continue; // already in the board
@@ -1908,10 +1963,10 @@ async function loadTranscript(id, quiet = false) {
     else if (ev.kind === 'tool_call') {
       const st = ev.result?.status ?? 'pending';
       const isSub = ev.name === 'subagent';
-      html.push(`<details class="tool ${st}">
+      html.push(`<details class="tool ${st}" data-tool-index="${toolIndex++}">
         <summary><span class="dot"></span><span class="name">${isSub ? ICON.threads + ' ' : ''}${esc(ev.name)}</span><span class="brief">${esc(briefArgs(ev.args))}</span></summary>
         <pre class="label">args</pre><pre>${esc(typeof ev.args === 'string' ? ev.args : JSON.stringify(ev.args, null, 2))}</pre>
-        ${ev.result ? `<pre class="label">result · ${st} · ${ev.result.bytes} bytes</pre><pre>${esc(ev.result.preview)}</pre>` : ''}
+        ${ev.result ? `<pre class="label">result · ${st} · ${ev.result.bytes} bytes</pre><pre>${esc(ev.result.preview)}</pre>${ev.result.artifact ? `<button type="button" class="artifact-open" data-artifact="${esc(ev.result.artifact)}">full output</button><div class="artifact-slot"></div>` : ''}` : ''}
       </details>`);
     } else if (ev.kind === 'turn_completed') html.push('<hr class="turn-sep" />');
     else if (ev.kind === 'interrupted') html.push(`<div class="interrupted">■ cancelled</div>${ev.partial ? `<div class="msg assistant"><div class="text muted">${esc(ev.partial)}</div></div>` : ''}`);
@@ -1932,12 +1987,27 @@ async function loadTranscript(id, quiet = false) {
     setTranscript(!empty && wanted, { save: false });
   }
   const body = $('#transcript-body');
+  const sameSession = lastEventCount.id === id;
+  const scrollTop = body.scrollTop;
+  const openRows = new Map();
+  if (sameSession) for (const row of body.querySelectorAll('.tool[open]')) {
+    const slot = row.querySelector('.artifact-slot');
+    openRows.set(row.dataset.toolIndex, slot?.firstElementChild ?? null);
+  }
+  const focusedTool = sameSession ? document.activeElement?.closest('.tool')?.dataset.toolIndex : null;
   const wasAtBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
   body.innerHTML = html.join('');
+  for (const row of body.querySelectorAll('.tool')) if (openRows.has(row.dataset.toolIndex)) {
+    row.open = true;
+    const viewer = openRows.get(row.dataset.toolIndex);
+    if (viewer) row.querySelector('.artifact-slot')?.append(viewer);
+  }
+  if (focusedTool !== null && focusedTool !== undefined) body.querySelector(`.tool[data-tool-index="${focusedTool}"] .artifact-viewer input`)?.focus({ preventScroll: true });
   // Scroll: top when you switch sessions; stay pinned to the end only if you were already there.
   const grew = lastEventCount.id === id && events.length > lastEventCount.n;
-  if (lastEventCount.id !== id) body.scrollTop = 0;
+  if (!sameSession) body.scrollTop = 0;
   else if (grew && wasAtBottom) body.scrollTop = body.scrollHeight;
+  else body.scrollTop = scrollTop;
   lastEventCount = { id, n: events.length };
   if (globalMessage?.id === id) {
     const target = body.querySelector(`.msg[data-message="${globalMessage.index}"]`);
