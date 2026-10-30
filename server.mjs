@@ -22,6 +22,7 @@ import { TOOLS, isInstalled, isEnabled, withEnabled, addArgs, findServer } from 
 import { createSkills } from './skills.mjs';
 import { createViewTokens, rewriteRootLinks, VIEW_TYPES } from './view.mjs';
 import { createWorkspaces, createRepoCatalog } from './workspaces.mjs';
+import { createLiveChecks, commandArgs } from './live-checks.mjs';
 import { createAppRegistry, createAppRouter, reconcileApps, appKind, appUrl, APP_SESSION } from './apps.mjs';
 import { createFxSettings } from './fxsettings.mjs';
 import { listSkills } from './skill-shelf.mjs';
@@ -307,6 +308,15 @@ async function sessionFiles(id) {
 
 const timingEvents = async (id) => (await harnessFor(id)).timing(id);
 const readEvents = async (id) => (await harnessFor(id)).events(id);
+const liveChecks = createLiveChecks({ workspaces, filesFor: sessionFiles, eventsFor: readEvents });
+// Browser tabs may be closed while fx finishes; check recent completed turns without waiting for a page poll.
+setInterval(async () => {
+  try {
+    if (!(await workspaces.anyLiveChecks())) return;
+    for (const s of (await listSessions()).filter((s) => s.harness === 'fx' && Date.now() - s.updatedAt < 120_000))
+      await liveChecks.status(s);
+  } catch (err) { console.error(`fox: live check: ${err.message}`); }
+}, 10000).unref();
 const readArtifact = async (id, name) => (await harnessFor(id)).artifact(id, name);
 
 // ---------- git info por workspace (cacheado) ----------
@@ -775,6 +785,10 @@ async function handlePanelRequest(req, res) {
       catch (err) { return send(res, 502, { error: err.message }); }
     }
     if (p === '/api/workspaces' && req.method === 'GET') return send(res, 200, await listWorkspaces(true));
+    if (req.method === 'GET' && (m = p.match(/^\/api\/sessions\/([A-Za-z0-9_-]{4,64})\/live-check$/))) {
+      const session = (await recentSessions()).find((s) => s.id === m[1]);
+      return send(res, session ? 200 : 404, session ? await liveChecks.status(session) : { error: 'Session not found' });
+    }
     if (p === '/api/companion-repos' && req.method === 'GET') return send(res, 200, await workspaces.companions(url.searchParams.get('cwd') ?? ''));
     if (p === '/api/skill-shelf' && req.method === 'GET') {
       try { return send(res, 200, await listSkills(url.searchParams.get('cwd'), homedir())); }
@@ -800,7 +814,11 @@ async function handlePanelRequest(req, res) {
       const [, id, action] = m;
       try {
         if (action && req.method === 'POST') { const ok = action === 'fetch' ? await workspaces.fetch(id) : await workspaces.retry(id); return send(res, ok ? 200 : 404, ok ? { ok } : { error: 'Workspace not found.' }); }
-        if (!action && req.method === 'PATCH') return send(res, 200, await workspaces.update(id, JSON.parse(await readBody(req) || '{}')));
+        if (!action && req.method === 'PATCH') {
+          const body = JSON.parse(await readBody(req) || '{}');
+          if (body.liveCheck?.command) commandArgs(body.liveCheck.command);
+          return send(res, 200, await workspaces.update(id, body));
+        }
         if (!action && req.method === 'DELETE') { await workspaces.remove(id, { deleteFolder: url.searchParams.get('folder') === '1' }); return send(res, 200, { ok: true }); }
         return send(res, 405, { error: 'method not allowed' });
       } catch (err) { return send(res, err.status ?? 500, { error: err.message, blockers: err.blockers }); }

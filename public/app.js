@@ -1710,23 +1710,25 @@ function renderArtifactCard(id, files) {
 // ---------- files the session touched ----------
 let filesCollapsed = false;
 try { filesCollapsed = localStorage.getItem('fox.filesCollapsed') === '1'; } catch {}
-function fileRow(f) {
+function fileRow(f, checks = []) {
   const kids = f.by.filter((b) => b > 0).map((b) => '#' + b);
   const subs = kids.join(' ');
   // Name first so a narrow column still tells files apart; the folder follows, muted.
   const name = f.rel.split('/').pop(), dir = f.rel.slice(0, f.rel.length - name.length);
   const kind = hasPreview(f.path) ? '◫' : '{}';
+  const check = checks.find((x) => x.path === f.path);
   const target = f.exists ? `data-view-file="${esc(f.path)}" data-view-mode="${defaultMode(f)}" title="Open in the middle"` : '';
   return `<div class="file ${f.exists ? '' : 'missing'}" ${target}>
-    <div class="file-head"><span class="file-kind" aria-hidden="true">${kind}</span><span class="file-path" title="${esc(f.path)}"><span class="file-name">${esc(name)}</span>${dir ? `<span class="file-dir">${esc(dir.replace(/\/$/, ''))}</span>` : ''}</span>${subs ? `<span class="file-by" title="by subagent ${subs}">${kids[0]}${kids.length > 1 ? ' +' + (kids.length - 1) : ''}</span>` : ''}${f.exists ? `<a href="#" class="file-open" data-open-file="${esc(f.path)}" title="Open with the default app">↗</a>` : '<span class="file-by">deleted</span>'}</div>
+    <div class="file-head"><span class="file-kind" aria-hidden="true">${kind}</span><span class="file-path" title="${esc(f.path)}"><span class="file-name">${esc(name)}</span>${dir ? `<span class="file-dir">${esc(dir.replace(/\/$/, ''))}</span>` : ''}</span>${check ? '<span class="check-dot" title="Check failed">●</span>' : ''}${subs ? `<span class="file-by" title="by subagent ${subs}">${kids[0]}${kids.length > 1 ? ' +' + (kids.length - 1) : ''}</span>` : ''}${f.exists ? `<a href="#" class="file-open" data-open-file="${esc(f.path)}" title="Open with the default app">↗</a>` : '<span class="file-by">deleted</span>'}</div>
+    ${check ? `<div class="file-check">${check.lines.map((line) => `<div>${esc(line)}</div>`).join('')}</div>` : ''}
   </div>`;
 }
 // What the session made or changed, newest change first. Files it only read are left out.
-function filesSection(id, files) {
+function filesSection(id, files, check) {
   const shown = (files ?? []).filter((f) => f.action !== 'read').sort((a, b) => b.mtime - a.mtime);
   if (!shown.length) return '';
   const head = `<a href="#" class="section-title fold ${filesCollapsed ? 'closed' : ''}" data-toggle-files>files <span class="fold-n">${shown.length}</span></a>`;
-  return filesCollapsed ? head : `${head}<div class="files">${shown.map(fileRow).join('')}</div>`;
+  return filesCollapsed ? head : `${head}<div class="files">${shown.map((f) => fileRow(f, check?.problems)).join('')}</div>${check?.general?.length ? `<div class="file-check">${check.general.map(esc).join('<br>')}</div>` : ''}`;
 }
 $('#transcript').addEventListener('click', (e) => {
   const opener = e.target.closest('[data-open-file]');
@@ -1860,6 +1862,12 @@ globalQuery.addEventListener('keydown', (e) => {
 });
 
 let lastTranscriptKey = '';
+let currentCheck = null;
+$('#transcript-meta').addEventListener('click', (e) => {
+  if (!e.target.closest('[data-insert-check]') || !currentCheck?.count || !nextDraftTarget()) return;
+  const text = ['Please look at these check errors (do not assume they are all new):', ...currentCheck.problems.flatMap((p) => [p.path, ...p.lines]), ...currentCheck.general].join('\n').replace(/[\x00-\x1f\x7f-\x9f]/g, ' ').slice(0, 4000);
+  pasteIntoTerminal(text, nextDraftTarget().name);
+});
 let lastEventCount = { id: null, n: 0 };
 async function loadTranscript(id, quiet = false) {
   const s = sessionById(id);
@@ -1867,12 +1875,13 @@ async function loadTranscript(id, quiet = false) {
   const parent = s.parentId ? sessionById(s.parentId) : s;
   const isChild = Boolean(s.parentId);
   if (parent?.children?.length && (cachedResults.key !== resultsKey(parent) || parent.children.some((c) => c.phase === 'running'))) await refreshResults(parent);
-  const [events, files, timing] = await Promise.all([fetch(`/api/sessions/${id}/events`).then((r) => r.json()), fetch(`/api/sessions/${id}/files`).then((r) => r.json()).catch(() => []), parent?.children?.length ? fetch(`/api/sessions/${id}/timeline`).then((r) => r.ok ? r.json() : null).catch(() => null) : null]);
+  const [events, files, timing, check] = await Promise.all([fetch(`/api/sessions/${id}/events`).then((r) => r.json()), fetch(`/api/sessions/${id}/files`).then((r) => r.json()).catch(() => []), parent?.children?.length ? fetch(`/api/sessions/${id}/timeline`).then((r) => r.ok ? r.json() : null).catch(() => null) : null, fetch(`/api/sessions/${id}/live-check`).then((r) => r.ok ? r.json() : null).catch(() => null)]);
   if (state.selected !== id) return; // selection changed while we were fetching: drop this render
   const termOpenKey = Boolean(s.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
-  const key = id + ':' + events.length + ':' + (s.updatedAt ?? 0) + ':' + (parent?.children ?? []).map((c) => c.phase).join(',') + ':' + termOpenKey + ':' + Math.floor(Date.now() / 5000);
+  const key = id + ':' + events.length + ':' + (s.updatedAt ?? 0) + ':' + (parent?.children ?? []).map((c) => c.phase).join(',') + ':' + termOpenKey + ':' + JSON.stringify(check) + ':' + Math.floor(Date.now() / 5000);
   if (quiet && key === lastTranscriptKey) return;
   lastTranscriptKey = key;
+  currentCheck = check;
 
   // No title on a desktop: the session is highlighted on the left. A subagent gets a way back to its parent;
   // on a phone, where the list is another screen, the name and model stay.
@@ -1881,12 +1890,13 @@ async function loadTranscript(id, quiet = false) {
     : mobileLayout.matches ? esc(displayTitle(s)) : '';
   const u = s.usage;
   const tokens = u.input + u.output ? `${fmtTokens(u.input)} in · ${fmtTokens(u.output)} out · ${fmtTokens(u.cacheRead)} cache` : '';
-  $('#transcript-meta').innerHTML = `<span title="${esc([tokens, s.workspace].filter(Boolean).join('\n'))}">${s.model ? vendorDot(s.model) + esc(modelShort(s.model)) : ''}${s.provider ? ` · <span title="${esc(providerLabel(s.provider))}">${s.provider === 'gateway' ? '▲ gateway' : esc(s.provider)}</span>` : ''}${u.wallMs ? ' · ' + fmtDur(u.wallMs) : ''}${isChild ? ' · billed to parent' : u.cost ? ' · $' + u.cost.toFixed(2) : ''}</span>`;
+  $('#transcript-meta').classList.toggle('has-check', Boolean(check?.count));
+  $('#transcript-meta').innerHTML = `<span class="meta-main" title="${esc([tokens, s.workspace].filter(Boolean).join('\n'))}">${s.model ? vendorDot(s.model) + esc(modelShort(s.model)) : ''}${s.provider ? ` · <span title="${esc(providerLabel(s.provider))}">${s.provider === 'gateway' ? '▲ gateway' : esc(s.provider)}</span>` : ''}${u.wallMs ? ' · ' + fmtDur(u.wallMs) : ''}${isChild ? ' · billed to parent' : u.cost ? ' · $' + u.cost.toFixed(2) : ''}</span>${check?.count ? `<span class="check-summary">● ${check.count} check issue${check.count === 1 ? '' : 's'} <button type="button" data-insert-check ${nextDraftTarget() ? '' : 'disabled title="Open this session’s fx terminal to insert"'}>Insert into fx's input</button></span>` : ''}`;
 
   const html = [];
   if (!isChild && s.addDirs?.length) html.push(`<div class="session-access"><div class="section-title">fx file access · chosen at launch</div><div class="session-access-path">${esc(s.workspace)}</div>${s.addDirs.map((dir) => `<div class="session-access-path">+ ${esc(dir)}</div>`).join('')}</div>`);
   // Desktop keeps its detail-first column; phones lead with the readable conversation.
-  if (!mobileLayout.matches) html.push(filesSection(id, files));
+  if (!mobileLayout.matches) html.push(filesSection(id, files, check));
   if (isChild) {
     if (lastChildShown !== id) { expandedAgents.add(id); lastChildShown = id; } // arrive with its answer open
     if (!mobileLayout.matches) html.push(agentsBoard(parent, { selectedId: id }), '<div class="section-title">its conversation</div>');
@@ -1919,7 +1929,7 @@ async function loadTranscript(id, quiet = false) {
   }
   if (mobileLayout.matches) {
     if (parent.children?.length) html.push(agentsBoard(parent, isChild ? { selectedId: id } : {}), timelineSection(timing, id));
-    html.push(filesSection(id, files));
+    html.push(filesSection(id, files, check));
   }
   renderArtifactCard(id, files);
   // On a session change the column follows its content: nothing to show closes it; something to show
@@ -2748,6 +2758,7 @@ function wsView(view) { // 'create' | 'edit' | 'folder' | 'progress'
   $('#ws-create-fields').classList.toggle('hidden', view !== 'create');
   $('#ws-repo-fields').classList.toggle('hidden', view !== 'create' && view !== 'edit');
   $('#ws-folder-fields').classList.toggle('hidden', view !== 'folder');
+  $('#ws-check-fields').classList.toggle('hidden', view !== 'edit');
   $('#ws-progress').classList.toggle('hidden', view !== 'progress');
   $('#ws-mode').classList.toggle('hidden', view !== 'create' && view !== 'folder');
   $('#ws-mode').textContent = view === 'folder' ? 'Create a workspace instead' : 'Use an existing folder instead';
@@ -2770,6 +2781,8 @@ async function openWorkspaceDialog(id = null) {
   $('#ws-cancel').textContent = 'Cancel';
   $('#ws-submit').disabled = false;
   $('#ws-delete-path').textContent = wsp ? shortPath(wsp.dir) : '';
+  $('#ws-check-enabled').checked = wsp?.liveCheck?.enabled === true;
+  $('#ws-check-command').value = wsp?.liveCheck?.command ?? '';
   $('#ws-finder').classList.toggle('hidden', foxConfig.remote);
   wsView(wsp ? 'edit' : 'create');
   $('#wsdialog').classList.remove('hidden');
@@ -2888,7 +2901,7 @@ $('#wsform').addEventListener('submit', async (e) => {
   $('#ws-submit').disabled = true;
   const body = wsDlg.mode === 'create'
     ? { name, repos: [...wsDlg.selected.values()] }
-    : { add: [...wsDlg.selected].filter(([k]) => !wsDlg.initial.has(k)).map(([, r]) => r), remove: [...wsDlg.initial].filter((k) => !wsDlg.selected.has(k)).map((k) => { const [owner, n] = k.split('/'); return { owner, name: n }; }) };
+    : { add: [...wsDlg.selected].filter(([k]) => !wsDlg.initial.has(k)).map(([, r]) => r), remove: [...wsDlg.initial].filter((k) => !wsDlg.selected.has(k)).map((k) => { const [owner, n] = k.split('/'); return { owner, name: n }; }), liveCheck: { enabled: $('#ws-check-enabled').checked, command: $('#ws-check-command').value.trim() } };
   const r = await fetch(wsDlg.mode === 'create' ? '/api/workspaces' : `/api/workspaces/${wsDlg.id}`, { method: wsDlg.mode === 'create' ? 'POST' : 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) { $('#ws-submit').disabled = false; $('#ws-error').textContent = j.error || 'Could not save the workspace.'; return; }
