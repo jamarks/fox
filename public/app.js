@@ -218,6 +218,19 @@ function markReplyRead(id) {
   saveInboxSeen();
   renderReplyInbox();
 }
+$('#reply-inbox-clear').addEventListener('click', () => {
+  // Mark everything in the list read at once: sessions' replies and subagents' results alike.
+  if (!inboxSeen) return;
+  for (const s of state.sessions) {
+    if (s.parentId) {
+      if (s.childCompletion?.marker) inboxSeen[`child:${s.id}`] = s.childCompletion.marker;
+    } else if (!s.archived && s.latestReply && s.latestReply.turn > (inboxSeen[s.id] ?? 0)) {
+      inboxSeen[s.id] = s.latestReply.turn;
+    }
+  }
+  saveInboxSeen();
+  renderReplyInbox();
+});
 $('#reply-inbox-toggle').addEventListener('click', () => {
   const list = $('#reply-inbox-list');
   list.classList.toggle('hidden');
