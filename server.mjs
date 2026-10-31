@@ -475,16 +475,13 @@ async function handlePanelRequest(req, res) {
       await Promise.all([...new Set(sessions.map((s) => s.workspace))].map(async (ws) => { repos[ws] = await gitInfo(ws); }));
       const byResume = new Map(terminals.filter((t) => t.resume).map((t) => [t.resume, t]));
       const byId = new Map(sessions.map((s) => [s.id, s]));
-      await Promise.all(sessions.map(async (s) => {
+      for (const s of sessions) {
         const t = byResume.get(s.id);
         s.terminal = t ? t.name : null;
         s.state = t ? t.activity : (s.live ? 'external' : 'idle');
-        if (t && !s.latestReply) {
-          // The first turn can run for a long time before fx writes any reply to events.jsonl.
-          const screen = await tmux('capture-pane', '-p', '-t', t.name).catch(() => '');
-          s.model = harnessById(s.harness)?.screenModel?.(screen) ?? s.model;
-        }
-      }));
+        // Children have no parent-pane model: their saved answer or metadata remains their only evidence.
+        s.activeModel = t && !s.parentId && !s.subagentChild ? t.activeModel : null;
+      }
       // Los hijos no tienen terminal propia: su estado sale de children.json del padre.
       for (const s of sessions) {
         for (const c of s.children) {
@@ -953,11 +950,13 @@ async function tmuxOption(name, key) {
 
 // Which harness runs in a terminal: set when fox starts it; terminals from before harnesses run fx.
 const terminalHarness = async (name) => harnessById(await tmuxOption(name, '@fox_harness').catch(() => null)) ?? HARNESSES[0];
-// Working, waiting or asking: each harness reads its own screen.
+// Activity and the live model share one bounded visible-pane capture; fx saves replies only after a turn ends.
 async function terminalActivity(name, harness = null) {
   let screen = '';
-  try { screen = await tmux('capture-pane', '-p', '-t', name); } catch { return 'unknown'; }
-  return (harness ?? await terminalHarness(name)).activity(screen);
+  try { screen = await tmux('capture-pane', '-p', '-t', name); } catch { return { activity: 'unknown', activeModel: null }; }
+  const agent = harness ?? await terminalHarness(name);
+  const activity = agent.activity(screen);
+  return { activity, activeModel: activity === 'working' ? agent.screenModel?.(screen) ?? null : null };
 }
 
 async function listTerminals() {
@@ -983,7 +982,7 @@ async function listTerminals() {
       }
     }
     if (resume && pending[name]) matched.push([name, resume]);
-    out.push({ name, cwd, resume, harness: harness.id, attached: Number(attached) > 0, createdAt: Number(created) * 1000, activity: await terminalActivity(name, harness) });
+    out.push({ name, cwd, resume, harness: harness.id, attached: Number(attached) > 0, createdAt: Number(created) * 1000, ...await terminalActivity(name, harness) });
   }
   if (matched.length) await updateLaunchState((st) => {
     for (const [name, id] of matched) {
@@ -1231,7 +1230,7 @@ async function sendMobileMessage(id, text, { waitMs = 10_000 } = {}) {
       if (!prompt) return { status: 409, body: { error: `${harness.label} did not become ready. Open the desktop terminal and check the session.` } };
     } catch (error) { return { status: 409, body: { error: `Could not resume session: ${error.message}` } }; }
   }
-  const activity = await terminalActivity(terminal.name);
+  const { activity } = await terminalActivity(terminal.name);
   if (activity === 'working' || activity === 'needs_input') {
     return { status: 409, body: { error: activity === 'working' ? `${harness.label} is still working. Wait for its reply.` : `${harness.label} needs terminal input; use the desktop panel for this prompt.` } };
   }

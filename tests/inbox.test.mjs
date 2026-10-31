@@ -72,6 +72,28 @@ test('the model of a session is the one that answered last, not fx\'s default in
   assert.equal(lastAnswerModel([reply('gpt-6-luna'), '{not json "provider_replay"']), 'gpt-6-luna');
 });
 
+test('sidebar and Read share the live parent model, falling back to the saved model', () => {
+  const source = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const modelCode = source.slice(source.indexOf('const displayedModel ='), source.indexOf('const STATE_LABEL'));
+  const code = source.slice(source.indexOf('function sessionCard('), source.indexOf('function childrenHtml(', source.indexOf('function sessionCard(')));
+  const ctx = { document: { createElement: () => ({ dataset: {} }) }, state: { terminals: [], activeTab: null, tabs: new Map(), selected: null, pinned: new Set() },
+    foxConfig: { remote: false }, ICON: { pin: '', rename: '', archive: '' }, STATE_LABEL: { working: 'working', ready: 'waiting', idle: '' },
+    agentName: () => 'fx', esc: String, displayTitle: (s) => s.title, modelShort: String, providerLabel: () => 'gateway', providerTag: () => '', fmtTime: () => '', childrenHtml: () => '' };
+  vm.runInNewContext(modelCode + code + 'this.card = sessionCard; this.readModel = displayedModel', ctx);
+  const parent = { id: 'parent', title: 'Parent', state: 'working', model: 'saved-model', activeModel: 'live-model' };
+  assert.equal(ctx.readModel(parent), 'live-model');
+  assert.match(ctx.card(parent).innerHTML, /title="live-model via gateway">live-model</);
+  parent.activeModel = null;
+  assert.match(ctx.card(parent).innerHTML, /title="saved-model via gateway">saved-model</);
+  parent.activeModel = 'live-model'; parent.state = 'idle';
+  assert.match(ctx.card(parent).innerHTML, /title="saved-model via gateway">saved-model</);
+  parent.state = 'working'; parent.parentId = 'another-session';
+  assert.equal(ctx.readModel(parent), 'saved-model');
+  assert.match(ctx.card(parent).innerHTML, /title="saved-model via gateway">saved-model</);
+  delete parent.parentId; parent.subagentChild = true;
+  assert.equal(ctx.readModel(parent), 'saved-model');
+});
+
 test('hidden or reduced-motion yawns do not consume the next visible yawn', () => {
   const source = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
   const code = source.slice(source.indexOf('const FOX_YAWN_IDLE'), source.indexOf('let inboxSeen = null;'));
