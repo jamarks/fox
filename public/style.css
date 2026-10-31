@@ -241,9 +241,14 @@ a.agent:hover { border-color: var(--accent); }
 button.icon.on { opacity: 1; color: var(--accent); }
 .group h3 { gap: 6px; align-items: center; cursor: default; }
 .group h3 .caret, .group h3 .gname { cursor: pointer; }
+.group.focused h3 .caret, .group.focused h3 .gname { cursor: default; }
 .group h3 .caret { flex: none; width: 10px; color: var(--muted); }
 .group h3 .gname { flex: 1; min-width: 0; }
 .group h3 .gcount { flex: none; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.group h3 .group-focus { flex: none; opacity: .65; }
+.group h3 .group-focus:hover, .group h3 .group-focus.on { opacity: 1; }
+.group h3 .group-focus:focus-visible, #clear-focus:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#clear-focus { color: var(--accent); white-space: nowrap; font-size: 11px; }
 .group.collapsed { padding-bottom: 2px; }
 button.icon svg { display: block; }
 .hidden { display: none !important; }

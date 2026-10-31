@@ -49,6 +49,13 @@ const saveGroupOrder = () => { try { localStorage.setItem('fox.groupOrder', JSON
 const collapsed = new Set();
 try { for (const g of JSON.parse(localStorage.getItem('fox.collapsed') ?? '[]')) collapsed.add(g); } catch {}
 const saveCollapsed = () => { try { localStorage.setItem('fox.collapsed', JSON.stringify([...collapsed])); } catch {} };
+let focusedGroup = null;
+try { focusedGroup = localStorage.getItem('fox.focusedGroup'); } catch {}
+function setFocusedGroup(path) {
+  focusedGroup = path;
+  try { if (path) localStorage.setItem('fox.focusedGroup', path); else localStorage.removeItem('fox.focusedGroup'); } catch {}
+  renderSessions();
+}
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 const ICON = {
@@ -60,6 +67,7 @@ const ICON = {
   restore: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9"/><path d="M2.5 2.5v3h3"/></svg>',
   pin: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2l4.5 4.5-2.3.6-2.6 2.6.3 2.9-1.7 1.7L4.6 11 2 13.6M4.6 11l-1.9-1.9 1.7-1.7 2.9.3 2.6-2.6.6-2.3"/></svg>',
   rename: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2.5l2.5 2.5L6 12.5H3.5V10z"/></svg>',
+  focus: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 2H3a1 1 0 0 0-1 1v2.5M10.5 2H13a1 1 0 0 1 1 1v2.5M2 10.5V13a1 1 0 0 0 1 1h2.5M14 10.5V13a1 1 0 0 1-1 1h-2.5"/><circle cx="8" cy="8" r="1.5"/></svg>',
 };
 // Vendor badge for a model id: two letters on the vendor's color. Works for "vendor/model" ids and bare names.
 const VENDORS = [
@@ -282,7 +290,6 @@ function wsWorkLine(wsp) {
 }
 
 function renderSessions() {
-  if (state.renaming) return; // replacing the sidebar would blur the input and save prematurely
   const active = state.sessions.filter((s) => !s.archived && !s.parentId);
   const archived = state.sessions.filter((s) => s.archived && !s.parentId);
   const groups = new Map();
@@ -293,6 +300,13 @@ function renderSessions() {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(s);
   }
+  // Other sidebar data can render before the first overview; only clear stale focus after it arrives.
+  if (focusedGroup && state.workspaces && !groups.has(focusedGroup)) {
+    focusedGroup = null;
+    try { localStorage.removeItem('fox.focusedGroup'); } catch {}
+  }
+  if (state.renaming) return; // replacing the sidebar would blur the input and save prematurely
+  $('#clear-focus').classList.toggle('hidden', !focusedGroup);
   const root = $('#session-groups');
   root.innerHTML = '';
   // Stable order: manual order (drag the project header) first, then alphabetical. Never by activity,
@@ -302,15 +316,18 @@ function renderSessions() {
   // Every group reads the same: its folder's name with a capital letter (the folder itself keeps its own).
   const groupName = (n) => n ? n[0].toLocaleUpperCase() + n.slice(1) : n;
   for (const [ws, list] of ordered) {
+    if (focusedGroup && focusedGroup !== ws) continue;
     list.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)); // newest first, and it stays put
     const g = document.createElement('div');
-    const isCollapsed = collapsed.has(ws);
-    g.className = 'group' + (isCollapsed ? ' collapsed' : '');
+    const isCollapsed = collapsed.has(ws) && focusedGroup !== ws;
+    const focusButton = `<button type="button" class="icon group-focus${focusedGroup === ws ? ' on' : ''}" data-focus-group="${esc(ws)}" aria-label="${focusedGroup === ws ? 'Clear focus' : 'Focus on'} ${esc(groupName(ws.split('/').filter(Boolean).pop() ?? ws))}" aria-pressed="${focusedGroup === ws}" title="${focusedGroup === ws ? 'Clear focus' : 'Focus on this group'}">${ICON.focus}</button>`;
+    g.className = 'group' + (isCollapsed ? ' collapsed' : '') + (focusedGroup === ws ? ' focused' : '');
     g.dataset.ws = ws;
+    const toggleAttr = focusedGroup === ws ? '' : `data-toggle-group="${esc(ws)}"`;
     const wsp = (state.workspaces ?? []).find((w) => w.dir === ws);
     if (wsp) {
       g.classList.add('workspace');
-      g.innerHTML = `<h3 draggable="true" title="Drag to reorder"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(groupName(wsp.name))}</span><span class="gcount" title="${list.length} session${list.length === 1 ? '' : 's'}">${list.length}</span><button class="icon" data-edit-ws="${esc(wsp.id)}" title="Edit workspace">${ICON.rename}</button><button class="icon" data-new="${esc(ws)}" title="New session in this workspace">+</button></h3>${isCollapsed ? '' : wsSummaryLine(wsp) + wsWorkLine(wsp) + wsRepoSummary(wsp)}`;
+      g.innerHTML = `<h3 draggable="true" title="Drag to reorder"><span class="caret" ${toggleAttr}>${isCollapsed ? '▸' : '▾'}</span><span class="gname" ${toggleAttr} title="${esc(shortPath(ws))}">${esc(groupName(wsp.name))}</span><span class="gcount" title="${list.length} session${list.length === 1 ? '' : 's'}">${list.length}</span>${focusButton}<button class="icon" data-edit-ws="${esc(wsp.id)}" title="Edit workspace">${ICON.rename}</button><button class="icon" data-new="${esc(ws)}" title="New session in this workspace">+</button></h3>${isCollapsed ? '' : wsSummaryLine(wsp) + wsWorkLine(wsp) + wsRepoSummary(wsp)}`;
       if (!isCollapsed) list.forEach((s, i) => g.appendChild(sessionCard(s, i + 1)));
       root.appendChild(g);
       continue;
@@ -319,15 +336,16 @@ function renderSessions() {
     const repo = state.repos?.[ws];
     // GitHub remote: owner/repo as a link. Plain git: just the branch (and the repo root if the workspace is a subfolder).
     const gitLine = repo ? `<div class="git" title="${esc(repo.remote || 'git repo without a remote: add one (git remote add origin …) and this becomes a link')}">${repo.url ? `<a href="${esc(repo.url)}" target="_blank" rel="noopener" title="Open ${esc(repo.repo)} on GitHub">${ICON.github}${esc(repo.repo)}</a>` : `<span>${ICON.git}${repo.root !== ws ? esc(shortPath(repo.root)) : 'no remote'}</span>`}${repo.branch ? `<span class="branch">${esc(repo.branch)}</span>` : ''}${repo.changed ? `<span class="changed" title="${repo.changed} changed file${repo.changed === 1 ? '' : 's'}">±${repo.changed}</span>` : ''}</div>` : '';
-    g.innerHTML = `<h3 draggable="true" title="Drag to reorder projects"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(groupName(ws.split('/').filter(Boolean).pop() ?? ws))}</span><span class="gcount">${list.length}</span><button class="icon" data-new="${esc(ws)}" title="New session in this folder">+</button></h3>${isCollapsed ? '' : gitLine}`;
+    g.innerHTML = `<h3 draggable="true" title="Drag to reorder projects"><span class="caret" ${toggleAttr}>${isCollapsed ? '▸' : '▾'}</span><span class="gname" ${toggleAttr} title="${esc(shortPath(ws))}">${esc(groupName(ws.split('/').filter(Boolean).pop() ?? ws))}</span><span class="gcount">${list.length}</span>${focusButton}<button class="icon" data-new="${esc(ws)}" title="New session in this folder">+</button></h3>${isCollapsed ? '' : gitLine}`;
     if (!isCollapsed) list.forEach((s, i) => g.appendChild(sessionCard(s, i + 1)));
     root.appendChild(g);
   }
-  if (archived.length) {
+  const visibleArchived = focusedGroup ? archived.filter((s) => (workspaceFor(s.workspace)?.dir ?? s.workspace) === focusedGroup) : archived;
+  if (visibleArchived.length) {
     const g = document.createElement('div');
     g.className = 'group archived';
-    g.innerHTML = `<h3 class="clickable" data-toggle-archived><span>${showArchived.value ? '▾' : '▸'} archived · ${archived.length}</span></h3>`;
-    if (showArchived.value) for (const s of archived) g.appendChild(sessionCard(s));
+    g.innerHTML = `<h3 class="clickable" data-toggle-archived><span>${showArchived.value ? '▾' : '▸'} archived · ${visibleArchived.length}</span></h3>`;
+    if (showArchived.value) for (const s of visibleArchived) g.appendChild(sessionCard(s));
     root.appendChild(g);
   }
 }
@@ -404,9 +422,11 @@ $('#session-groups').addEventListener('drop', (e) => {
 });
 $('#session-groups').addEventListener('dragend', () => { dragWs = null; document.querySelectorAll('.group').forEach((x) => x.classList.remove('dragging', 'drop-before', 'drop-after')); });
 
+$('#clear-focus').addEventListener('click', () => setFocusedGroup(null));
 $('#session-groups').addEventListener('click', async (e) => {
   const btn = e.target.closest('button');
   const d = btn?.dataset ?? {};
+  if (d.focusGroup) return setFocusedGroup(focusedGroup === d.focusGroup ? null : d.focusGroup);
   if (d.new) return newSessionSheet(d.new);
   if (d.editWs) return openWorkspaceDialog(d.editWs);
   if (d.branchWs) return openBranchMenu(btn, d.branchWs, d.branchDir);
