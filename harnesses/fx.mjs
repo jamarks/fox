@@ -1,6 +1,6 @@
 // fx as a harness: everything fox knows about fx's files on disk (~/.fx/sessions) and its screen lives here.
 // The rest of fox sees sessions and events in fox's own shape (see docs/harnesses.md); nothing outside this
-// file reads session.json, events.jsonl or children.json.
+// file reads session.json, events.jsonl, children.json or the v2 index/log.
 import { readFile, readdir, stat, lstat, open } from 'node:fs/promises';
 import { existsSync, constants } from 'node:fs';
 import { join } from 'node:path';
@@ -13,6 +13,56 @@ const safeId = (id) => /^[A-Za-z0-9_-]{4,64}$/.test(id ?? '');
 const EFFECTS = { write_file: 'write', edit_file: 'edit', read_file: 'read', shell: 'shell', bash: 'shell' };
 
 export function createFx({ sessionsDir, bin }) {
+  const v2Dir = join(sessionsDir, 'v2');
+  const v2Log = (id) => join(v2Dir, id, 'log.jsonl');
+  const isV2 = (id) => safeId(id) && existsSync(v2Log(id));
+  // Normalize v2's append-only items to the event shape shared by Read, inbox and timing.
+  async function v2Records(id) {
+    const raw = await readFile(v2Log(id), 'utf8').catch(() => '');
+    return raw.split('\n').flatMap((line) => { try { return [JSON.parse(line)]; } catch { return []; } });
+  }
+  function v2Events(records) {
+    return records.flatMap((r) => {
+      if (r.kind !== 'item') return [];
+      const kind = r.type === 'turn_end' ? 'turn_completed' : r.type;
+      if (!['user', 'assistant', 'tool_call', 'tool_result', 'turn_completed', 'interrupted'].includes(kind)) return [];
+      return [{ timestamp_ms: r.ts, event: { [kind]: r.data ?? {} } }];
+    });
+  }
+  async function listV2Sessions() {
+    const index = await readFile(join(v2Dir, 'index.jsonl'), 'utf8').catch(() => '');
+    const entries = new Map();
+    for (const line of index.split('\n')) {
+      try {
+        const row = JSON.parse(line);
+        if (!safeId(row.id)) continue;
+        if (row.op === 'put') entries.set(row.id, row);
+        else if (row.op === 'delete') entries.delete(row.id);
+      } catch {} // the writer may leave an incomplete final line during a poll
+    }
+    const sessions = [];
+    for (const [id, meta] of entries) {
+      if (!isV2(id)) continue;
+      const records = await v2Records(id);
+      const events = v2Events(records);
+      const raw = events.map(JSON.stringify).join('\n');
+      const snap = records.findLast((r) => r.kind === 'snapshot')?.state;
+      const prefs = records.findLast((r) => r.kind === 'set' && r.key === 'prefs')?.value ?? snap?.prefs ?? {};
+      const usage = snap?.usage ?? {};
+      const firstPrompt = events.find((r) => r.event.user)?.event.user.text ?? '';
+      const last = events.at(-1)?.event ?? {};
+      const lastKind = Object.keys(last)[0] ?? null;
+      sessions.push({ id, title: meta.title || snap?.title || '(untitled)', firstPrompt: String(firstPrompt).replace(/\s+/g, ' ').slice(0, 160),
+        latestReply: latestCompletedReply(raw), lastKind, partial: last.interrupted?.partial_text ?? null,
+        workspace: meta.workspace ?? '?', provider: prefs.provider, model: lastAnswerModel(raw.split('\n')) ?? prefs.model,
+        createdAt: meta.created, updatedAt: meta.updated, parentId: null, subagentChild: meta.role !== 'root', children: [],
+        live: false, turns: events.filter((r) => r.event.user).length,
+        usage: { input: usage.input_tokens ?? 0, output: usage.output_tokens ?? 0, cacheRead: usage.cache_read_tokens ?? 0,
+          cost: 0, wallMs: 0, savedAt: snap?.usage ? await stat(v2Log(id)).then((s) => s.mtimeMs).catch(() => null) : null },
+      });
+    }
+    return sessions;
+  }
   async function listSessions() {
     if (!existsSync(sessionsDir)) return [];
     const sessions = [];
@@ -85,7 +135,7 @@ export function createFx({ sessionsDir, bin }) {
         },
       });
     }
-    return sessions;
+    return [...sessions, ...(await listV2Sessions()).filter((s) => !sessions.some((old) => old.id === s.id))];
   }
 
   // fx leaves owner.live with the pid of the process that holds the session; a dead pid is an orphaned lock.
@@ -96,8 +146,10 @@ export function createFx({ sessionsDir, bin }) {
   }
 
   async function events(id) {
+    if (!safeId(id)) return [];
     let raw;
-    try { raw = await readFile(join(sessionsDir, id, 'events.jsonl'), 'utf8'); } catch { return []; }
+    if (isV2(id)) raw = v2Events(await v2Records(id)).map(JSON.stringify).join('\n');
+    else try { raw = await readFile(join(sessionsDir, id, 'events.jsonl'), 'utf8'); } catch { return []; }
     const out = [];
     const callsById = new Map();
     for (const line of raw.split('\n')) {
@@ -145,13 +197,15 @@ export function createFx({ sessionsDir, bin }) {
   // overview state and children.json, never from an assumed tail of events.jsonl.
   const timelineCache = new Map();
   async function timing(id) {
-    const file = join(sessionsDir, id, 'events.jsonl');
+    if (!safeId(id)) return [];
+    const file = isV2(id) ? v2Log(id) : join(sessionsDir, id, 'events.jsonl');
     const info = await stat(file).catch(() => null);
     if (!info) return [];
     const key = `${info.mtimeMs}:${info.size}`;
     const hit = timelineCache.get(id);
     if (hit?.key === key) return hit.events;
-    const parsed = parseTimeline(await readFile(file, 'utf8'));
+    const raw = isV2(id) ? v2Events(await v2Records(id)).map(JSON.stringify).join('\n') : await readFile(file, 'utf8');
+    const parsed = parseTimeline(raw);
     if (timelineCache.size > 100) timelineCache.delete(timelineCache.keys().next().value);
     timelineCache.set(id, { key, events: parsed });
     return parsed;
@@ -163,13 +217,14 @@ export function createFx({ sessionsDir, bin }) {
     bin,
     sessionsDir,
     available: () => existsSync(bin),
-    has: (id) => safeId(id) && existsSync(join(sessionsDir, id, 'session.json')),
+    has: (id) => safeId(id) && (existsSync(join(sessionsDir, id, 'session.json')) || isV2(id)),
     listSessions,
     events,
     timing,
     async artifact(id, name) {
       if (!/^[A-Za-z0-9._-]+$/.test(name)) return null;
-      const dir = join(sessionsDir, id);
+      if (!safeId(id)) return null;
+      const dir = isV2(id) ? join(v2Dir, id) : join(sessionsDir, id);
       const results = join(dir, 'tool-results');
       const limit = 512 * 1024;
       let file;

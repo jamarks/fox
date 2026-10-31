@@ -178,6 +178,44 @@ test('fx sessions keep their files on disk and get the same tool effects as any 
   assert.deepEqual(fx.launch({ flags: ['--model', 'x'] }), { argv: ['/bin/fx', '--model', 'x'], id: null });
 });
 
+test('fx v2 index and log show in the sidebar alongside legacy sessions and support Read and resume', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'fox-fx-v2-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await mkdir(join(dir, 'legacy'));
+  await writeFile(join(dir, 'legacy', 'session.json'), JSON.stringify({ title: 'Old', created_at_ms: 1 }));
+  const v2 = join(dir, 'v2');
+  await mkdir(join(v2, 'newsession01'), { recursive: true });
+  await writeFile(join(v2, 'index.jsonl'), lines(
+    { op: 'put', id: 'newsession01', role: 'root', workspace: '/w', title: 'New', created: 10, updated: 40, turns: 1 },
+    { op: 'put', id: 'deleted00001', role: 'root', title: 'Deleted' },
+    { op: 'delete', id: 'deleted00001' },
+  ) + '{"op":'); // tolerate an incomplete index tail
+  await writeFile(join(v2, 'newsession01', 'log.jsonl'), lines(
+    { kind: 'session_created', ts: 10, id: 'newsession01' },
+    { kind: 'set', key: 'prefs', value: { provider: 'codex', model: 'model-x' } },
+    { kind: 'item', ts: 11, type: 'user', data: { text: 'Write a page' } },
+    { kind: 'item', ts: 12, type: 'tool_call', data: { call_id: 'c1', tool_name: 'write_file', arguments_json: '{"path":"a.html"}' } },
+    { kind: 'item', ts: 13, type: 'tool_result', data: { call_id: 'c1', status: 'ok', preview: 'done' } },
+    { kind: 'item', ts: 14, type: 'assistant', data: { text: 'Done', provider_replay: { source: { model: 'model-y' } } } },
+    { kind: 'item', ts: 15, type: 'turn_end', data: {} },
+    { kind: 'item', ts: 16, type: 'user', data: { text: 'Again' } },
+    { kind: 'item', ts: 17, type: 'assistant_running', data: { text: 'unfinished' } },
+    { kind: 'snapshot', state: { usage: { input_tokens: 8, output_tokens: 3 } } },
+  ) + '{"kind":');
+  const fx = createFx({ sessionsDir: dir, bin: '/bin/fx' });
+  const rows = await fx.listSessions();
+  assert.equal(rows.length, 2);
+  const row = rows.find((s) => s.id === 'newsession01');
+  assert.deepEqual([row.title, row.workspace, row.firstPrompt, row.latestReply.text, row.model, row.turns], ['New', '/w', 'Write a page', 'Done', 'model-y', 2]);
+  assert.equal(row.usage.input, 8);
+  assert.ok(fx.has(row.id));
+  assert.deepEqual(fx.launch({ resume: row.id }), { argv: ['/bin/fx', 'session', 'resume', row.id], id: row.id });
+  assert.deepEqual((await fx.events(row.id)).map((e) => e.kind), ['user', 'tool_call', 'assistant', 'turn_completed', 'user']);
+  assert.deepEqual((await fx.events(row.id)).find((e) => e.kind === 'tool_call').path, 'a.html');
+  assert.equal((await fx.timing(row.id)).length, 5);
+  assert.equal(fx.has('deleted00001'), false);
+});
+
 test('fox knows whether Claude Code is signed in, from `claude auth status`', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'fox-claude-auth-'));
   t.after(() => rm(dir, { recursive: true, force: true }));

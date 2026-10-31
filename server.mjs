@@ -102,10 +102,10 @@ function updateLaunchState(change) {
   launchStateWrite = next.catch(() => {});
   return next;
 }
-// fx's sessions are indexed from its files; the other harnesses' from their events, which they cache.
+// Legacy fx sessions are indexed from their files; v2 fx and other harnesses use normalized events.
 const searchSessions = createSearchIndex(SESSIONS_DIR, loadState, async () => {
   const st = await loadState();
-  const rows = (await listSessions()).filter((s) => s.harness !== 'fx');
+  const rows = (await listSessions()).filter((s) => s.harness !== 'fx' || !existsSync(join(SESSIONS_DIR, s.id, 'session.json')));
   return Promise.all(rows.map(async (s) => {
     let index = 0;
     const messages = (await readEvents(s.id)).filter((e) => e.kind === 'user' || e.kind === 'assistant').map((e) => ({ index: index++, kind: e.kind, text: e.text ?? '' }));
