@@ -20,12 +20,12 @@ fx is the coding agent from Vercel Labs. fox runs it on a VPS or a computer at h
 ## What's new
 
 <!-- changelog:start -->
-- **2026-10-29** Keep root metadata writes out of the build tree ([#65](https://github.com/jamarks/fox/pull/65))
-- **2026-10-28** Serialize fx settings updates to preserve explicit overrides ([#63](https://github.com/jamarks/fox/pull/63))
-- **2026-10-28** Reject publication roots that resolve outside allowed directories ([#62](https://github.com/jamarks/fox/pull/62))
-- **2026-10-28** Do not label an existing checkout as a different repo ([#61](https://github.com/jamarks/fox/pull/61))
-- **2026-10-28** Expose new fx settings as opt-in controls ([#60](https://github.com/jamarks/fox/pull/60))
-- **2026-10-28** Block workspace deletion when repos contain ignored files ([#59](https://github.com/jamarks/fox/pull/59))
+- **2026-10-31** Live checks on what fx changed: lint and type errors next to its files ([#72](https://github.com/jamarks/fox/pull/72))
+- **2026-10-31** Open a large tool result from its exact transcript call ([#70](https://github.com/jamarks/fox/pull/70))
+- **2026-10-31** Surface unread subagent results as they land ([#68](https://github.com/jamarks/fox/pull/68))
+- **2026-10-31** Expose new fx settings as opt-in controls ([#71](https://github.com/jamarks/fox/pull/71))
+- **2026-10-31** Focus the sidebar on one workspace ([#67](https://github.com/jamarks/fox/pull/67))
+- **2026-10-31** Show the live model after a session switches models ([#66](https://github.com/jamarks/fox/pull/66))
 
 All of it: [CHANGELOG.md](CHANGELOG.md).
 <!-- changelog:end -->

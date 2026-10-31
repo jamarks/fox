@@ -2,6 +2,15 @@
 
 What changed in fox, newest first: one line per merged pull request. Written by a job from the pull requests; edit the PR title to change a line.
 
+## 2026-10-31
+
+- Live checks on what fx changed: lint and type errors next to its files ([#72](https://github.com/jamarks/fox/pull/72))
+- Open a large tool result from its exact transcript call ([#70](https://github.com/jamarks/fox/pull/70))
+- Surface unread subagent results as they land ([#68](https://github.com/jamarks/fox/pull/68))
+- Expose new fx settings as opt-in controls ([#71](https://github.com/jamarks/fox/pull/71))
+- Focus the sidebar on one workspace ([#67](https://github.com/jamarks/fox/pull/67))
+- Show the live model after a session switches models ([#66](https://github.com/jamarks/fox/pull/66))
+
 ## 2026-10-29
 
 - Keep root metadata writes out of the build tree ([#65](https://github.com/jamarks/fox/pull/65))
