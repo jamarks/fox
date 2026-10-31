@@ -144,14 +144,28 @@ export function createSkills({ home, stateDir, workspaces, web = fetchText, gh =
     if (b.length > 128 * 1024 || !plain(b)) fail('Skill is not plain text.', 400);
     return { ...item, text: b.toString('utf8') };
   }
+  // Only GitHub file links are accepted; no arbitrary URL is fetched. The ref is a single URL segment
+  // (branch names containing / need a commit permalink), and the selected path must be an actual SKILL.md.
+  function skillLink(value) {
+    let url;
+    try { url = new URL(value); } catch { fail('Enter a GitHub SKILL.md URL.'); }
+    const parts = url.pathname.split('/').slice(1);
+    if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.username || url.password || url.port || url.search || url.hash || value.includes('%') ||
+        parts.length < 5 || parts[2] !== 'blob' || parts.at(-1) !== 'SKILL.md' ||
+        parts.some((p) => !p || p.includes('%') || p === '..') || !REPO.test(parts.slice(0, 2).join('/')) ||
+        !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(parts[3])) fail('Enter a GitHub SKILL.md URL (https://github.com/owner/repo/blob/ref/path/SKILL.md).');
+    const dir = parts.slice(4, -1).join('/');
+    if (dir && !safeFile(dir)) fail('Unsafe skill path.');
+    return { source: parts.slice(0, 2).join('/'), ref: parts[3], dir };
+  }
   // A repo's tree, held a few minutes for the cards and lists; a preview reads it fresh, since that is what installs.
-  async function repoTree(source, fresh = false) {
+  async function repoTree(source, fresh = false, ref = 'HEAD') {
     if (typeof source !== 'string' || !REPO.test(source) || source.includes('..')) fail('Enter a GitHub owner/repo.');
-    const hit = trees.get(source);
+    const key = `${source}@${ref}`, hit = trees.get(key);
     if (!fresh && hit && hit.until > Date.now()) return hit.entries;
-    const tree = JSON.parse(await gh([`repos/${source}/git/trees/HEAD?recursive=1`]));
+    const tree = JSON.parse(await gh([`repos/${source}/git/trees/${ref}?recursive=1`]));
     if (tree.truncated || !Array.isArray(tree.tree) || tree.tree.length > 10000) fail('Repository tree is too large or incomplete.');
-    trees.set(source, { until: Date.now() + 10 * 60_000, entries: tree.tree });
+    trees.set(key, { until: Date.now() + 10 * 60_000, entries: tree.tree });
     return tree.tree;
   }
   async function blob(source, f) {
@@ -236,14 +250,18 @@ export function createSkills({ home, stateDir, workspaces, web = fetchText, gh =
     audits.set(key, { value, until: Date.now() + (value.status === 'unavailable' ? 60_000 : 5 * 60_000) });
     return value;
   }
-  async function preview({ source, dirs, scope }) {
+  async function preview({ source, dirs, scope, url }) {
     await target(scope);
-    const entries = await repoTree(source, true);
+    const link = url === undefined ? null : skillLink(url);
+    if (link) { source = link.source; dirs = [link.dir]; }
+    const entries = await repoTree(source, true, link?.ref);
+    if (link && (!entries.some((e) => e.type === 'blob' && e.path === (link.dir ? `${link.dir}/SKILL.md` : 'SKILL.md')) ||
+        link.dir.split('/').some((_, i, parts) => entries.some((e) => e.type === 'blob' && e.path === `${parts.slice(0, i).join('/')}${i ? '/' : ''}SKILL.md`)))) fail('That URL does not point to a standalone skill.', 404);
     if (!Array.isArray(dirs) || !dirs.length) fail('Choose at least one skill.');
     if (dirs.length > 40) fail('Choose 40 skills or fewer.');
     if (dirs.some((d) => typeof d !== 'string')) fail('That skill is not in this repository.', 404);
     const skills = [];
-    for (const dir of new Set(dirs.map((d) => findDir(entries, d)))) {
+    for (const dir of new Set(dirs.map((d) => link ? d : findDir(entries, d)))) {
       const files = filesOf(entries, dir), prefix = dir ? `${dir}/` : '', why = problem(files);
       if (why) fail(`${posix.basename(dir) || source}: ${why}.`);
       const data = await pool(files, 8, async (f) => ({ name: f.path.slice(prefix.length), data: await blob(source, f) }));
@@ -255,7 +273,7 @@ export function createSkills({ home, stateDir, workspaces, web = fetchText, gh =
     const token = randomUUID();
     for (const [k, v] of previews) if (v.until < Date.now()) previews.delete(k);
     previews.set(token, { until: Date.now() + 10 * 60_000, scope, source, skills });
-    return { token, source, scope, skills: skills.map((s) => ({ name: s.name, description: s.description, audit: s.audit, files: s.files.map((f) => ({ name: f.name, size: f.data.length })), text: s.files.find((f) => f.name === 'SKILL.md').data.toString('utf8') })) };
+    return { token, source, scope, dir: link?.dir, url: link ? url : undefined, skills: skills.map((s) => ({ name: s.name, description: s.description, audit: s.audit, files: s.files.map((f) => ({ name: f.name, size: f.data.length })), text: s.files.find((f) => f.name === 'SKILL.md').data.toString('utf8') })) };
   }
   // `scope` may change where it goes after the preview (picked next to Install); what goes is what was shown.
   // A skill that failed a security audit installs only with `confirmRisk`, the "Install anyway" of the page.

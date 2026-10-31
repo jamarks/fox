@@ -2469,7 +2469,7 @@ $('#settings-tools').addEventListener('click', async (e) => {
 });
 // ---------- skills: a page of its own, like Jobs and Pull requests ----------
 // Two tabs: Installed (what fx loads) and Browse (what can be installed). Browse lists Popular from skills.sh, a
-// skills.sh search, or one repo; ticked skills, from any of them, are reviewed file by file before installing.
+// skills.sh search, one repo, or a GitHub SKILL.md URL; every skill is reviewed before installing.
 // Skills are instructions, not programs: nothing is copied before that review.
 let skillCount = null, skillItems = [], skillSources = [], skillTab = null;
 let skillView = 'popular', skillRows = null, skillViewMsg = '', skillScopes = [], skillScope = 'global';
@@ -2515,7 +2515,7 @@ function showSkillTab(tab) {
 }
 // The chips say where the list comes from: Popular on skills.sh, a known repo, or one you type.
 function renderSkillChips() {
-  const other = !['popular', 'search', ...skillSources].includes(skillView);
+  const other = !['popular', 'search', 'url', ...skillSources].includes(skillView);
   $('#skill-repos').innerHTML = `<button type="button" class="skill-chip${skillView === 'popular' ? ' on' : ''}" data-skill-view="popular">Popular</button>` +
     skillSources.map((src) => `<button type="button" class="skill-chip${skillView === src ? ' on' : ''}" data-skill-view="${esc(src)}">${esc(src)}</button>`).join('') +
     `<button type="button" class="skill-chip${other || !$('#skill-other').classList.contains('hidden') ? ' on' : ''}" data-skill-other>${other ? esc(skillView) : 'owner/repo…'}</button>`;
@@ -2580,11 +2580,11 @@ async function openSkillRow(key) {
   const row = skillRows.find((s) => `${s.source}|${s.id}` === key); if (!row) return;
   skillOpen = key; skillPanel = { state: 'loading' }; renderSkillPick();
   try {
-    const j = await skillApi('preview', { source: row.source, dirs: [row.id], scope: skillScope });
+    const j = await skillApi('preview', row.url ? { url: row.url, scope: skillScope } : { source: row.source, dirs: [row.id], scope: skillScope });
     if (skillOpen === key) skillPanel = { state: 'ready', token: j.token, skill: j.skills[0] };
   } catch (err) {
     // Not installable: still show what it is, when its SKILL.md can be read.
-    const peek = await skillApi('peek', { source: row.source, dir: row.id }).catch(() => null);
+    const peek = row.url ? null : await skillApi('peek', { source: row.source, dir: row.id }).catch(() => null);
     if (skillOpen === key) skillPanel = { state: 'error', error: err.message, skill: peek ? { text: peek.text, files: peek.files } : null };
   }
   if (skillOpen === key) renderSkillPick();
@@ -2617,6 +2617,20 @@ $('#skill-repos').addEventListener('click', (e) => {
   $('#skill-other').classList.remove('hidden'); renderSkillChips(); $('#skill-source').focus();
 });
 $('#skill-other').addEventListener('submit', (e) => { e.preventDefault(); const src = $('#skill-source').value.trim(); if (src) openSkillView(src); });
+$('#skill-url-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const url = $('#skill-url').value.trim();
+  skillView = 'url'; skillOpen = null; skillPanel = null; skillRows = null; skillViewMsg = 'Checking the GitHub skill…';
+  renderSkillChips(); renderSkillPick();
+  try {
+    const j = await skillApi('preview', { url, scope: skillScope });
+    if (skillView !== 'url' || $('#skill-url').value.trim() !== url) return;
+    const s = j.skills[0], row = { source: j.source, id: j.dir, name: s.name, desc: s.description, url };
+    skillRows = [row]; skillOpen = `${row.source}|${row.id}`;
+    skillPanel = { state: 'ready', token: j.token, skill: s }; skillViewMsg = '';
+  } catch (err) { if (skillView === 'url') skillViewMsg = err.message; }
+  renderSkillPick();
+});
 let skillSearchTimer = 0;
 $('#skills-search').addEventListener('input', () => {
   clearTimeout(skillSearchTimer);

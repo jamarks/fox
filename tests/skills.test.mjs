@@ -116,6 +116,36 @@ test('skills.sh gives names to pick; the skill is found in its repo by id, also 
   assert.deepEqual((await api.preview({ source: 'x/y', scope: 'global', dirs: ['example', 'helper'] })).skills.map((s) => s.name), ['example', 'helper']);
   await assert.rejects(() => api.preview({ source: 'x/y', scope: 'global', dirs: ['missing'] }), /not in this repository/);
 });
+test('GitHub SKILL.md link previews the exact folder and ref before install, with the usual checks', async (t) => {
+  const f = await fixture(t), calls = [];
+  const api = f.api({ gh: async (args) => { calls.push(args[0]); return f.gh(args); } });
+  const url = 'https://github.com/x/y/blob/main/skills/example/SKILL.md';
+  const p = await api.preview({ url, scope: 'global' });
+  assert.equal(p.source, 'x/y'); assert.equal(p.dir, 'skills/example');
+  assert.match(calls[0], /repos\/x\/y\/git\/trees\/main\?recursive=1/);
+  assert.deepEqual(p.skills[0].files.map((x) => x.name), ['SKILL.md', 'docs/notes.md']);
+  await api.install(p.token);
+  assert.equal(await readFile(join(f.home, '.claude/skills/example/SKILL.md'), 'utf8'), f.files['skills/example/SKILL.md']);
+  for (const bad of [
+    'http://github.com/x/y/blob/main/skills/example/SKILL.md',
+    'https://github.com.evil.test/x/y/blob/main/skills/example/SKILL.md',
+    'https://github.com/x/y/blob/main/skills/example/%2e%2e/SKILL.md',
+    'https://github.com/x/y/blob/main/skills/example/SKILL.md?download=1',
+    'https://github.com/x/y/blob/main/skills/example/docs/notes.md',
+    'https://github.com/x/y/blob/main/skills/missing/SKILL.md',
+  ]) await assert.rejects(() => api.preview({ url: bad, scope: 'global' }), /GitHub SKILL.md URL|standalone skill/);
+  f.files['skills/example/SKILL.md'] = 'not a skill';
+  f.tree[0].size = Buffer.byteLength(f.files['skills/example/SKILL.md']);
+  await assert.rejects(() => api.preview({ url, scope: 'global' }), /valid name and description/);
+});
+test('GitHub links to skills outside skills/ work, but nested SKILL.md files are resources', async (t) => {
+  const f = await fixture(t), api = f.api();
+  f.files['.claude/skills/helper/SKILL.md'] = '---\nname: helper\ndescription: A helper.\n---\n# Helper';
+  f.tree.push({ path: '.claude/skills/helper/SKILL.md', type: 'blob', mode: '100644', sha: 'f'.repeat(40), size: Buffer.byteLength(f.files['.claude/skills/helper/SKILL.md']) });
+  assert.equal((await api.preview({ url: 'https://github.com/x/y/blob/main/.claude/skills/helper/SKILL.md', scope: 'global' })).skills[0].name, 'helper');
+  f.tree.push({ path: 'skills/example/docs/nested/SKILL.md', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 10 });
+  await assert.rejects(() => api.preview({ url: 'https://github.com/x/y/blob/main/skills/example/docs/nested/SKILL.md', scope: 'global' }), /standalone skill/);
+});
 test('accepts folded YAML descriptions and rejects empty descriptions', async (t) => {
   const f = await fixture(t);
   f.files['skills/example/SKILL.md'] = '---\nname: example\ndescription: >\n  Useful for tests\n  and safety.\n---\n# Sample';
