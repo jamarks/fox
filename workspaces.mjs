@@ -9,6 +9,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID, createHash } from 'node:crypto';
 import { SAFE_GIT } from './gitsync.mjs';
+import { commandArgs } from './live-checks.mjs';
 const execFileP = promisify(execFile);
 
 export const WORKSPACE_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/;
@@ -110,6 +111,7 @@ export function createWorkspaces({
 
   return {
     rootDir,
+    async anyLiveChecks() { return (await load()).some((w) => w.liveCheck?.enabled === true); },
     async list() {
       let all = await load();
       // Once per workspace per run of fox: workspaces from before the notes get theirs.
@@ -146,12 +148,18 @@ export function createWorkspaces({
       cloneMissing(ws);
       return ws;
     },
-    async update(id, { name, add = [], remove = [] }) {
+    async update(id, { name, add = [], remove = [], liveCheck }) {
       const all = await load();
       const ws = all.find((w) => w.id === id);
       if (!ws) throw Object.assign(new Error('Workspace not found.'), { status: 404 });
       if (name !== undefined && String(name).trim() !== ws.name) throw Object.assign(new Error('The name is the folder and cannot change. Create a new workspace instead.'), { status: 400 });
-      if (!add.every(validRepo) || !remove.every(validRepo)) throw Object.assign(new Error('Invalid repo.'), { status: 400 });
+      if (!Array.isArray(add) || !Array.isArray(remove) || !add.every(validRepo) || !remove.every(validRepo)) throw Object.assign(new Error('Invalid repo.'), { status: 400 });
+      if (liveCheck !== undefined) {
+        if (!liveCheck || typeof liveCheck.enabled !== 'boolean' || typeof liveCheck.command !== 'string' || liveCheck.command.length > 300)
+          throw Object.assign(new Error('Invalid check settings.'), { status: 400 });
+        if (liveCheck.command.trim()) commandArgs(liveCheck.command);
+        ws.liveCheck = { enabled: liveCheck.enabled, command: liveCheck.command.trim(), enabledAt: liveCheck.enabled ? (ws.liveCheck?.enabled && ws.liveCheck.command === liveCheck.command.trim() ? ws.liveCheck.enabledAt : Date.now()) : null };
+      }
       const drop = new Set(remove.map(key));
       ws.repos = ws.repos.filter((r) => !drop.has(key(r))); // leaves its folder on disk
       for (const r of add) {

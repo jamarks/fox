@@ -443,6 +443,15 @@ button.agent-open { padding: 0; line-height: 1.45; }
 .file-open { flex: none; color: var(--muted); text-decoration: none; padding: 0 2px; }
 .file-open:hover { color: var(--accent); }
 .file.missing .file-path { text-decoration: line-through; color: var(--muted); }
+.check-dot, .check-summary { color: var(--warn); }
+.check-dot { font-size: 10px; }
+.file-check { margin: 0 7px 6px 24px; color: var(--warn); font: 10px/1.5 var(--mono); overflow-wrap: anywhere; max-height: 90px; overflow: auto; }
+.check-summary { display: inline-flex; align-items: center; gap: 6px; margin-left: 9px; font-size: 11px; }
+.check-summary button { font-size: 10px; color: var(--accent); border: 0; background: none; cursor: pointer; }
+.check-summary button:disabled { color: var(--muted); cursor: default; }
+.ws-check-toggle { display: flex; align-items: center; gap: 8px; margin: 12px 0 5px; font-size: 12px; }
+#ws-check-enabled { flex: none; width: 14px; height: 14px; }
+#ws-check-command { width: 100%; }
 .files-more { margin: 4px 6px 0; font-size: 11px; color: var(--accent); text-decoration: none; }
 .agent-note { margin-top: 4px; padding-left: 21px; font-size: 11px; color: var(--muted); font-style: italic; }
 .board .agent.selected { border-color: var(--accent); }
@@ -629,6 +638,8 @@ a.section-title.fold:hover { color: var(--text); }
 /* right column on a desktop: no repeated name or model, just the close button */
 @media (min-width: 1101px) {
   #transcript-meta { display: none; }
+  #transcript-meta.has-check { display: flex; }
+  #transcript-meta.has-check .meta-main { display: none; }
   #transcript > .side-head { border-bottom: 0; min-height: 0; padding: 8px 10px 0 16px; }
 }
 

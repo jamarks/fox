@@ -61,6 +61,22 @@ test('a workspace clones every repo into its folder and is saved', async () => {
   await assert.rejects(ws.create({ name: '../escape', repos: [{ owner: 'jamarks', name: 'notes' }] }), /lowercase/);
 });
 
+test('workspace checks are off until explicitly enabled and persist per workspace', async () => {
+  const { ws } = await setup([]);
+  const created = await ws.create({ name: 'checks' });
+  assert.equal(await ws.anyLiveChecks(), false);
+  assert.equal((await ws.get(created.id)).liveCheck, undefined);
+  await ws.update(created.id, { liveCheck: { enabled: true, command: 'npm run lint' } });
+  assert.equal(await ws.anyLiveChecks(), true);
+  assert.equal((await ws.get(created.id)).liveCheck.command, 'npm run lint');
+  assert.ok((await ws.get(created.id)).liveCheck.enabledAt > 0);
+  await ws.update(created.id, { liveCheck: { enabled: false, command: '' } });
+  assert.equal(await ws.anyLiveChecks(), false);
+  await assert.rejects(ws.update(created.id, { liveCheck: { enabled: 'yes', command: '' } }), /Invalid check settings/);
+  await assert.rejects(ws.update(created.id, { liveCheck: { enabled: true, command: 'npm run lint; echo bad' } }), (e) => e.status === 400);
+  assert.equal(await ws.anyLiveChecks(), false);
+});
+
 test('companion access accepts only distinct cloned sibling repos, never symlinks or outside paths', async () => {
   const { base, ws } = await setup([['a', 'api'], ['b', 'web'], ['c', 'docs']]);
   const created = await ws.create({ name: 'team', repos: [{ owner: 'a', name: 'api' }, { owner: 'b', name: 'web' }, { owner: 'c', name: 'docs' }] });

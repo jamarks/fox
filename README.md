@@ -34,7 +34,7 @@ All of it: [CHANGELOG.md](CHANGELOG.md).
 
 - **Sessions** grouped by workspace (with its jobs and open pull requests counted under it, one click to see only those), with a live dot (working, waiting, needs input), a bell when one finishes, and an inbox of replies you have not read.
 - **Subagents** grouped by task, so the same question on three models is a side-by-side comparison; weak answers are flagged.
-- **Files** fx wrote, opened the way they read best: pages and images rendered, Markdown formatted, CSV as a table, code highlighted. The newest page shows as a live card, sandboxed.
+- **Files** fx wrote, opened the way they read best: pages and images rendered, Markdown formatted, CSV as a table, code highlighted. The newest page shows as a live card, sandboxed. Workspace settings can opt into checking changed files after each fx turn with the repo's `lint`, `typecheck` or `check` script (or a command you supply); errors stay in fox until you choose to insert them into fx's input.
 - **One terminal** per session in tmux; pin the ones you keep. Drop files on it, dictate into it (the text lands in fx's input; you send it). Toggle the read-only mosaic in the tab bar to watch up to four live sessions, then open a tile to type.
 - **Workspaces**: a folder of GitHub repos, cloned once, with each repo's branch and changes at a glance; click the branch to go back to main, switch, update or start one (uncommitted work is kept in a wip/ branch, never dropped). Start a session in one repo and explicitly grant fx file access to selected sibling repos for that launch only.
 - **Jobs**: scripts on a schedule, each with its model, log, summary and links. A job can have fx make a change and open a pull request it checked itself. [docs/jobs.md](docs/jobs.md)
