@@ -176,7 +176,11 @@ label.toggle { font-weight: 400; color: var(--muted); font-size: 11px; display: 
 /* states */
 #summary { padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 11px; display: flex; gap: 10px; min-height: 27px; align-items: center; box-sizing: border-box; }
 #reply-inbox { border-bottom: 1px solid var(--border); }
-#reply-inbox-toggle { display: flex; align-items: center; gap: 5px; width: 100%; padding: 8px 12px; color: var(--accent); font-weight: 600; text-align: left; }
+.reply-inbox-head { display: flex; align-items: center; padding-right: 6px; }
+#reply-inbox-toggle { display: flex; align-items: center; gap: 5px; flex: 1; min-width: 0; padding: 8px 12px; color: var(--accent); font-weight: 600; text-align: left; }
+#reply-inbox-clear { flex: none; width: 32px; height: 32px; }
+#reply-inbox-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+@media (pointer: coarse) { #reply-inbox-clear { width: 44px; height: 44px; } }
 #reply-inbox-toggle .inbox-caret { margin-left: auto; color: var(--muted); }
 #reply-inbox-list { max-height: min(40vh, 340px); overflow-y: auto; border-top: 1px solid var(--border); padding: 4px 0; }
 .reply-inbox-item { display: block; width: 100%; padding: 8px 12px; text-align: left; color: var(--text); border-radius: 0; }

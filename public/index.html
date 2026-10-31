@@ -33,7 +33,10 @@
     </header>
     <div id="summary"></div>
     <div id="reply-inbox" class="hidden">
-      <button id="reply-inbox-toggle" type="button" aria-expanded="false">● <span id="reply-inbox-count"></span> <span id="reply-inbox-label">new replies</span> <span class="inbox-caret">▾</span></button>
+      <div class="reply-inbox-head">
+        <button id="reply-inbox-toggle" type="button" aria-expanded="false">● <span id="reply-inbox-count"></span> <span id="reply-inbox-label">new replies</span> <span class="inbox-caret">▾</span></button>
+        <button id="reply-inbox-clear" class="icon" type="button" title="Clear all replies" aria-label="Clear all replies"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4h8M2 8h5M2 12h5m3-3 2 2 3-4"/></svg></button>
+      </div>
       <div id="reply-inbox-list" class="hidden"></div>
     </div>
     <div id="session-groups"></div>
