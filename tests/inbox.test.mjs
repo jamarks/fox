@@ -42,7 +42,7 @@ test('first load baselines history, polling adds unread, selection clears only t
   const selection = source.slice(source.indexOf('function selectSession(id) {'), source.indexOf('async function renameInline(id) {'));
   assert.ok(start >= 0 && end > start && selection.includes('markReplyRead(id)'));
   const handlers = {};
-  const elements = Object.fromEntries(['reply-inbox', 'reply-inbox-list', 'reply-inbox-toggle', 'reply-inbox-count', 'reply-inbox-label'].map((name) => [name, {
+  const elements = Object.fromEntries(['reply-inbox', 'reply-inbox-list', 'reply-inbox-toggle', 'reply-inbox-clear', 'reply-inbox-count', 'reply-inbox-label'].map((name) => [name, {
     classList: { values: new Set(['hidden']), toggle(key, force) { if (force === undefined ? !this.values.has(key) : force) this.values.add(key); else this.values.delete(key); }, add(key) { this.values.add(key); }, contains(key) { return this.values.has(key); } },
     setAttribute() {}, addEventListener(type, handler) { handlers[`${name}:${type}`] = handler; },
     innerHTML: '', textContent: '',
@@ -50,7 +50,7 @@ test('first load baselines history, polling adds unread, selection clears only t
   const storage = new Map();
   const state = { sessions: [{ id: 'abcd', archived: false, parentId: null, workspace: '/repo', title: 'Session' }], selected: null };
   const ctx = { state, $: (selector) => elements[selector.slice(1)], localStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
-    sessionById: (id) => state.sessions.find((s) => s.id === id), displayTitle: (s) => s.title, shortPath: (s) => s, fmtTime: String, esc: String,
+    sessionById: (id) => state.sessions.find((s) => s.id === id), ICON: { threads: '↳' }, displayTitle: (s) => s.title, shortPath: (s) => s, fmtTime: String, esc: String,
     globalMessage: null, convoShown: new Set(), setTranscript() {}, closePages() {}, renderSessions() {}, renderNextDraft() {}, loadTranscript() {}, syncUrl() {}, updatePageTitle() {}, syncNothingOpen() {}, foxMotion: { activity: 0 }, gestures: [], foxGesture(name) { ctx.gestures.push(name); },
     mobileLayout: { matches: false }, opened: [], openSession(id) { ctx.opened.push(id); },
   };
@@ -80,6 +80,28 @@ test('first load baselines history, polling adds unread, selection clears only t
   handlers['reply-inbox-list:click']({ target: { closest: () => ({ dataset: { reply: 'abcd' } }) } });
   assert.deepEqual(ctx.opened, ['abcd']);
   assert.equal(ctx.globalMessage, null);
+
+  state.sessions[0].latestReply.turn = 3;
+  state.sessions.push({ id: 'other', title: 'Other', latestReply: { turn: 2, text: 'Other reply' } },
+    { id: 'child', parentId: 'abcd', latestReply: { turn: 1 }, childCompletion: { marker: 'done:1', text: 'Child result', at: 3 } },
+    { id: 'archived', archived: true, latestReply: { turn: 1 } });
+  vm.runInNewContext('renderReplyInbox()', ctx);
+  assert.equal(elements['reply-inbox-count'].textContent, 3, 'two replies and one subagent result');
+  ctx.opened = [];
+  handlers['reply-inbox-clear:click']();
+  assert.equal(elements['reply-inbox'].classList.contains('hidden'), true);
+  assert.equal(elements['reply-inbox-list'].classList.contains('hidden'), true);
+  const seen = JSON.parse(storage.get('fox.inbox.seen'));
+  assert.equal(seen.abcd, 3); assert.equal(seen.other, 2);
+  assert.equal(seen['child:child'], 'done:1', 'subagent results clear too');
+  assert.equal(seen.archived, undefined, 'archived sessions are left alone');
+  assert.deepEqual(ctx.opened, [], 'clearing replies never opens a terminal');
+  vm.runInNewContext('inboxSeen = null; renderReplyInbox()', ctx);
+  assert.equal(elements['reply-inbox'].classList.contains('hidden'), true, 'cleared replies stay read after reload');
+  state.sessions[0].latestReply.turn = 4;
+  vm.runInNewContext('renderReplyInbox()', ctx);
+  assert.equal(elements['reply-inbox-count'].textContent, 1);
+  assert.equal(elements['reply-inbox'].classList.contains('hidden'), false, 'future replies still appear');
 });
 
 test('child rounds appear under the parent without duplicate parent alerts or terminal attachment', () => {
