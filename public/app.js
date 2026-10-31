@@ -4,7 +4,7 @@ const $ = (sel) => document.querySelector(sel);
 const state = {
   sessions: [], terminals: [], selected: null,
   tabs: new Map(), // tmux name -> { term, fit, ws, wrap, label, closed }
-  activeTab: null, pollTimer: null, prevStates: new Map(), sound: false,
+  activeTab: null, pollTimer: null, prevStates: new Map(), prevChildResults: new Map(), sound: false,
   renaming: null, // keep the inline editor mounted while overview polling updates the rest of the UI
   pinned: new Set(), // tmux names pinned as tabs; restored after reload. Everything else is a preview or runs unseen.
   preview: null,     // the one unpinned terminal currently shown; replaced when you click another session
@@ -105,19 +105,31 @@ async function refresh() {
   state.terminals = terminals;
   state.repos = repos ?? {};
   updatePageTitle();
+  renderReplyInbox(); // seed seen markers before deciding whether a transition is new
   detectTransitions();
   renderSessions();
   renderSummary();
-  renderReplyInbox();
   syncTabsWithTerminals();
   renderNextDraft();
   if (state.mosaic) renderMosaic();
 }
 
 function detectTransitions() {
+  const firstPoll = !state.prevStates.size;
+  const parentsWithResults = new Set();
+  for (const s of state.sessions) {
+    if (!s.parentId) continue;
+    const marker = s.childCompletion?.marker ?? null;
+    const prev = state.prevChildResults.get(s.id);
+    if (!firstPoll && marker && marker !== prev && marker !== inboxSeen?.[`child:${s.id}`] && !s.archived && !sessionById(s.parentId)?.archived) {
+      parentsWithResults.add(s.parentId);
+      notify(`${displayTitle(s)}: ${s.childCompletion.failed ? 'failed' : 'done'}`, s.childCompletion.text);
+    }
+    state.prevChildResults.set(s.id, marker);
+  }
   for (const s of state.sessions) {
     const prev = state.prevStates.get(s.id);
-    if (prev && prev !== s.state && (s.state === 'ready' || s.state === 'needs_input') && prev === 'working') {
+    if (prev && prev !== s.state && (s.state === 'ready' || s.state === 'needs_input') && prev === 'working' && !s.parentId && !parentsWithResults.has(s.id)) {
       notify(`${displayTitle(s)}: ${STATE_LABEL[s.state]}`, s.firstPrompt);
     }
     state.prevStates.set(s.id, s.state);
@@ -159,14 +171,24 @@ function renderReplyInbox() {
     try { inboxSeen = JSON.parse(localStorage.getItem('fox.inbox.seen')); } catch {}
     if (!inboxSeen || typeof inboxSeen !== 'object' || Array.isArray(inboxSeen)) {
       // First visit: don't flood the inbox with all the old conversations.
-      inboxSeen = Object.fromEntries(state.sessions.filter((s) => s.latestReply).map((s) => [s.id, s.latestReply.turn]));
+      inboxSeen = Object.fromEntries(state.sessions.filter((s) => !s.parentId && s.latestReply).map((s) => [s.id, s.latestReply.turn]));
+    }
+    if (!inboxSeen['@children']) {
+      // Migrate existing browsers too: old child results are history, not a burst of new alerts.
+      for (const s of state.sessions.filter((s) => s.parentId)) {
+        const marker = s.childCompletion?.marker ?? (s.latestReply ? `turn:${s.latestReply.turn}` : null);
+        if (marker) inboxSeen[`child:${s.id}`] = marker;
+      }
+      inboxSeen['@children'] = true;
       saveInboxSeen();
     }
   }
-  const unread = state.sessions.filter((s) => !s.parentId && !s.archived && s.latestReply && s.latestReply.turn > (inboxSeen[s.id] ?? 0))
-    .sort((a, b) => (b.latestReply.at ?? b.updatedAt ?? 0) - (a.latestReply.at ?? a.updatedAt ?? 0));
+  const unread = state.sessions.filter((s) => !s.archived && (!s.parentId
+    ? s.latestReply && s.latestReply.turn > (inboxSeen[s.id] ?? 0)
+    : !sessionById(s.parentId)?.archived && s.childCompletion && s.childCompletion.marker !== inboxSeen[`child:${s.id}`]))
+    .sort((a, b) => (b.childCompletion?.at ?? b.latestReply?.at ?? b.updatedAt ?? 0) - (a.childCompletion?.at ?? a.latestReply?.at ?? a.updatedAt ?? 0));
   // A reply that was not unread on the last render is new: the fox winks (not on the first render, not for old ones).
-  const keys = unread.map((s) => `${s.id}:${s.latestReply.turn}`);
+  const keys = unread.map((s) => s.parentId ? `${s.id}:${s.childCompletion.marker}` : `${s.id}:${s.latestReply.turn}`);
   if (winkKeys && keys.some((k) => !winkKeys.has(k))) {
     foxMotion.activity = Date.now();
     foxGesture('wink');
@@ -177,16 +199,22 @@ function renderReplyInbox() {
   if (!unread.length) { list.classList.add('hidden'); toggle.setAttribute('aria-expanded', 'false'); return; }
   $('#reply-inbox-count').textContent = unread.length;
   $('#reply-inbox-label').textContent = unread.length === 1 ? 'new reply' : 'new replies';
-  list.innerHTML = unread.map((s) => `<button type="button" class="reply-inbox-item" data-reply="${esc(s.id)}">
-    <span class="inbox-title">${esc(displayTitle(s))}<small>${esc(shortPath(s.workspace))} · ${esc(fmtTime(s.latestReply.at))}</small></span>
-    <span class="inbox-excerpt">${esc(s.latestReply.text)}</span>
-  </button>`).join('');
+  list.innerHTML = unread.map((s) => {
+    const result = s.parentId ? s.childCompletion : s.latestReply;
+    const parent = s.parentId && sessionById(s.parentId);
+    return `<button type="button" class="reply-inbox-item${s.parentId ? ' child-result' : ''}" data-reply="${esc(s.id)}">
+    <span class="inbox-title">${s.parentId ? '<span class="inbox-child-icon">' + ICON.threads + '</span>' : ''}${esc(displayTitle(s))}${result.failed ? ' <span class="flag err">failed</span>' : ''}<small>${esc(parent ? displayTitle(parent) : shortPath(s.workspace))} · ${esc(fmtTime(result.at))}</small></span>
+    <span class="inbox-excerpt">${esc(result.text)}</span>
+  </button>`;
+  }).join('');
 }
 function saveInboxSeen() { try { localStorage.setItem('fox.inbox.seen', JSON.stringify(inboxSeen)); } catch {} }
 function markReplyRead(id) {
-  const turn = sessionById(id)?.latestReply?.turn;
-  if (!turn || !inboxSeen || turn <= (inboxSeen[id] ?? 0)) return;
-  inboxSeen[id] = turn;
+  const s = sessionById(id);
+  const key = s?.parentId ? `child:${id}` : id;
+  const marker = s?.parentId ? s.childCompletion?.marker : s?.latestReply?.turn;
+  if (!marker || !inboxSeen || (s?.parentId ? marker === inboxSeen[key] : marker <= (inboxSeen[key] ?? 0))) return;
+  inboxSeen[key] = marker;
   saveInboxSeen();
   renderReplyInbox();
 }
@@ -199,12 +227,23 @@ $('#reply-inbox-list').addEventListener('click', (e) => {
   const item = e.target.closest('[data-reply]');
   if (!item) return;
   const s = sessionById(item.dataset.reply);
-  if (!s?.latestReply) return;
+  const result = s?.parentId ? s.childCompletion : s?.latestReply;
+  if (!result) return;
+  if (s.parentId) {
+    // Children have no terminal: select their saved conversation without waking or attaching to the parent.
+    globalMessage = result.messageIndex == null ? null : { id: s.id, index: result.messageIndex };
+    convoShown.add(s.id);
+    closePages();
+    setTranscript(true);
+    selectSession(s.id);
+    if (mobileLayout.matches) showMobileView('read');
+    return;
+  }
   // On a phone the answer is read where you reply: straight to the session's terminal.
   if (mobileLayout.matches) return openSession(s.id);
   // On a computer: the answer in the right column, scrolled to, and the session's terminal in the center
   // (woken up if it was asleep), the same as clicking the session. Selecting marks the reply read.
-  globalMessage = { id: s.id, index: s.latestReply.messageIndex };
+  globalMessage = { id: s.id, index: result.messageIndex };
   convoShown.add(s.id);
   closePages(); // the answer shows in the right column, which an open page hides
   setTranscript(true);

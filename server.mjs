@@ -37,6 +37,7 @@ import { createModels, launchArgs } from './models.mjs';
 import { createUsage } from './usage.mjs';
 import { turnTimeline } from './timeline.mjs';
 import { familyUsage } from './family-usage.mjs';
+import { childCompletion } from './inbox.mjs';
 import { createFx } from './harnesses/fx.mjs';
 import { createClaude, claudeBin } from './harnesses/claude.mjs';
 import { toResume, splitOnce, nextWorking, CONTINUE_TEXT } from './restart.mjs';
@@ -488,6 +489,7 @@ async function handlePanelRequest(req, res) {
           const child = byId.get(c.id);
           if (!child) continue;
           child.subagent = { ...c, parentId: s.id };
+          child.childCompletion = childCompletion(child, c);
           child.state = c.phase === 'running' ? 'working' : c.phase === 'idle' ? 'ready' : 'done';
           if (!child.firstPrompt && c.task) child.firstPrompt = c.task;
         }

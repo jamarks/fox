@@ -167,7 +167,9 @@ label.toggle { font-weight: 400; color: var(--muted); font-size: 11px; display: 
 .reply-inbox-item { display: block; width: 100%; padding: 8px 12px; text-align: left; color: var(--text); border-radius: 0; }
 .reply-inbox-item:hover { background: var(--panel-2); }
 .inbox-title { display: block; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.inbox-child-icon { color: var(--accent); margin-right: 5px; vertical-align: -2px; }
 .inbox-title small { margin-left: 6px; color: var(--muted); font-size: 10px; font-weight: 400; }
+.reply-inbox-item.child-result .inbox-title small { display: block; margin: 2px 0 0 18px; overflow: hidden; text-overflow: ellipsis; }
 .inbox-excerpt { display: block; color: var(--muted); font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-top: 2px; }
 .st { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; }
 .st i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block; }
