@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
-const section = source.slice(source.indexOf('let filesCollapsed = false;'), source.indexOf("$('#transcript').addEventListener('click'"));
+const section = source.slice(source.indexOf('let filesCollapsed = false;'), source.indexOf("$('#transcript').addEventListener("));
 const ctx = { localStorage: { getItem: () => '0' }, esc: (s) => String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;'), hasPreview: () => false, defaultMode: () => 'code' };
 vm.createContext(ctx);
 vm.runInContext(section, ctx);

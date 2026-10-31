@@ -39,7 +39,32 @@ test('without a passkey fox still refuses foreign names, keeps previews in their
   const dir = join(home, '.fx', 'sessions', 'hard-session');
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, 'session.json'), JSON.stringify({ title: 'Test', workspace_root: project }));
-  await writeFile(join(dir, 'events.jsonl'), JSON.stringify({ event: { assistant: { text: 'Made `index.html`' } } }) + '\n');
+  await writeFile(join(dir, 'events.jsonl'), [
+    { event: { assistant: { text: 'Made `index.html`' } } },
+    { event: { tool_call: { call_id: 'one', tool_name: 'shell', arguments_json: '{}' } } },
+    { event: { tool_result: { call_id: 'one', status: 'failure', preview: 'short', output_bytes: 11, artifact_ref: 'exact.txt' } } },
+    { event: { tool_call: { call_id: 'two', tool_name: 'shell', arguments_json: '{}' } } },
+    { event: { tool_result: { call_id: 'two', status: 'success', preview: 'huge', artifact_ref: 'huge.txt' } } },
+    { event: { tool_call: { call_id: 'three', tool_name: 'shell', arguments_json: '{}' } } },
+    { event: { tool_result: { call_id: 'three', status: 'success', preview: 'link', artifact_ref: 'linked.txt' } } },
+    { event: { tool_call: { call_id: 'four', tool_name: 'shell', arguments_json: '{}' } } },
+    { event: { tool_result: { call_id: 'four', status: 'failure', preview: 'gone', artifact_ref: 'missing.txt' } } },
+    { event: { tool_call: { call_id: 'five', tool_name: 'shell', arguments_json: '{}' } } },
+    { event: { tool_result: { call_id: 'five', status: 'success', preview: 'raw', artifact_ref: 'raw.bin' } } },
+  ].map(JSON.stringify).join('\n') + '\n');
+  await mkdir(join(dir, 'tool-results'));
+  await writeFile(join(dir, 'tool-results', 'exact.txt'), 'exact output');
+  await writeFile(join(dir, 'tool-results', 'raw.bin'), Buffer.from([0xff, 0, 0x41]));
+  await writeFile(join(dir, 'tool-results', 'unlisted.txt'), 'private');
+  await writeFile(join(dir, 'tool-results', 'huge.txt'), 'x'.repeat(512 * 1024 + 1));
+  await symlink(join(outside, 'secret.txt'), join(dir, 'tool-results', 'linked.txt'));
+  const linkedDir = join(home, '.fx', 'sessions', 'linked-results');
+  await mkdir(linkedDir);
+  await writeFile(join(linkedDir, 'events.jsonl'), [
+    { event: { tool_call: { call_id: 'one', tool_name: 'shell', arguments_json: '{}' } } },
+    { event: { tool_result: { call_id: 'one', artifact_ref: 'secret.txt' } } },
+  ].map(JSON.stringify).join('\n') + '\n');
+  await symlink(outside, join(linkedDir, 'tool-results'));
   await mkdir(join(home, '.fx', 'sessions', 'constructor'));
   await writeFile(join(home, '.fx', 'sessions', 'constructor', 'session.json'), JSON.stringify({ title: 'odd' }));
   await writeFile(join(home, '.fx', 'settings.json'), JSON.stringify({ provider: 'local', providers: { local: { base_url: 'http://127.0.0.1:1234', auth: { env: 'SECRET' } } }, models: { local: 'qwen:7b' } }));
@@ -66,6 +91,23 @@ test('without a passkey fox still refuses foreign names, keeps previews in their
     assert.equal((await get(port, `${base}/leak.txt`)).status, 404);
     assert.equal((await get(port, `${base}/env.txt`)).status, 404);
     assert.equal((await get(port, `${base}/dir/secret.txt`)).status, 404);
+    // A file name alone grants no access: it must be attached to a tool result in this session.
+    const artifact = '/api/sessions/hard-session/artifact/';
+    assert.equal((await get(port, artifact + 'exact.txt')).body, 'exact output');
+    assert.equal((await get(port, artifact + 'exact.txt')).headers['x-artifact-bytes'], '12');
+    assert.match((await get(port, artifact + 'exact.txt?download=1')).headers['content-disposition'], /attachment; filename="exact.txt"/);
+    const raw = await fetch(`http://127.0.0.1:${port}${artifact}raw.bin?download=1`);
+    assert.equal(raw.headers.get('content-type'), 'application/octet-stream');
+    assert.deepEqual(Buffer.from(await raw.arrayBuffer()), Buffer.from([0xff, 0, 0x41]));
+    assert.equal((await get(port, artifact + 'unlisted.txt')).status, 404);
+    assert.equal((await get(port, '/api/sessions/constructor/artifact/exact.txt')).status, 404);
+    assert.deepEqual(JSON.parse((await get(port, artifact + 'missing.txt')).body), { error: 'artifact file missing' });
+    assert.equal((await get(port, artifact + 'linked.txt')).status, 404);
+    assert.equal((await get(port, '/api/sessions/linked-results/artifact/secret.txt')).status, 404);
+    assert.equal((await get(port, artifact + 'huge.txt')).status, 413);
+    assert.equal((await get(port, artifact + 'huge.txt?download=1')).status, 413);
+    assert.match((await get(port, artifact + 'huge.txt')).body, /too large/);
+    assert.equal((await get(port, artifact + '..%2Fsecret.txt')).status, 404);
     // Choosing the deploy branch is for a server only.
     assert.deepEqual(JSON.parse((await get(port, '/api/deploy')).body), { available: false, branch: 'release' });
     // Search with a session folder named like an Object method.

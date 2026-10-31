@@ -4,7 +4,7 @@ const $ = (sel) => document.querySelector(sel);
 const state = {
   sessions: [], terminals: [], selected: null,
   tabs: new Map(), // tmux name -> { term, fit, ws, wrap, label, closed }
-  activeTab: null, pollTimer: null, prevStates: new Map(), sound: false,
+  activeTab: null, pollTimer: null, prevStates: new Map(), prevChildResults: new Map(), sound: false,
   renaming: null, // keep the inline editor mounted while overview polling updates the rest of the UI
   pinned: new Set(), // tmux names pinned as tabs; restored after reload. Everything else is a preview or runs unseen.
   preview: null,     // the one unpinned terminal currently shown; replaced when you click another session
@@ -49,6 +49,13 @@ const saveGroupOrder = () => { try { localStorage.setItem('fox.groupOrder', JSON
 const collapsed = new Set();
 try { for (const g of JSON.parse(localStorage.getItem('fox.collapsed') ?? '[]')) collapsed.add(g); } catch {}
 const saveCollapsed = () => { try { localStorage.setItem('fox.collapsed', JSON.stringify([...collapsed])); } catch {} };
+let focusedGroup = null;
+try { focusedGroup = localStorage.getItem('fox.focusedGroup'); } catch {}
+function setFocusedGroup(path) {
+  focusedGroup = path;
+  try { if (path) localStorage.setItem('fox.focusedGroup', path); else localStorage.removeItem('fox.focusedGroup'); } catch {}
+  renderSessions();
+}
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 const ICON = {
@@ -60,6 +67,7 @@ const ICON = {
   restore: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9"/><path d="M2.5 2.5v3h3"/></svg>',
   pin: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2l4.5 4.5-2.3.6-2.6 2.6.3 2.9-1.7 1.7L4.6 11 2 13.6M4.6 11l-1.9-1.9 1.7-1.7 2.9.3 2.6-2.6.6-2.3"/></svg>',
   rename: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2.5l2.5 2.5L6 12.5H3.5V10z"/></svg>',
+  focus: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 2H3a1 1 0 0 0-1 1v2.5M10.5 2H13a1 1 0 0 1 1 1v2.5M2 10.5V13a1 1 0 0 0 1 1h2.5M14 10.5V13a1 1 0 0 1-1 1h-2.5"/><circle cx="8" cy="8" r="1.5"/></svg>',
 };
 // Vendor badge for a model id: two letters on the vendor's color. Works for "vendor/model" ids and bare names.
 const VENDORS = [
@@ -83,6 +91,8 @@ function modelBadge(model) {
 const providerLabel = (p) => ({ gateway: 'Vercel AI Gateway (pay per use)', codex: 'ChatGPT subscription', grok: 'Grok subscription', claude: 'Claude Code (your Claude sign-in)' })[p] ?? (p || 'unknown provider');
 const providerTag = (p) => !p ? '' : p === 'gateway' ? '<span class="prov gw">▲ gateway</span>' : `<span class="prov">${esc(p)}</span>`;
 const modelShort = (model) => String(model ?? '').replace(/^[a-z0-9-]+\//i, '');
+// Only the parent's visible terminal can identify a model while its answer is still being written.
+const displayedModel = (s) => s.state === 'working' && !s.parentId && !s.subagentChild ? s.activeModel ?? s.model : s.model;
 const STATE_LABEL = { working: 'working', ready: 'waiting', needs_input: 'needs input', external: 'other terminal', done: 'done', idle: '' };
 const STATE_ORDER = { needs_input: 0, working: 1, ready: 2, external: 3, done: 4, idle: 5 };
 
@@ -95,19 +105,31 @@ async function refresh() {
   state.terminals = terminals;
   state.repos = repos ?? {};
   updatePageTitle();
+  renderReplyInbox(); // seed seen markers before deciding whether a transition is new
   detectTransitions();
   renderSessions();
   renderSummary();
-  renderReplyInbox();
   syncTabsWithTerminals();
   renderNextDraft();
   if (state.mosaic) renderMosaic();
 }
 
 function detectTransitions() {
+  const firstPoll = !state.prevStates.size;
+  const parentsWithResults = new Set();
+  for (const s of state.sessions) {
+    if (!s.parentId) continue;
+    const marker = s.childCompletion?.marker ?? null;
+    const prev = state.prevChildResults.get(s.id);
+    if (!firstPoll && marker && marker !== prev && marker !== inboxSeen?.[`child:${s.id}`] && !s.archived && !sessionById(s.parentId)?.archived) {
+      parentsWithResults.add(s.parentId);
+      notify(`${displayTitle(s)}: ${s.childCompletion.failed ? 'failed' : 'done'}`, s.childCompletion.text);
+    }
+    state.prevChildResults.set(s.id, marker);
+  }
   for (const s of state.sessions) {
     const prev = state.prevStates.get(s.id);
-    if (prev && prev !== s.state && (s.state === 'ready' || s.state === 'needs_input') && prev === 'working') {
+    if (prev && prev !== s.state && (s.state === 'ready' || s.state === 'needs_input') && prev === 'working' && !s.parentId && !parentsWithResults.has(s.id)) {
       notify(`${displayTitle(s)}: ${STATE_LABEL[s.state]}`, s.firstPrompt);
     }
     state.prevStates.set(s.id, s.state);
@@ -149,14 +171,24 @@ function renderReplyInbox() {
     try { inboxSeen = JSON.parse(localStorage.getItem('fox.inbox.seen')); } catch {}
     if (!inboxSeen || typeof inboxSeen !== 'object' || Array.isArray(inboxSeen)) {
       // First visit: don't flood the inbox with all the old conversations.
-      inboxSeen = Object.fromEntries(state.sessions.filter((s) => s.latestReply).map((s) => [s.id, s.latestReply.turn]));
+      inboxSeen = Object.fromEntries(state.sessions.filter((s) => !s.parentId && s.latestReply).map((s) => [s.id, s.latestReply.turn]));
+    }
+    if (!inboxSeen['@children']) {
+      // Migrate existing browsers too: old child results are history, not a burst of new alerts.
+      for (const s of state.sessions.filter((s) => s.parentId)) {
+        const marker = s.childCompletion?.marker ?? (s.latestReply ? `turn:${s.latestReply.turn}` : null);
+        if (marker) inboxSeen[`child:${s.id}`] = marker;
+      }
+      inboxSeen['@children'] = true;
       saveInboxSeen();
     }
   }
-  const unread = state.sessions.filter((s) => !s.parentId && !s.archived && s.latestReply && s.latestReply.turn > (inboxSeen[s.id] ?? 0))
-    .sort((a, b) => (b.latestReply.at ?? b.updatedAt ?? 0) - (a.latestReply.at ?? a.updatedAt ?? 0));
+  const unread = state.sessions.filter((s) => !s.archived && (!s.parentId
+    ? s.latestReply && s.latestReply.turn > (inboxSeen[s.id] ?? 0)
+    : !sessionById(s.parentId)?.archived && s.childCompletion && s.childCompletion.marker !== inboxSeen[`child:${s.id}`]))
+    .sort((a, b) => (b.childCompletion?.at ?? b.latestReply?.at ?? b.updatedAt ?? 0) - (a.childCompletion?.at ?? a.latestReply?.at ?? a.updatedAt ?? 0));
   // A reply that was not unread on the last render is new: the fox winks (not on the first render, not for old ones).
-  const keys = unread.map((s) => `${s.id}:${s.latestReply.turn}`);
+  const keys = unread.map((s) => s.parentId ? `${s.id}:${s.childCompletion.marker}` : `${s.id}:${s.latestReply.turn}`);
   if (winkKeys && keys.some((k) => !winkKeys.has(k))) {
     foxMotion.activity = Date.now();
     foxGesture('wink');
@@ -167,16 +199,22 @@ function renderReplyInbox() {
   if (!unread.length) { list.classList.add('hidden'); toggle.setAttribute('aria-expanded', 'false'); return; }
   $('#reply-inbox-count').textContent = unread.length;
   $('#reply-inbox-label').textContent = unread.length === 1 ? 'new reply' : 'new replies';
-  list.innerHTML = unread.map((s) => `<button type="button" class="reply-inbox-item" data-reply="${esc(s.id)}">
-    <span class="inbox-title">${esc(displayTitle(s))}<small>${esc(shortPath(s.workspace))} · ${esc(fmtTime(s.latestReply.at))}</small></span>
-    <span class="inbox-excerpt">${esc(s.latestReply.text)}</span>
-  </button>`).join('');
+  list.innerHTML = unread.map((s) => {
+    const result = s.parentId ? s.childCompletion : s.latestReply;
+    const parent = s.parentId && sessionById(s.parentId);
+    return `<button type="button" class="reply-inbox-item${s.parentId ? ' child-result' : ''}" data-reply="${esc(s.id)}">
+    <span class="inbox-title">${s.parentId ? '<span class="inbox-child-icon">' + ICON.threads + '</span>' : ''}${esc(displayTitle(s))}${result.failed ? ' <span class="flag err">failed</span>' : ''}<small>${esc(parent ? displayTitle(parent) : shortPath(s.workspace))} · ${esc(fmtTime(result.at))}</small></span>
+    <span class="inbox-excerpt">${esc(result.text)}</span>
+  </button>`;
+  }).join('');
 }
 function saveInboxSeen() { try { localStorage.setItem('fox.inbox.seen', JSON.stringify(inboxSeen)); } catch {} }
 function markReplyRead(id) {
-  const turn = sessionById(id)?.latestReply?.turn;
-  if (!turn || !inboxSeen || turn <= (inboxSeen[id] ?? 0)) return;
-  inboxSeen[id] = turn;
+  const s = sessionById(id);
+  const key = s?.parentId ? `child:${id}` : id;
+  const marker = s?.parentId ? s.childCompletion?.marker : s?.latestReply?.turn;
+  if (!marker || !inboxSeen || (s?.parentId ? marker === inboxSeen[key] : marker <= (inboxSeen[key] ?? 0))) return;
+  inboxSeen[key] = marker;
   saveInboxSeen();
   renderReplyInbox();
 }
@@ -189,12 +227,23 @@ $('#reply-inbox-list').addEventListener('click', (e) => {
   const item = e.target.closest('[data-reply]');
   if (!item) return;
   const s = sessionById(item.dataset.reply);
-  if (!s?.latestReply) return;
+  const result = s?.parentId ? s.childCompletion : s?.latestReply;
+  if (!result) return;
+  if (s.parentId) {
+    // Children have no terminal: select their saved conversation without waking or attaching to the parent.
+    globalMessage = result.messageIndex == null ? null : { id: s.id, index: result.messageIndex };
+    convoShown.add(s.id);
+    closePages();
+    setTranscript(true);
+    selectSession(s.id);
+    if (mobileLayout.matches) showMobileView('read');
+    return;
+  }
   // On a phone the answer is read where you reply: straight to the session's terminal.
   if (mobileLayout.matches) return openSession(s.id);
   // On a computer: the answer in the right column, scrolled to, and the session's terminal in the center
   // (woken up if it was asleep), the same as clicking the session. Selecting marks the reply read.
-  globalMessage = { id: s.id, index: s.latestReply.messageIndex };
+  globalMessage = { id: s.id, index: result.messageIndex };
   convoShown.add(s.id);
   closePages(); // the answer shows in the right column, which an open page hides
   setTranscript(true);
@@ -280,7 +329,6 @@ function wsWorkLine(wsp) {
 }
 
 function renderSessions() {
-  if (state.renaming) return; // replacing the sidebar would blur the input and save prematurely
   const active = state.sessions.filter((s) => !s.archived && !s.parentId);
   const archived = state.sessions.filter((s) => s.archived && !s.parentId);
   const groups = new Map();
@@ -291,6 +339,13 @@ function renderSessions() {
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(s);
   }
+  // Other sidebar data can render before the first overview; only clear stale focus after it arrives.
+  if (focusedGroup && state.workspaces && !groups.has(focusedGroup)) {
+    focusedGroup = null;
+    try { localStorage.removeItem('fox.focusedGroup'); } catch {}
+  }
+  if (state.renaming) return; // replacing the sidebar would blur the input and save prematurely
+  $('#clear-focus').classList.toggle('hidden', !focusedGroup);
   const root = $('#session-groups');
   root.innerHTML = '';
   // Stable order: manual order (drag the project header) first, then alphabetical. Never by activity,
@@ -300,15 +355,18 @@ function renderSessions() {
   // Every group reads the same: its folder's name with a capital letter (the folder itself keeps its own).
   const groupName = (n) => n ? n[0].toLocaleUpperCase() + n.slice(1) : n;
   for (const [ws, list] of ordered) {
+    if (focusedGroup && focusedGroup !== ws) continue;
     list.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)); // newest first, and it stays put
     const g = document.createElement('div');
-    const isCollapsed = collapsed.has(ws);
-    g.className = 'group' + (isCollapsed ? ' collapsed' : '');
+    const isCollapsed = collapsed.has(ws) && focusedGroup !== ws;
+    const focusButton = `<button type="button" class="icon group-focus${focusedGroup === ws ? ' on' : ''}" data-focus-group="${esc(ws)}" aria-label="${focusedGroup === ws ? 'Clear focus' : 'Focus on'} ${esc(groupName(ws.split('/').filter(Boolean).pop() ?? ws))}" aria-pressed="${focusedGroup === ws}" title="${focusedGroup === ws ? 'Clear focus' : 'Focus on this group'}">${ICON.focus}</button>`;
+    g.className = 'group' + (isCollapsed ? ' collapsed' : '') + (focusedGroup === ws ? ' focused' : '');
     g.dataset.ws = ws;
+    const toggleAttr = focusedGroup === ws ? '' : `data-toggle-group="${esc(ws)}"`;
     const wsp = (state.workspaces ?? []).find((w) => w.dir === ws);
     if (wsp) {
       g.classList.add('workspace');
-      g.innerHTML = `<h3 draggable="true" title="Drag to reorder"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(groupName(wsp.name))}</span><span class="gcount" title="${list.length} session${list.length === 1 ? '' : 's'}">${list.length}</span><button class="icon" data-edit-ws="${esc(wsp.id)}" title="Edit workspace">${ICON.rename}</button><button class="icon" data-new="${esc(ws)}" title="New session in this workspace">+</button></h3>${isCollapsed ? '' : wsSummaryLine(wsp) + wsWorkLine(wsp) + wsRepoSummary(wsp)}`;
+      g.innerHTML = `<h3 draggable="true" title="Drag to reorder"><span class="caret" ${toggleAttr}>${isCollapsed ? '▸' : '▾'}</span><span class="gname" ${toggleAttr} title="${esc(shortPath(ws))}">${esc(groupName(wsp.name))}</span><span class="gcount" title="${list.length} session${list.length === 1 ? '' : 's'}">${list.length}</span>${focusButton}<button class="icon" data-edit-ws="${esc(wsp.id)}" title="Edit workspace">${ICON.rename}</button><button class="icon" data-new="${esc(ws)}" title="New session in this workspace">+</button></h3>${isCollapsed ? '' : wsSummaryLine(wsp) + wsWorkLine(wsp) + wsRepoSummary(wsp)}`;
       if (!isCollapsed) list.forEach((s, i) => g.appendChild(sessionCard(s, i + 1)));
       root.appendChild(g);
       continue;
@@ -317,15 +375,16 @@ function renderSessions() {
     const repo = state.repos?.[ws];
     // GitHub remote: owner/repo as a link. Plain git: just the branch (and the repo root if the workspace is a subfolder).
     const gitLine = repo ? `<div class="git" title="${esc(repo.remote || 'git repo without a remote: add one (git remote add origin …) and this becomes a link')}">${repo.url ? `<a href="${esc(repo.url)}" target="_blank" rel="noopener" title="Open ${esc(repo.repo)} on GitHub">${ICON.github}${esc(repo.repo)}</a>` : `<span>${ICON.git}${repo.root !== ws ? esc(shortPath(repo.root)) : 'no remote'}</span>`}${repo.branch ? `<span class="branch">${esc(repo.branch)}</span>` : ''}${repo.changed ? `<span class="changed" title="${repo.changed} changed file${repo.changed === 1 ? '' : 's'}">±${repo.changed}</span>` : ''}</div>` : '';
-    g.innerHTML = `<h3 draggable="true" title="Drag to reorder projects"><span class="caret" data-toggle-group="${esc(ws)}">${isCollapsed ? '▸' : '▾'}</span><span class="gname" data-toggle-group="${esc(ws)}" title="${esc(shortPath(ws))}">${esc(groupName(ws.split('/').filter(Boolean).pop() ?? ws))}</span><span class="gcount">${list.length}</span><button class="icon" data-new="${esc(ws)}" title="New session in this folder">+</button></h3>${isCollapsed ? '' : gitLine}`;
+    g.innerHTML = `<h3 draggable="true" title="Drag to reorder projects"><span class="caret" ${toggleAttr}>${isCollapsed ? '▸' : '▾'}</span><span class="gname" ${toggleAttr} title="${esc(shortPath(ws))}">${esc(groupName(ws.split('/').filter(Boolean).pop() ?? ws))}</span><span class="gcount">${list.length}</span>${focusButton}<button class="icon" data-new="${esc(ws)}" title="New session in this folder">+</button></h3>${isCollapsed ? '' : gitLine}`;
     if (!isCollapsed) list.forEach((s, i) => g.appendChild(sessionCard(s, i + 1)));
     root.appendChild(g);
   }
-  if (archived.length) {
+  const visibleArchived = focusedGroup ? archived.filter((s) => (workspaceFor(s.workspace)?.dir ?? s.workspace) === focusedGroup) : archived;
+  if (visibleArchived.length) {
     const g = document.createElement('div');
     g.className = 'group archived';
-    g.innerHTML = `<h3 class="clickable" data-toggle-archived><span>${showArchived.value ? '▾' : '▸'} archived · ${archived.length}</span></h3>`;
-    if (showArchived.value) for (const s of archived) g.appendChild(sessionCard(s));
+    g.innerHTML = `<h3 class="clickable" data-toggle-archived><span>${showArchived.value ? '▾' : '▸'} archived · ${visibleArchived.length}</span></h3>`;
+    if (showArchived.value) for (const s of visibleArchived) g.appendChild(sessionCard(s));
     root.appendChild(g);
   }
 }
@@ -340,6 +399,7 @@ function sessionCard(s, index = null) {
   // Sidebar state as a dot: green and still when fx waits for you, orange and breathing while it works.
   // Only needs-input (and another terminal) still say it in words; no process, nothing.
   const quiet = s.state === 'ready' || s.state === 'working';
+  const model = displayedModel(s);
   const asleep = foxConfig.remote && s.state === 'idle' && !s.archived;
   const stateHtml = asleep ? '<span class="st asleep" title="Asleep: its tools are off to save memory. Opening it wakes it up in a few seconds." aria-label="asleep"><i></i></span>' : s.state !== 'idle' ? `<span class="st ${s.state}" title="${s.state === 'external' ? `open in another terminal; ${esc(agentName(s))} allows one process per session` : STATE_LABEL[s.state]}"><i></i>${quiet ? '' : STATE_LABEL[s.state]}</span>` : '';
   el.innerHTML = `
@@ -354,7 +414,7 @@ function sessionCard(s, index = null) {
     </div>
     <div class="sub">
       ${stateHtml}
-      <span class="model mono" title="${esc(s.model ?? '')} via ${esc(providerLabel(s.provider))}">${esc(modelShort(s.model))}${providerTag(s.provider)}</span>
+      <span class="model mono" title="${esc(model ?? '')} via ${esc(providerLabel(s.provider))}">${esc(modelShort(model))}${providerTag(s.provider)}</span>
       <span>${fmtTime(s.updatedAt)}</span>
       ${s.resumedAfterRestart && Date.now() - s.resumedAfterRestart < 6 * 3600_000 ? `<span class="restarted" title="The server went down mid-turn; fox resumed this session ${esc(fmtTime(s.resumedAfterRestart))} and told it to continue">resumed after restart</span>` : ''}
     </div>
@@ -401,9 +461,11 @@ $('#session-groups').addEventListener('drop', (e) => {
 });
 $('#session-groups').addEventListener('dragend', () => { dragWs = null; document.querySelectorAll('.group').forEach((x) => x.classList.remove('dragging', 'drop-before', 'drop-after')); });
 
+$('#clear-focus').addEventListener('click', () => setFocusedGroup(null));
 $('#session-groups').addEventListener('click', async (e) => {
   const btn = e.target.closest('button');
   const d = btn?.dataset ?? {};
+  if (d.focusGroup) return setFocusedGroup(focusedGroup === d.focusGroup ? null : d.focusGroup);
   if (d.new) return newSessionSheet(d.new);
   if (d.editWs) return openWorkspaceDialog(d.editWs);
   if (d.branchWs) return openBranchMenu(btn, d.branchWs, d.branchDir);
@@ -1132,7 +1194,7 @@ function renderMosaic() {
   if (mounted.length !== state.mosaicIds.length || mounted.some((el, i) => el.dataset.tile !== state.mosaicIds[i])) {
     tiles.innerHTML = state.mosaicIds.length ? state.mosaicIds.map((id) => {
       const s = sessionById(id);
-      return `<article class="mosaic-tile" data-tile="${esc(id)}"><header><span class="st ${esc(s.state)}" title="${esc(STATE_LABEL[s.state] ?? s.state)}"><i></i></span><strong title="${esc(displayTitle(s))}">${esc(displayTitle(s))}</strong><button type="button" data-remove="${esc(id)}" aria-label="Remove ${esc(displayTitle(s))} from mosaic" title="Remove">×</button></header><div class="mosaic-meta" title="${esc(s.workspace)}">${esc(shortPath(s.workspace))} · ${esc(modelShort(s.model) || 'model unknown')}</div><pre class="mosaic-screen" aria-label="Recent terminal output">${s.terminal ? 'Loading…' : 'Waking up…'}</pre><div class="mosaic-reply"><span>${s.latestReply ? 'Last reply' : 'Current turn'}</span><div class="md mosaic-reply-text">${renderMarkdown(s.latestReply?.text ?? (s.terminal && s.state === 'working' ? 'Working…' : 'No completed reply yet'))}</div></div><button type="button" class="mosaic-open" data-expand="${esc(id)}">Open terminal ↗</button></article>`;
+      return `<article class="mosaic-tile" data-tile="${esc(id)}"><header><span class="st ${esc(s.state)}" title="${esc(STATE_LABEL[s.state] ?? s.state)}"><i></i></span><strong title="${esc(displayTitle(s))}">${esc(displayTitle(s))}</strong><button type="button" data-remove="${esc(id)}" aria-label="Remove ${esc(displayTitle(s))} from mosaic" title="Remove">×</button></header><div class="mosaic-meta" title="${esc(s.workspace)}">${esc(shortPath(s.workspace))} · ${esc(modelShort(displayedModel(s)) || 'model unknown')}</div><pre class="mosaic-screen" aria-label="Recent terminal output">${s.terminal ? 'Loading…' : 'Waking up…'}</pre><div class="mosaic-reply"><span>${s.latestReply ? 'Last reply' : 'Current turn'}</span><div class="md mosaic-reply-text">${renderMarkdown(s.latestReply?.text ?? (s.terminal && s.state === 'working' ? 'Working…' : 'No completed reply yet'))}</div></div><button type="button" class="mosaic-open" data-expand="${esc(id)}">Open terminal ↗</button></article>`;
     }).join('') : '<p class="mosaic-empty">Choose up to four sessions above to watch here.</p>';
   }
   for (const tile of tiles.querySelectorAll('[data-tile]')) {
@@ -1148,7 +1210,7 @@ function renderMosaic() {
     if (pre.dataset.terminal !== (s.terminal ?? '')) { pre.dataset.terminal = s.terminal ?? ''; pre.dataset.model = ''; }
     const meta = tile.querySelector('.mosaic-meta');
     meta.title = s.workspace ?? '';
-    meta.textContent = `${shortPath(s.workspace)} · ${modelShort(pre.dataset.model || s.model) || 'model unknown'}`;
+    meta.textContent = `${shortPath(s.workspace)} · ${modelShort(pre.dataset.model || displayedModel(s)) || 'model unknown'}`;
     const reply = tile.querySelector('.mosaic-reply');
     reply.querySelector('span').textContent = s.latestReply ? 'Last reply' : 'Current turn';
     const formatted = renderMarkdown(s.latestReply?.text ?? (s.terminal && s.state === 'working' ? 'Working…' : 'No completed reply yet'));
@@ -1500,7 +1562,7 @@ function agentsBoard(parent, { selectedId = null } = {}) {
     const task = c.task ?? child?.firstPrompt ?? '';
     const elapsed = c.phase === 'running' && c.startedAt ? fmtDur(Date.now() - c.startedAt) : child?.usage.wallMs ? fmtDur(child.usage.wallMs) : '';
     const open = expandedAgents.has(c.id);
-    const head = `<div class="agent-head"><span class="idx">${i + 1}</span>${model ? vendorDot(model) : ''}<span class="agent-name">${model ? esc(modelShort(model)) : 'failed to start'}</span>${c.phase === 'running' ? '<span class="st working"><i></i></span>' : ''}${flag ? `<span class="flag ${flag[1]}">${flag[0]}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>`;
+    const head = `<div class="agent-head"><span class="idx">${i + 1}</span>${model ? vendorDot(model) : ''}<span class="agent-name">${model ? esc(modelShort(model)) : c.failure ? 'failed to start' : 'model unknown'}</span>${c.phase === 'running' ? '<span class="st working"><i></i></span>' : ''}${flag ? `<span class="flag ${flag[1]}">${flag[0]}</span>` : ''}<span class="agent-elapsed">${elapsed}</span></div>`;
     const failure = c.failure ? (typeof c.failure === 'string' ? c.failure : (c.failure.message ?? c.failure.reason ?? JSON.stringify(c.failure))) : '';
     // Open: the whole answer it returned to the parent (every round for a named agent), or why there is none.
     const rounds = c.name ? (cachedResults.id === parent.id ? cachedResults.byAgent.get(c.name) ?? [] : []) : [];
@@ -1730,7 +1792,66 @@ function filesSection(id, files, check) {
   const head = `<a href="#" class="section-title fold ${filesCollapsed ? 'closed' : ''}" data-toggle-files>files <span class="fold-n">${shown.length}</span></a>`;
   return filesCollapsed ? head : `${head}<div class="files">${shown.map((f) => fileRow(f, check?.problems)).join('')}</div>${check?.general?.length ? `<div class="file-check">${check.general.map(esc).join('<br>')}</div>` : ''}`;
 }
+// Artifact content is requested only after opening its own tool row; polling reuses the mounted viewer.
+function artifactMatches(text, query) {
+  const hits = [];
+  if (!query) return hits;
+  const haystack = text.toLocaleLowerCase(), needle = query.toLocaleLowerCase();
+  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + needle.length)) hits.push(at);
+  return hits;
+}
+function showArtifactMatch(viewer, step = 0) {
+  const text = viewer._text, query = viewer.querySelector('input').value;
+  const hits = artifactMatches(text, query);
+  const current = hits.length ? (viewer._matchIndex + step + hits.length) % hits.length : 0;
+  viewer._matchIndex = current;
+  viewer.querySelector('.artifact-count').textContent = query ? `${hits.length ? current + 1 : 0} / ${hits.length}` : '';
+  const pre = viewer.querySelector('.artifact-text');
+  if (!hits.length) { pre.textContent = text; return; }
+  const body = $('#transcript-body'), scroll = body.scrollTop;
+  const at = hits[current];
+  pre.innerHTML = esc(text.slice(0, at)) + '<mark>' + esc(text.slice(at, at + query.length)) + '</mark>' + esc(text.slice(at + query.length));
+  const mark = pre.querySelector('mark');
+  pre.scrollTop = Math.max(0, mark.offsetTop - pre.offsetTop - pre.clientHeight / 2);
+  pre.scrollLeft = Math.max(0, mark.offsetLeft - pre.offsetLeft - 40);
+  body.scrollTop = scroll;
+}
+async function openArtifact(button) {
+  const row = button.closest('.tool'), slot = row.querySelector('.artifact-slot');
+  if (slot.hasChildNodes()) { if (!slot.dataset.loading) slot.replaceChildren(); return; }
+  const id = state.selected, name = button.dataset.artifact;
+  slot.dataset.loading = '1';
+  const url = `/api/sessions/${encodeURIComponent(id)}/artifact/${encodeURIComponent(name)}`;
+  button.disabled = true;
+  slot.textContent = 'Loading full output…';
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(response.status === 413 ? `Output too large to open (${Number(detail.size).toLocaleString()} bytes).` : response.status === 404 ? 'Saved output is missing or no longer belongs to this session.' : 'Could not load saved output.');
+    }
+    const text = await response.text();
+    if (state.selected !== id || !slot.isConnected) return;
+    slot.innerHTML = `<div class="artifact-viewer"><div class="artifact-controls"><span>${esc(Number(response.headers.get('x-artifact-bytes')).toLocaleString())} bytes</span><input type="search" aria-label="Find in full output" placeholder="Find in output"><span class="artifact-count" aria-live="polite"></span><button type="button" data-artifact-step="-1" aria-label="Previous match" title="Previous match">↑</button><button type="button" data-artifact-step="1" aria-label="Next match" title="Next match">↓</button><a href="${url}?download=1" download="${esc(name)}">download</a></div><pre class="artifact-text"></pre></div>`;
+    const viewer = slot.firstElementChild;
+    viewer._text = text; viewer._matchIndex = 0;
+    viewer.querySelector('.artifact-text').textContent = text;
+  } catch (err) { if (slot.isConnected && state.selected === id) slot.innerHTML = `<div class="artifact-error" role="alert">${esc(err.message)}</div>`; }
+  finally {
+    delete slot.dataset.loading;
+    slot.parentElement?.querySelector('.artifact-open')?.removeAttribute('disabled');
+  }
+}
+$('#transcript').addEventListener('input', (e) => {
+  if (!e.target.matches('.artifact-viewer input')) return;
+  const viewer = e.target.closest('.artifact-viewer'); viewer._matchIndex = 0;
+  showArtifactMatch(viewer);
+});
 $('#transcript').addEventListener('click', (e) => {
+  const artifact = e.target.closest('[data-artifact]');
+  if (artifact) { e.preventDefault(); return openArtifact(artifact); }
+  const step = e.target.closest('[data-artifact-step]');
+  if (step) { e.preventDefault(); return showArtifactMatch(step.closest('.artifact-viewer'), Number(step.dataset.artifactStep)); }
   const opener = e.target.closest('[data-open-file]');
   if (opener) { e.preventDefault(); return post(`/api/sessions/${state.selected}/open-file`, { path: opener.dataset.openFile }); }
   const full = e.target.closest('[data-full-view]');
@@ -1878,7 +1999,7 @@ async function loadTranscript(id, quiet = false) {
   const [events, files, timing, check] = await Promise.all([fetch(`/api/sessions/${id}/events`).then((r) => r.json()), fetch(`/api/sessions/${id}/files`).then((r) => r.json()).catch(() => []), parent?.children?.length ? fetch(`/api/sessions/${id}/timeline`).then((r) => r.ok ? r.json() : null).catch(() => null) : null, fetch(`/api/sessions/${id}/live-check`).then((r) => r.ok ? r.json() : null).catch(() => null)]);
   if (state.selected !== id) return; // selection changed while we were fetching: drop this render
   const termOpenKey = Boolean(s.terminal && state.tabs.get(s.terminal) && !state.tabs.get(s.terminal).closed);
-  const key = id + ':' + events.length + ':' + (s.updatedAt ?? 0) + ':' + (parent?.children ?? []).map((c) => c.phase).join(',') + ':' + termOpenKey + ':' + JSON.stringify(check) + ':' + Math.floor(Date.now() / 5000);
+  const key = id + ':' + events.length + ':' + (s.updatedAt ?? 0) + ':' + displayedModel(s) + ':' + (parent?.children ?? []).map((c) => c.phase).join(',') + ':' + termOpenKey + ':' + JSON.stringify(check) + ':' + Math.floor(Date.now() / 5000);
   if (quiet && key === lastTranscriptKey) return;
   lastTranscriptKey = key;
   currentCheck = check;
@@ -1890,8 +2011,9 @@ async function loadTranscript(id, quiet = false) {
     : mobileLayout.matches ? esc(displayTitle(s)) : '';
   const u = s.usage;
   const tokens = u.input + u.output ? `${fmtTokens(u.input)} in · ${fmtTokens(u.output)} out · ${fmtTokens(u.cacheRead)} cache` : '';
+  const model = displayedModel(s);
   $('#transcript-meta').classList.toggle('has-check', Boolean(check?.count));
-  $('#transcript-meta').innerHTML = `<span class="meta-main" title="${esc([tokens, s.workspace].filter(Boolean).join('\n'))}">${s.model ? vendorDot(s.model) + esc(modelShort(s.model)) : ''}${s.provider ? ` · <span title="${esc(providerLabel(s.provider))}">${s.provider === 'gateway' ? '▲ gateway' : esc(s.provider)}</span>` : ''}${u.wallMs ? ' · ' + fmtDur(u.wallMs) : ''}${isChild ? ' · billed to parent' : u.cost ? ' · $' + u.cost.toFixed(2) : ''}</span>${check?.count ? `<span class="check-summary">● ${check.count} check issue${check.count === 1 ? '' : 's'} <button type="button" data-insert-check ${nextDraftTarget() ? '' : 'disabled title="Open this session’s fx terminal to insert"'}>Insert into fx's input</button></span>` : ''}`;
+  $('#transcript-meta').innerHTML = `<span class="meta-main" title="${esc([tokens, s.workspace].filter(Boolean).join('\n'))}">${model ? vendorDot(model) + esc(modelShort(model)) : ''}${s.provider ? ` · <span title="${esc(providerLabel(s.provider))}">${s.provider === 'gateway' ? '▲ gateway' : esc(s.provider)}</span>` : ''}${u.wallMs ? ' · ' + fmtDur(u.wallMs) : ''}${isChild ? ' · billed to parent' : u.cost ? ' · $' + u.cost.toFixed(2) : ''}</span>${check?.count ? `<span class="check-summary">● ${check.count} check issue${check.count === 1 ? '' : 's'} <button type="button" data-insert-check ${nextDraftTarget() ? '' : 'disabled title="Open this session’s fx terminal to insert"'}>Insert into fx's input</button></span>` : ''}`;
 
   const html = [];
   if (!isChild && s.addDirs?.length) html.push(`<div class="session-access"><div class="section-title">fx file access · chosen at launch</div><div class="session-access-path">${esc(s.workspace)}</div>${s.addDirs.map((dir) => `<div class="session-access-path">+ ${esc(dir)}</div>`).join('')}</div>`);
@@ -1907,7 +2029,7 @@ async function loadTranscript(id, quiet = false) {
   const showConvo = isChild || convoShown.has(id) || mobileLayout.matches;
   if (mobileLayout.matches) html.push('<div class="section-title">conversation</div>');
   else if (!isChild && showConvo) html.push(`<div class="section-title">conversation · <a href="#" data-hide-convo="${esc(id)}">hide</a></div>`);
-  let messageIndex = 0;
+  let messageIndex = 0, toolIndex = 0;
   for (const ev of showConvo ? events : []) {
     if (mobileLayout.matches && ev.kind !== 'user' && ev.kind !== 'assistant') continue;
     if (!isChild && ev.kind === 'tool_call' && ev.name === 'subagent' && parent.children?.length) continue; // already in the board
@@ -1918,10 +2040,10 @@ async function loadTranscript(id, quiet = false) {
     else if (ev.kind === 'tool_call') {
       const st = ev.result?.status ?? 'pending';
       const isSub = ev.name === 'subagent';
-      html.push(`<details class="tool ${st}">
+      html.push(`<details class="tool ${st}" data-tool-index="${toolIndex++}">
         <summary><span class="dot"></span><span class="name">${isSub ? ICON.threads + ' ' : ''}${esc(ev.name)}</span><span class="brief">${esc(briefArgs(ev.args))}</span></summary>
         <pre class="label">args</pre><pre>${esc(typeof ev.args === 'string' ? ev.args : JSON.stringify(ev.args, null, 2))}</pre>
-        ${ev.result ? `<pre class="label">result · ${st} · ${ev.result.bytes} bytes</pre><pre>${esc(ev.result.preview)}</pre>` : ''}
+        ${ev.result ? `<pre class="label">result · ${st} · ${ev.result.bytes} bytes</pre><pre>${esc(ev.result.preview)}</pre>${ev.result.artifact ? `<button type="button" class="artifact-open" data-artifact="${esc(ev.result.artifact)}">full output</button><div class="artifact-slot"></div>` : ''}` : ''}
       </details>`);
     } else if (ev.kind === 'turn_completed') html.push('<hr class="turn-sep" />');
     else if (ev.kind === 'interrupted') html.push(`<div class="interrupted">■ cancelled</div>${ev.partial ? `<div class="msg assistant"><div class="text muted">${esc(ev.partial)}</div></div>` : ''}`);
@@ -1942,12 +2064,30 @@ async function loadTranscript(id, quiet = false) {
     setTranscript(!empty && wanted, { save: false });
   }
   const body = $('#transcript-body');
+  const sameSession = lastEventCount.id === id;
+  const scrollTop = body.scrollTop;
+  const openRows = new Map();
+  if (sameSession) for (const row of body.querySelectorAll('.tool[open]')) {
+    const slot = row.querySelector('.artifact-slot');
+    if (slot) openRows.set(row.dataset.toolIndex, slot);
+  }
+  const focusedTool = sameSession ? document.activeElement?.closest('.tool')?.dataset.toolIndex : null;
   const wasAtBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 40;
   body.innerHTML = html.join('');
+  for (const row of body.querySelectorAll('.tool')) if (openRows.has(row.dataset.toolIndex)) {
+    row.open = true;
+    const slot = openRows.get(row.dataset.toolIndex);
+    if (slot) {
+      row.querySelector('.artifact-slot')?.replaceWith(slot);
+      if (slot.dataset.loading) row.querySelector('.artifact-open').disabled = true;
+    }
+  }
+  if (focusedTool !== null && focusedTool !== undefined) body.querySelector(`.tool[data-tool-index="${focusedTool}"] .artifact-viewer input`)?.focus({ preventScroll: true });
   // Scroll: top when you switch sessions; stay pinned to the end only if you were already there.
   const grew = lastEventCount.id === id && events.length > lastEventCount.n;
-  if (lastEventCount.id !== id) body.scrollTop = 0;
+  if (!sameSession) body.scrollTop = 0;
   else if (grew && wasAtBottom) body.scrollTop = body.scrollHeight;
+  else body.scrollTop = scrollTop;
   lastEventCount = { id, n: events.length };
   if (globalMessage?.id === id) {
     const target = body.querySelector(`.msg[data-message="${globalMessage.index}"]`);
@@ -2218,7 +2358,7 @@ function fxSettingRow(o) {
   const fresh = unseen ? (o.managedOverride ? `<span class="set-new-label">New</span> <button type="button" class="set-act" data-fx-seen="${o.key}:${o.introduced}">Mark as seen</button>` : '<span class="set-new" title="New"></span>') : '';
   const more = o.introduced ? ` · fx default: ${esc(o.upstreamDefault)}${o.documentation ? ` · <a href="${esc(o.documentation)}" target="_blank" rel="noopener noreferrer">docs</a>` : ''}` : '';
   const main = `<span class="set-main">${esc(o.label)}${fresh}<span class="set-sub">${esc(o.description)}${more}</span></span>`;
-  if (o.managedOverride) return `<div class="set-row fx-override">${main}<div class="fx-override-controls"><label>Apply setting <button type="button" class="switch-btn ${o.applied ? 'on' : ''}" data-fx-key="${o.key}" data-fx-apply="${o.applied}" role="switch" aria-checked="${o.applied}" aria-label="Apply ${esc(o.label)}"><span class="switch"></span></button></label><label>Save prompts <button type="button" class="switch-btn ${o.value ? 'on' : ''}" data-fx-key="${o.key}" ${o.applied ? '' : 'disabled'} role="switch" aria-checked="${o.value}" aria-label="${esc(o.label)}"><span class="switch"></span></button></label><span class="set-sub">${o.applied ? 'Personal override applied.' : 'No fox override; fx defaults to on.'} Changes apply to new or resumed sessions.</span></div></div>`;
+  if (o.managedOverride) return `<div class="set-row fx-override">${main}<div class="fx-override-controls"><label>Apply setting <button type="button" class="switch-btn ${o.applied ? 'on' : ''}" data-fx-key="${o.key}" data-fx-apply="${o.applied}" role="switch" aria-checked="${o.applied}" aria-label="Apply ${esc(o.label)}"><span class="switch"></span></button></label><label>${esc(o.valueLabel || 'Save prompts')} <button type="button" class="switch-btn ${o.value ? 'on' : ''}" data-fx-key="${o.key}" ${o.applied ? '' : 'disabled'} role="switch" aria-checked="${o.value}" aria-label="${esc(o.label)}"><span class="switch"></span></button></label><span class="set-sub">${o.applied ? 'Personal override applied.' : `No fox override; fx defaults to ${esc(o.upstreamDefault)}.`} Changes apply to new or resumed sessions.</span></div></div>`;
   if (o.type === 'integer') return `<div class="set-row">${main}<div class="set-num"><input type="number" min="${o.min}" max="${o.max}" step="1" value="${o.applied ? esc(o.value) : ''}" placeholder="fx default" aria-label="${esc(o.label)}" data-fx-num="${o.key}">${o.applied ? `<button type="button" class="set-act" data-fx-key="${o.key}" data-fx-tri="default" title="Give it back to fx">Default</button>` : ''}</div></div>`;
   if (o.type === 'bool' && o.introduced) {
     const now = !o.applied ? 'default' : o.value ? 'on' : 'off';

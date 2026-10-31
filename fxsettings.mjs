@@ -8,6 +8,8 @@ import { resolve } from 'node:path';
 const pendingWrites = new Map();
 
 export const FX_SETTINGS = [
+  { key: 'slash_menu_categories', label: 'Command categories', description: 'Show command categories and skill sources in fox’s terminal search', type: 'bool', default: false, introduced: '2026-10-30', documentation: 'https://fx.sh/docs/configure-fx/configuration.md#interface-and-update-settings', upstreamDefault: 'on', managedOverride: true, valueLabel: 'Show categories' },
+  { key: 'startup_scrollback', label: 'Restore terminal output', description: 'Restore previous output when starting or resuming fx in fox’s terminal view', type: 'bool', default: false, introduced: '2026-10-30', documentation: 'https://fx.sh/docs/configure-fx/configuration.md#interface-and-update-settings', upstreamDefault: 'on', managedOverride: true, valueLabel: 'Restore output' },
   { key: 'prompt_history.enabled', label: 'Save prompt history', description: 'Recall prompts and slash commands in fox’s terminal view', type: 'bool', default: false, introduced: '2026-10-27', documentation: 'https://fx.sh/docs/configure-fx/configuration.md#interface-and-update-settings', upstreamDefault: 'on', managedOverride: true },
   { key: 'collapse_tool_calls', label: 'Summarize tool calls', description: 'One line per group of reads, edits and commands', type: 'bool', default: false },
   { key: 'statusLine.context', label: 'Context in the footer', description: 'How full the session is, to know when to start a new one', type: 'bool', default: false },

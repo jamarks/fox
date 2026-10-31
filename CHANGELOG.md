@@ -2,6 +2,19 @@
 
 What changed in fox, newest first: one line per merged pull request. Written by a job from the pull requests; edit the PR title to change a line.
 
+## 2026-10-29
+
+- Keep root metadata writes out of the build tree ([#65](https://github.com/jamarks/fox/pull/65))
+
+## 2026-10-28
+
+- Serialize fx settings updates to preserve explicit overrides ([#63](https://github.com/jamarks/fox/pull/63))
+- Reject publication roots that resolve outside allowed directories ([#62](https://github.com/jamarks/fox/pull/62))
+- Do not label an existing checkout as a different repo ([#61](https://github.com/jamarks/fox/pull/61))
+- Expose new fx settings as opt-in controls ([#60](https://github.com/jamarks/fox/pull/60))
+- Block workspace deletion when repos contain ignored files ([#59](https://github.com/jamarks/fox/pull/59))
+- Show the conversation that changed a pull request ([#53](https://github.com/jamarks/fox/pull/53))
+
 ## 2026-10-26
 
 - Preserve in-flight passkey challenges under load ([#58](https://github.com/jamarks/fox/pull/58))

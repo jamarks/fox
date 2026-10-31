@@ -38,6 +38,7 @@ import { createModels, launchArgs } from './models.mjs';
 import { createUsage } from './usage.mjs';
 import { turnTimeline } from './timeline.mjs';
 import { familyUsage } from './family-usage.mjs';
+import { childCompletion } from './inbox.mjs';
 import { createFx } from './harnesses/fx.mjs';
 import { createClaude, claudeBin } from './harnesses/claude.mjs';
 import { toResume, splitOnce, nextWorking, CONTINUE_TEXT } from './restart.mjs';
@@ -485,22 +486,20 @@ async function handlePanelRequest(req, res) {
       await Promise.all([...new Set(sessions.map((s) => s.workspace))].map(async (ws) => { repos[ws] = await gitInfo(ws); }));
       const byResume = new Map(terminals.filter((t) => t.resume).map((t) => [t.resume, t]));
       const byId = new Map(sessions.map((s) => [s.id, s]));
-      await Promise.all(sessions.map(async (s) => {
+      for (const s of sessions) {
         const t = byResume.get(s.id);
         s.terminal = t ? t.name : null;
         s.state = t ? t.activity : (s.live ? 'external' : 'idle');
-        if (t && !s.latestReply) {
-          // The first turn can run for a long time before fx writes any reply to events.jsonl.
-          const screen = await tmux('capture-pane', '-p', '-t', t.name).catch(() => '');
-          s.model = harnessById(s.harness)?.screenModel?.(screen) ?? s.model;
-        }
-      }));
+        // Children have no parent-pane model: their saved answer or metadata remains their only evidence.
+        s.activeModel = t && !s.parentId && !s.subagentChild ? t.activeModel : null;
+      }
       // Los hijos no tienen terminal propia: su estado sale de children.json del padre.
       for (const s of sessions) {
         for (const c of s.children) {
           const child = byId.get(c.id);
           if (!child) continue;
           child.subagent = { ...c, parentId: s.id };
+          child.childCompletion = childCompletion(child, c);
           child.state = c.phase === 'running' ? 'working' : c.phase === 'idle' ? 'ready' : 'done';
           if (!child.firstPrompt && c.task) child.firstPrompt = c.task;
         }
@@ -596,8 +595,17 @@ async function handlePanelRequest(req, res) {
     if ((m = p.match(/^\/api\/sessions\/([^/]+)\/artifact\/([^/]+)$/))) {
       const id = safeSessionId(m[1]);
       if (!id) return send(res, 400, { error: 'bad id' });
-      const text = await readArtifact(id, m[2]);
-      return text === null ? send(res, 404, { error: 'not found' }) : send(res, 200, text, 'text/plain; charset=utf-8');
+      const name = m[2];
+      if (!/^[A-Za-z0-9._-]+$/.test(name) || !(await readEvents(id)).some((e) => e.kind === 'tool_call' && e.result?.artifact === name)) return send(res, 404, { error: 'artifact not referenced by this session' });
+      const artifact = await readArtifact(id, name);
+      if (!artifact) return send(res, 404, { error: 'artifact file missing' });
+      if (artifact.tooLarge) return send(res, 413, { error: 'artifact too large to open', size: artifact.size });
+      res.setHeader('x-artifact-bytes', String(artifact.size));
+      res.setHeader('cache-control', 'no-store');
+      res.setHeader('x-content-type-options', 'nosniff');
+      if (url.searchParams.has('download')) res.setHeader('content-disposition', `attachment; filename="${name}"`);
+      res.writeHead(200, { ...BASE_HEADERS, 'content-type': url.searchParams.has('download') ? 'application/octet-stream' : 'text/plain; charset=utf-8' });
+      return res.end(artifact.buffer);
     }
     if (req.method === 'POST' && (m = p.match(/^\/api\/sessions\/([^/]+)\/(archive|unarchive|rename)$/))) {
       const id = safeSessionId(m[1]);
@@ -969,11 +977,13 @@ async function tmuxOption(name, key) {
 
 // Which harness runs in a terminal: set when fox starts it; terminals from before harnesses run fx.
 const terminalHarness = async (name) => harnessById(await tmuxOption(name, '@fox_harness').catch(() => null)) ?? HARNESSES[0];
-// Working, waiting or asking: each harness reads its own screen.
+// Activity and the live model share one bounded visible-pane capture; fx saves replies only after a turn ends.
 async function terminalActivity(name, harness = null) {
   let screen = '';
-  try { screen = await tmux('capture-pane', '-p', '-t', name); } catch { return 'unknown'; }
-  return (harness ?? await terminalHarness(name)).activity(screen);
+  try { screen = await tmux('capture-pane', '-p', '-t', name); } catch { return { activity: 'unknown', activeModel: null }; }
+  const agent = harness ?? await terminalHarness(name);
+  const activity = agent.activity(screen);
+  return { activity, activeModel: activity === 'working' ? agent.screenModel?.(screen) ?? null : null };
 }
 
 async function listTerminals() {
@@ -999,7 +1009,7 @@ async function listTerminals() {
       }
     }
     if (resume && pending[name]) matched.push([name, resume]);
-    out.push({ name, cwd, resume, harness: harness.id, attached: Number(attached) > 0, createdAt: Number(created) * 1000, activity: await terminalActivity(name, harness) });
+    out.push({ name, cwd, resume, harness: harness.id, attached: Number(attached) > 0, createdAt: Number(created) * 1000, ...await terminalActivity(name, harness) });
   }
   if (matched.length) await updateLaunchState((st) => {
     for (const [name, id] of matched) {
@@ -1247,7 +1257,7 @@ async function sendMobileMessage(id, text, { waitMs = 10_000 } = {}) {
       if (!prompt) return { status: 409, body: { error: `${harness.label} did not become ready. Open the desktop terminal and check the session.` } };
     } catch (error) { return { status: 409, body: { error: `Could not resume session: ${error.message}` } }; }
   }
-  const activity = await terminalActivity(terminal.name);
+  const { activity } = await terminalActivity(terminal.name);
   if (activity === 'working' || activity === 'needs_input') {
     return { status: 409, body: { error: activity === 'working' ? `${harness.label} is still working. Wait for its reply.` : `${harness.label} needs terminal input; use the desktop panel for this prompt.` } };
   }
