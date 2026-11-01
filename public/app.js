@@ -2371,6 +2371,7 @@ function fxSettingRow(o) {
   const fresh = unseen ? (o.managedOverride ? `<span class="set-new-label">New</span> <button type="button" class="set-act" data-fx-seen="${o.key}:${o.introduced}">Mark as seen</button>` : '<span class="set-new" title="New"></span>') : '';
   const more = o.introduced ? ` · fx default: ${esc(o.upstreamDefault)}${o.documentation ? ` · <a href="${esc(o.documentation)}" target="_blank" rel="noopener noreferrer">docs</a>` : ''}` : '';
   const main = `<span class="set-main">${esc(o.label)}${fresh}<span class="set-sub">${esc(o.description)}${more}</span></span>`;
+  if (o.typedInput) return `<div class="set-row fx-override">${main}<div class="fx-override-controls"><label>Theme <input type="text" value="${esc(o.value)}" placeholder="light or dark" pattern="light|dark" required aria-label="${esc(o.label)}" data-fx-text="${o.key}"></label><label>Apply setting <button type="button" class="switch-btn ${o.applied ? 'on' : ''}" data-fx-key="${o.key}" data-fx-apply="${o.applied}" data-fx-typed="true" role="switch" aria-checked="${o.applied}" aria-label="Apply ${esc(o.label)}"><span class="switch"></span></button></label><span class="set-sub">${o.applied ? 'Personal override applied. Existing custom themes are kept until you change them.' : 'No fox override; fx follows the terminal by default.'} Changes apply to new or resumed sessions.</span></div></div>`;
   if (o.managedOverride) return `<div class="set-row fx-override">${main}<div class="fx-override-controls"><label>Apply setting <button type="button" class="switch-btn ${o.applied ? 'on' : ''}" data-fx-key="${o.key}" data-fx-apply="${o.applied}" role="switch" aria-checked="${o.applied}" aria-label="Apply ${esc(o.label)}"><span class="switch"></span></button></label><label>${esc(o.valueLabel || 'Save prompts')} <button type="button" class="switch-btn ${o.value ? 'on' : ''}" data-fx-key="${o.key}" ${o.applied ? '' : 'disabled'} role="switch" aria-checked="${o.value}" aria-label="${esc(o.label)}"><span class="switch"></span></button></label><span class="set-sub">${o.applied ? 'Personal override applied.' : `No fox override; fx defaults to ${esc(o.upstreamDefault)}.`} Changes apply to new or resumed sessions.</span></div></div>`;
   if (o.type === 'integer') return `<div class="set-row">${main}<div class="set-num"><input type="number" min="${o.min}" max="${o.max}" step="1" value="${o.applied ? esc(o.value) : ''}" placeholder="fx default" aria-label="${esc(o.label)}" data-fx-num="${o.key}">${o.applied ? `<button type="button" class="set-act" data-fx-key="${o.key}" data-fx-tri="default" title="Give it back to fx">Default</button>` : ''}</div></div>`;
   if (o.type === 'bool' && o.introduced) {
@@ -2412,10 +2413,23 @@ $('#settings-fx').addEventListener('click', (e) => {
   }
   const btn = e.target.closest('[data-fx-key]');
   if (!btn || btn.disabled || btn.classList.contains('on') && 'fxTri' in btn.dataset) return;
+  if (btn.dataset.fxTyped && btn.dataset.fxApply === 'false') {
+    const input = btn.closest('.set-row').querySelector('[data-fx-text]');
+    if (!input.reportValidity()) { $('#settings-fx-note').textContent = 'Enter light or dark.'; return; }
+    saveFxSetting(btn.dataset.fxKey, input.value, btn);
+    return;
+  }
   const value = 'fxApply' in btn.dataset ? (btn.dataset.fxApply === 'true' ? null : false)
     : 'fxTri' in btn.dataset ? (btn.dataset.fxTri === 'default' ? null : btn.dataset.fxTri === 'on')
     : 'fxValue' in btn.dataset ? btn.dataset.fxValue : !btn.classList.contains('on');
   saveFxSetting(btn.dataset.fxKey, value, btn);
+});
+// Typed preferences write only after applying; an unapplied draft stays in this view.
+$('#settings-fx').addEventListener('change', (e) => {
+  const input = e.target.closest('[data-fx-text]'); if (!input) return;
+  if (input.closest('.set-row').querySelector('[data-fx-apply]').dataset.fxApply !== 'true') return;
+  if (!input.reportValidity()) { $('#settings-fx-note').textContent = 'Enter light or dark.'; return; }
+  saveFxSetting(input.dataset.fxText, input.value, input);
 });
 // A number saves when you leave the field or press Enter; empty gives it back to fx.
 $('#settings-fx').addEventListener('change', (e) => {
