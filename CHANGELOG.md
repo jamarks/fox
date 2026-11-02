@@ -4,6 +4,8 @@ What changed in fox, newest first: one line per merged pull request. Written by 
 
 ## 2026-10-31
 
+- Add clear all icon to replies inbox ([#75](https://github.com/jamarks/fox/pull/75))
+- Clear all new replies at once from the reply inbox ([#74](https://github.com/jamarks/fox/pull/74))
 - Live checks on what fx changed: lint and type errors next to its files ([#72](https://github.com/jamarks/fox/pull/72))
 - Open a large tool result from its exact transcript call ([#70](https://github.com/jamarks/fox/pull/70))
 - Surface unread subagent results as they land ([#68](https://github.com/jamarks/fox/pull/68))
