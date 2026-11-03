@@ -2,6 +2,10 @@
 
 What changed in fox, newest first: one line per merged pull request. Written by a job from the pull requests; edit the PR title to change a line.
 
+## 2026-11-02
+
+- Expose new fx settings as opt-in controls ([#76](https://github.com/jamarks/fox/pull/76))
+
 ## 2026-10-31
 
 - Add clear all icon to replies inbox ([#75](https://github.com/jamarks/fox/pull/75))
