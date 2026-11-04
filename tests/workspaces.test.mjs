@@ -215,6 +215,21 @@ test('a clean workspace folder can be deleted', async () => {
   assert.ok(!existsSync(join(base, 'workspaces', 'gone')));
 });
 
+test('untracked local files block folder deletion regardless of Git status settings', async () => {
+  const { ws } = await setup([['jamarks', 'notes']]);
+  const created = await ws.create({ name: 'keep', repos: [{ owner: 'jamarks', name: 'notes' }] });
+  await settle(ws, created.id);
+  const dir = join(created.dir, 'notes');
+  git(['config', '--local', 'status.showUntrackedFiles', 'no'], dir);
+  const localFile = join(dir, 'draft.txt');
+  await writeFile(localFile, 'local');
+  assert.equal(git(['status', '--porcelain'], dir), '');
+  assert.deepEqual(await ws.blockers(created.id), ['notes: uncommitted changes']);
+  await assert.rejects(ws.remove(created.id, { deleteFolder: true }), (e) => e.status === 409 && e.blockers.includes('notes: uncommitted changes'));
+  assert.equal(await readFile(localFile, 'utf8'), 'local');
+  assert.ok(await ws.get(created.id));
+});
+
 test('ignored local files block folder deletion even when the repo is clean and pushed', async () => {
   const { ws } = await setup([['jamarks', 'notes']]);
   const created = await ws.create({ name: 'keep', repos: [{ owner: 'jamarks', name: 'notes' }] });
@@ -247,6 +262,23 @@ test('an ignored whitespace-only filename cannot be trimmed away', async () => {
   assert.deepEqual(await ws.blockers(created.id), ['notes: ignored files']);
   await assert.rejects(ws.remove(created.id, { deleteFolder: true }), (e) => e.status === 409);
   assert.equal(await readFile(join(dir, ' '), 'utf8'), 'local');
+});
+
+test('folder deletion is blocked if the status check fails', async () => {
+  const { base, ws } = await setup([['jamarks', 'notes']]);
+  const created = await ws.create({ name: 'keep', repos: [{ owner: 'jamarks', name: 'notes' }] });
+  await settle(ws, created.id);
+  const guarded = createWorkspaces({
+    stateDir: join(base, 'state'), rootDir: join(base, 'workspaces'),
+    remoteUrl: (r) => join(base, 'remotes', r.owner, `${r.name}.git`),
+    git: async (args) => {
+      if (args.includes('status')) throw new Error('git check failed');
+      return git(args);
+    },
+  });
+  assert.deepEqual(await guarded.blockers(created.id), ['notes: uncommitted changes']);
+  await assert.rejects(guarded.remove(created.id, { deleteFolder: true }), (e) => e.status === 409);
+  assert.ok(existsSync(join(created.dir, 'notes', 'README.md')));
 });
 
 test('folder deletion is blocked if the ignored-file check fails', async () => {
