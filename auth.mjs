@@ -199,5 +199,5 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
       return json(res, 403, { error: 'passkey verification failed' });
     }
   }
-  return { active, track, handle, accepts, validOrigin, get registered() { return Boolean(credential); }, get usedChallengeCount() { return used.size; } };
+  return { active, track, handle, accepts, validOrigin, get registered() { return Boolean(credential); } };
 }
