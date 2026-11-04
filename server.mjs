@@ -467,7 +467,9 @@ function sameOrigin(req) {
 }
 
 async function handlePanelRequest(req, res) {
-  const url = new URL(req.url, 'http://localhost');
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); }
+  catch { return send(res, 400, { error: 'invalid request target' }); }
   const p = url.pathname;
   try {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !sameOrigin(req)) return send(res, 403, { error: 'same-origin request required' });
@@ -924,7 +926,9 @@ async function handleView(req, res, path) {
 const OPEN_ASSETS = new Set(['/fox.svg', '/icon-180.png', '/icon-512.png', '/manifest.webmanifest']);
 const server = http.createServer(async (req, res) => {
   if (process.env.FOX_SHARE_PORT !== undefined && !localHost(req.headers.host)) return send(res, 403, { error: 'use the paired gateway for remote access' });
-  const path = new URL(req.url, 'http://localhost').pathname;
+  let path;
+  try { path = new URL(req.url, 'http://localhost').pathname; }
+  catch { return send(res, 400, { error: 'invalid request target' }); }
   // Without a passkey only fox's own names reach it: another name pointing here (DNS rebinding) is a foreign site.
   if (process.env.FOX_AUTH_DISABLED === '1' && !unlockedHost(req.headers.host)) return send(res, 403, { error: 'host not allowed' });
   if (!auth.accepts(req) && process.env.FOX_AUTH_DISABLED !== '1') {
@@ -1178,7 +1182,10 @@ setTimeout(() => watchForRestart(), 3_000).unref();
 
 const wss = new WebSocketServer({ noServer: true });
 function upgrade(req, socket, head, deviceId = null, remoteSockets = null) {
-  if (!auth.active(req) || new URL(req.url, 'http://localhost').pathname !== '/pty' || !sameOrigin(req)) {
+  let path;
+  try { path = new URL(req.url, 'http://localhost').pathname; }
+  catch { socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'); return; }
+  if (!auth.active(req) || path !== '/pty' || !sameOrigin(req)) {
     socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return;
   }
   wss.handleUpgrade(req, socket, head, (ws) => {
@@ -1306,7 +1313,9 @@ if (mobilePort !== undefined) {
     if (!auth.active(req)) return send(res, 401, { error: 'passkey required' });
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'");
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    const url = new URL(req.url, 'http://localhost');
+    let url;
+    try { url = new URL(req.url, 'http://localhost'); }
+    catch { return send(res, 400, { error: 'invalid request target' }); }
     const p = url.pathname;
     try {
       const reply = p.match(/^\/api\/sessions\/([^/]+)\/reply$/);
