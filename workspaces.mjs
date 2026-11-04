@@ -2,7 +2,7 @@
 // plus whatever else you keep there. Created once, reopened many times. Definitions live in
 // ~/.config/fox/workspaces.json; fox never writes in ~/.fx. Removing a repo or a workspace never deletes
 // files unless asked, and never when a repo has uncommitted or unpushed work.
-import { readFile, writeFile, mkdir, rename, readdir, rm, realpath, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, readdir, rm, realpath, stat, lstat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -23,7 +23,7 @@ export function createWorkspaces({
   stateDir, rootDir,
   agentNotes = () => null, // (ws) => AGENTS.md for the workspace root: that it is no repo, and which subfolder is which
   remoteUrl = (r) => `https://github.com/${r.owner}/${r.name}.git`,
-  git = (args, opts = {}) => execFileP('git', args, { timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, ...opts }).then((x) => x.stdout.trim()),
+  git = (args, { raw = false, ...opts } = {}) => execFileP('git', args, { timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, ...opts }).then((x) => raw ? x.stdout : x.stdout.trim()),
 }) {
   const file = join(stateDir, 'workspaces.json');
   const cloning = new Map(); // "<id>|owner/name" -> true while a clone runs
@@ -184,6 +184,45 @@ export function createWorkspaces({
     },
     // What stops the folder from being deleted: dirty, ignored or unpushed repos, and any file that is not a repo.
     async blockers(id) {
+      async function checkRepo(dir, label) {
+        const run = (args, opts = {}) => git(['-C', dir, ...SAFE_GIT, ...args], { timeout: 10000, ...opts });
+        const dirty = await run(['status', '--porcelain']).catch(() => 'unknown');
+        if (dirty) out.push(`${label}: uncommitted changes`);
+        // Ignored local files are absent from status but still must not be deleted.
+        const ignored = await run(['ls-files', '-z', '--others', '--ignored', '--exclude-standard']).catch(() => null);
+        if (ignored === null) out.push(`${label}: unable to check ignored files`);
+        else if (ignored) out.push(`${label}: ignored files`);
+        // Commits on any ref (a detached HEAD and a stash too) that no remote has.
+        const unpushed = await run(['log', '--all', '--not', '--remotes', '--oneline', '-n', '1']).catch(() => 'unknown');
+        if (unpushed) out.push(`${label}: commits not pushed`);
+
+        // A superproject's status and ignored-file list do not cover files inside its submodules.
+        let links;
+        try {
+          const indexed = await run(['ls-files', '--stage', '-z'], { raw: true });
+          if (indexed && !indexed.endsWith('\0')) throw new Error('incomplete index listing');
+          links = indexed.split('\0').filter(Boolean).filter((entry) => entry.startsWith('160000 ')).map((entry) => {
+            const tab = entry.indexOf('\t');
+            if (tab < 0) throw new Error('invalid gitlink');
+            return entry.slice(tab + 1);
+          });
+        } catch { out.push(`${label}: unable to check submodules`); return; }
+        for (const path of links) {
+          const child = join(dir, path), name = `${label}/${path}`;
+          const info = await lstat(child).catch((err) => err.code === 'ENOENT' ? null : undefined);
+          if (info === undefined || info?.isSymbolicLink() || (info && !info.isDirectory())) {
+            out.push(`${name}: unable to check submodule`);
+          } else if (info && existsSync(join(child, '.git'))) {
+            await checkRepo(child, name);
+          } else {
+            const files = info ? await readdir(child).catch(() => null) : [];
+            // Deinit empties the worktree but leaves local commits in the parent's git directory.
+            const modulePath = await run(['rev-parse', '--git-path', `modules/${path}`]).catch(() => null);
+            if (!files || files.length || !modulePath || existsSync(resolve(dir, modulePath)))
+              out.push(`${name}: unable to check submodule`);
+          }
+        }
+      }
       const ws = await this.get(id);
       if (!ws) return null;
       const out = [];
@@ -194,16 +233,7 @@ export function createWorkspaces({
         // A repo folder without .git (a failed clone, or .git removed) is plain files: nothing says they are pushed.
         if (!existsSync(join(dir, '.git'))) { if ((await readdir(dir).catch(() => [])).length) out.push(`${r.dir}: files outside git`); continue; }
         if (!(await originMatches(ws, r))) { out.push(`${r.dir}: checkout origin does not match`); continue; }
-        const run = (args) => git(['-C', dir, ...SAFE_GIT, ...args], { timeout: 10000 });
-        const dirty = await run(['status', '--porcelain']).catch(() => 'unknown');
-        if (dirty) out.push(`${r.dir}: uncommitted changes`);
-        // Ignored local files are absent from status but still must not be deleted.
-        const ignored = await run(['ls-files', '-z', '--others', '--ignored', '--exclude-standard']).catch(() => null);
-        if (ignored === null) out.push(`${r.dir}: unable to check ignored files`);
-        else if (ignored) out.push(`${r.dir}: ignored files`);
-        // Commits on any ref (a detached HEAD and a stash too) that no remote has.
-        const unpushed = await run(['log', '--all', '--not', '--remotes', '--oneline', '-n', '1']).catch(() => 'unknown');
-        if (unpushed) out.push(`${r.dir}: commits not pushed`);
+        await checkRepo(dir, r.dir);
       }
       for (const entry of await readdir(ws.dir).catch(() => [])) {
         if (repoDirs.has(entry)) continue;
