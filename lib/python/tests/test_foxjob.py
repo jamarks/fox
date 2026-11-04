@@ -162,6 +162,30 @@ class FoxJobTest(unittest.TestCase):
         self.assertEqual((p.status, p.files, p.lines), ("opened", 1, 0))
         self.assertEqual(sh("git", "cat-file", "-s", "agent/hello:payload0.bin", cwd=self.origin), "128")
 
+    def test_binary_size_counts_replacements_and_renames_but_not_deletions(self):
+        path = self.fj.checkout("o/r")
+        (path / "old.bin").write_bytes(b"\0" * 300)
+        (path / "removed.bin").write_bytes(b"\0" * 500)
+        sh("git", "add", "-A", cwd=path)
+        sh("git", "commit", "-qm", "binary fixtures", cwd=path)
+        start = sh("git", "rev-parse", "HEAD", cwd=path)
+        (path / "old.bin").rename(path / "new\nname.bin")
+        (path / "new\nname.bin").write_bytes(b"\0" * 120)
+        (path / "removed.bin").unlink()
+        sh("git", "add", "-A", cwd=path)
+        self.assertEqual(self.fj.staged_binary_bytes(path, start), 120,
+                         "only the new blob counts, including a rename with a newline in its path")
+
+    def test_binary_size_counts_the_whole_replacement_blob(self):
+        path = self.fj.checkout("o/r")
+        (path / "payload.bin").write_bytes(b"\0" * 100)
+        sh("git", "add", "-A", cwd=path)
+        sh("git", "commit", "-qm", "binary fixture", cwd=path)
+        start = sh("git", "rev-parse", "HEAD", cwd=path)
+        (path / "payload.bin").write_bytes(b"\0" * 90 + b"x" * 10)
+        sh("git", "add", "-A", cwd=path)
+        self.assertEqual(self.fj.staged_binary_bytes(path, start), 100)
+
     def test_too_many_waiting_pull_requests_stops_a_new_one(self):
         Path(os.environ["FAKE_GH_STATE"]).write_text(json.dumps({"open": [{"number": 1, "headRefName": "agent/x", "url": "u", "title": "x"}], "merged": []}))
         self.assertEqual(self.propose(max_open=1).status, "busy")
