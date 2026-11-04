@@ -233,6 +233,72 @@ test('ignored local files block folder deletion even when the repo is clean and 
   assert.ok(await ws.get(created.id));
 });
 
+test('a clean pushed workspace keeps ignored local files inside a populated submodule', async () => {
+  const { base, ws } = await setup([['jamarks', 'notes'], ['jamarks', 'library']]);
+  const seed = join(base, 'seed', 'jamarks', 'notes');
+  git(['-c', 'protocol.file.allow=always', 'submodule', 'add', join(base, 'remotes', 'jamarks', 'library.git'), 'library'], seed);
+  git(['add', '.'], seed); git(['commit', '-q', '-m', 'add library'], seed);
+  git(['push', '-q', 'origin', 'main'], seed);
+  const created = await ws.create({ name: 'keep', repos: [{ owner: 'jamarks', name: 'notes' }] });
+  await settle(ws, created.id);
+  const parent = join(created.dir, 'notes');
+  git(['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init', '--recursive'], parent);
+  const child = join(parent, 'library');
+  await writeFile(join(child, '.gitignore'), '*.private\n');
+  git(['add', '.gitignore'], child); git(['commit', '-q', '-m', 'ignore local files'], child);
+  git(['push', '-q', 'origin', 'HEAD:main'], child);
+  git(['add', 'library'], parent); git(['commit', '-q', '-m', 'update library'], parent);
+  git(['push', '-q', 'origin', 'main'], parent);
+  const local = join(child, 'only-local.private');
+  await writeFile(local, 'keep me');
+  assert.equal(git(['status', '--porcelain'], parent), '');
+  assert.deepEqual(await ws.blockers(created.id), ['notes/library: ignored files']);
+  await assert.rejects(ws.remove(created.id, { deleteFolder: true }), (e) => e.status === 409 && e.blockers.includes('notes/library: ignored files'));
+  assert.equal(await readFile(local, 'utf8'), 'keep me');
+  assert.ok(await ws.get(created.id));
+});
+
+test('nested submodule changes and unpushed commits block deletion', async () => {
+  const { base, ws } = await setup([['jamarks', 'notes'], ['jamarks', 'library'], ['jamarks', 'assets']]);
+  const seedLibrary = join(base, 'seed', 'jamarks', 'library');
+  git(['-c', 'protocol.file.allow=always', 'submodule', 'add', join(base, 'remotes', 'jamarks', 'assets.git'), 'assets'], seedLibrary);
+  git(['add', '.'], seedLibrary); git(['commit', '-q', '-m', 'add assets'], seedLibrary);
+  git(['push', '-q', 'origin', 'main'], seedLibrary);
+  const seedNotes = join(base, 'seed', 'jamarks', 'notes');
+  git(['-c', 'protocol.file.allow=always', 'submodule', 'add', join(base, 'remotes', 'jamarks', 'library.git'), 'library'], seedNotes);
+  git(['add', '.'], seedNotes); git(['commit', '-q', '-m', 'add library'], seedNotes);
+  git(['push', '-q', 'origin', 'main'], seedNotes);
+  const created = await ws.create({ name: 'keep', repos: [{ owner: 'jamarks', name: 'notes' }] });
+  await settle(ws, created.id);
+  const parent = join(created.dir, 'notes');
+  git(['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init', '--recursive'], parent);
+  assert.deepEqual(await ws.blockers(created.id), []);
+  const nested = join(parent, 'library', 'assets');
+  await writeFile(join(nested, 'draft.txt'), 'local');
+  assert.ok((await ws.blockers(created.id)).includes('notes/library/assets: uncommitted changes'));
+  git(['add', 'draft.txt'], nested); git(['commit', '-q', '-m', 'local draft'], nested);
+  assert.ok((await ws.blockers(created.id)).includes('notes/library/assets: commits not pushed'));
+  await assert.rejects(ws.remove(created.id, { deleteFolder: true }), (e) => e.status === 409);
+  assert.equal(await readFile(join(nested, 'draft.txt'), 'utf8'), 'local');
+});
+
+test('folder deletion is blocked when submodules cannot be checked', async () => {
+  const { base, ws } = await setup([['jamarks', 'notes']]);
+  const created = await ws.create({ name: 'keep', repos: [{ owner: 'jamarks', name: 'notes' }] });
+  await settle(ws, created.id);
+  const guarded = createWorkspaces({
+    stateDir: join(base, 'state'), rootDir: join(base, 'workspaces'),
+    remoteUrl: (r) => join(base, 'remotes', r.owner, `${r.name}.git`),
+    git: async (args) => {
+      if (args.includes('--stage')) throw new Error('git check failed');
+      return git(args);
+    },
+  });
+  assert.deepEqual(await guarded.blockers(created.id), ['notes: unable to check submodules']);
+  await assert.rejects(guarded.remove(created.id, { deleteFolder: true }), (e) => e.status === 409);
+  assert.ok(existsSync(join(created.dir, 'notes', 'README.md')));
+});
+
 test('an ignored whitespace-only filename cannot be trimmed away', async () => {
   const { ws } = await setup([['jamarks', 'notes']]);
   const created = await ws.create({ name: 'keep', repos: [{ owner: 'jamarks', name: 'notes' }] });
@@ -256,9 +322,9 @@ test('folder deletion is blocked if the ignored-file check fails', async () => {
   const guarded = createWorkspaces({
     stateDir: join(base, 'state'), rootDir: join(base, 'workspaces'),
     remoteUrl: (r) => join(base, 'remotes', r.owner, `${r.name}.git`),
-    git: async (args) => {
-      if (args.includes('ls-files')) throw new Error('git check failed');
-      return git(args);
+    git: async (args, opts) => {
+      if (args.includes('--ignored')) throw new Error('git check failed');
+      return opts.raw ? execFileSync('git', args, { stdio: 'pipe' }).toString() : git(args);
     },
   });
   assert.deepEqual(await guarded.blockers(created.id), ['notes: unable to check ignored files']);
