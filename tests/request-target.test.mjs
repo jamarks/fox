@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import { connect, createServer } from 'node:net';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,7 +17,7 @@ const get = (port, host, path = '/api/auth/status') => new Promise((resolve, rej
     res.resume(); res.on('end', () => resolve(res.statusCode));
   }).once('error', reject);
 });
-const raw = (port, host, upgrade = false, target = 'http://\\[') => new Promise((resolve, reject) => {
+const raw = (port, host, upgrade = false, target = 'http://[') => new Promise((resolve, reject) => {
   const socket = connect(port, '127.0.0.1');
   let response = '';
   socket.setTimeout(5000, () => socket.destroy(new Error('request timed out')));
@@ -33,13 +33,21 @@ for (const mode of ['passkey', 'auth disabled']) {
     const port = await freePort();
     const mobilePort = mode === 'auth disabled' ? await freePort() : undefined;
     const sharePort = mode === 'auth disabled' ? await freePort() : undefined;
+    const appsPort = mode === 'auth disabled' ? await freePort() : undefined;
+    if (appsPort) {
+      await mkdir(join(home, 'site'));
+      await mkdir(join(home, 'state'));
+      await writeFile(join(home, 'site', 'index.html'), 'published');
+      await writeFile(join(home, 'state', 'apps.json'), JSON.stringify({ site: { dir: join(home, 'site') } }));
+    }
     const host = mode === 'passkey' ? 'fox.probe.test' : `localhost:${port}`;
     const status = mode === 'passkey' ? 200 : 404; // The disabled mode does not expose auth endpoints.
     const child = spawn(process.execPath, ['server.mjs'], { cwd: new URL('..', import.meta.url), stdio: 'pipe',
       env: { ...process.env, HOME: home, FOX_STATE_DIR: join(home, 'state'), PORT: String(port),
         FOX_AUTH_DISABLED: mode === 'auth disabled' ? '1' : undefined,
         FOX_PUBLIC_ORIGIN: mode === 'passkey' ? 'https://fox.probe.test' : undefined,
-        FOX_MOBILE_PORT: mobilePort?.toString(), FOX_SHARE_PORT: sharePort?.toString() } });
+        FOX_MOBILE_PORT: mobilePort?.toString(), FOX_SHARE_PORT: sharePort?.toString(),
+        FOX_APPS_URL: appsPort ? 'https://{name}.probe.test' : undefined, FOX_APPS_PORT: appsPort?.toString() } });
     try {
       let ready = false;
       for (let i = 0; i < 200; i++) {
@@ -52,6 +60,10 @@ for (const mode of ['passkey', 'auth disabled']) {
         assert.match(await raw(sharePort, host), /^HTTP\/1\.1 400 Bad Request\r\n/);
         assert.equal(await get(mobilePort, host, '/api/overview'), 200);
         assert.equal(await get(sharePort, host), 403);
+        assert.match(await raw(appsPort, 'site.probe.test'), /^HTTP\/1\.1 400 Bad Request\r\n/);
+        assert.match(await raw(appsPort, 'site.probe.test', true), /^HTTP\/1\.1 400 Bad Request\r\n/);
+        assert.match(await raw(appsPort, 'site.probe.test', false, 'http://\\\\['), /^HTTP\/1\.1 400 Bad Request\r\n/, 'parser-level error');
+        assert.equal(await get(appsPort, 'site.probe.test', '/'), 200, 'folder app still responds');
       }
       assert.match(await raw(port, host, true, '/pty'), /^HTTP\/1\.1 403 Forbidden\r\n/, 'valid upgrade reaches WebSocket routing');
       for (const upgrade of [false, true]) {

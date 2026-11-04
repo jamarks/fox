@@ -181,6 +181,8 @@ export function createAppRouter({ registry, domain, denyPorts = [], log = consol
     return h;
   };
   const server = http.createServer(async (req, res) => {
+    try { new URL(req.url, 'http://localhost'); }
+    catch { res.writeHead(400); return res.end(); }
     const t = await target(req);
     if (t.paused) { res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' }); return res.end(`${t.name} is paused. Resume it on fox's Apps page.\n`); }
     if (t.dir) return serveStaticApp(req, res, t);
@@ -199,6 +201,8 @@ export function createAppRouter({ registry, domain, denyPorts = [], log = consol
     req.pipe(up);
   });
   server.on('upgrade', async (req, socket, head) => {
+    try { new URL(req.url, 'http://localhost'); }
+    catch { socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'); return; }
     const t = await target(req);
     if (!t.port) return socket.destroy();
     const up = net.connect(t.port, '127.0.0.1', () => {
@@ -210,7 +214,10 @@ export function createAppRouter({ registry, domain, denyPorts = [], log = consol
     up.on('error', () => socket.destroy());
     socket.on('error', () => up.destroy());
   });
-  server.on('clientError', (err, socket) => socket.destroy());
+  server.on('clientError', (err, socket) => {
+    if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
+    else socket.destroy();
+  });
   return server;
 }
 
