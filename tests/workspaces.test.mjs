@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, mkdir, readFile, readdir, symlink } from 'node:fs/promises';
+import { mkdtemp, writeFile, mkdir, readFile, readdir, symlink, rmdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -256,6 +256,29 @@ test('a clean pushed workspace keeps ignored local files inside a populated subm
   await assert.rejects(ws.remove(created.id, { deleteFolder: true }), (e) => e.status === 409 && e.blockers.includes('notes/library: ignored files'));
   assert.equal(await readFile(local, 'utf8'), 'keep me');
   assert.ok(await ws.get(created.id));
+});
+
+test('a deinitialized submodule retains local commits in the parent git directory', async () => {
+  const { base, ws } = await setup([['jamarks', 'notes'], ['jamarks', 'library']]);
+  const seed = join(base, 'seed', 'jamarks', 'notes');
+  git(['-c', 'protocol.file.allow=always', 'submodule', 'add', join(base, 'remotes', 'jamarks', 'library.git'), 'library'], seed);
+  git(['add', '.'], seed); git(['commit', '-q', '-m', 'add library'], seed);
+  git(['push', '-q', 'origin', 'main'], seed);
+  const created = await ws.create({ name: 'keep', repos: [{ owner: 'jamarks', name: 'notes' }] });
+  await settle(ws, created.id);
+  const parent = join(created.dir, 'notes');
+  git(['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init'], parent);
+  const child = join(parent, 'library');
+  await writeFile(join(child, 'draft.txt'), 'local');
+  git(['add', 'draft.txt'], child); git(['commit', '-q', '-m', 'local draft'], child);
+  git(['submodule', 'deinit', '-f', 'library'], parent);
+  assert.equal(git(['status', '--porcelain'], parent), '');
+  assert.ok(existsSync(join(parent, '.git', 'modules', 'library', 'objects')));
+  assert.ok((await ws.blockers(created.id)).includes('notes/library: unable to check submodule'));
+  await rmdir(child);
+  assert.ok((await ws.blockers(created.id)).includes('notes/library: unable to check submodule'));
+  await assert.rejects(ws.remove(created.id, { deleteFolder: true }), (e) => e.status === 409);
+  assert.ok(existsSync(join(parent, '.git', 'modules', 'library', 'objects')));
 });
 
 test('nested submodule changes and unpushed commits block deletion', async () => {

@@ -212,12 +212,14 @@ export function createWorkspaces({
           const info = await lstat(child).catch((err) => err.code === 'ENOENT' ? null : undefined);
           if (info === undefined || info?.isSymbolicLink() || (info && !info.isDirectory())) {
             out.push(`${name}: unable to check submodule`);
-          } else if (info) {
-            if (existsSync(join(child, '.git'))) await checkRepo(child, name);
-            else {
-              const files = await readdir(child).catch(() => null);
-              if (!files || files.length) out.push(`${name}: unable to check submodule`);
-            }
+          } else if (info && existsSync(join(child, '.git'))) {
+            await checkRepo(child, name);
+          } else {
+            const files = info ? await readdir(child).catch(() => null) : [];
+            // Deinit empties the worktree but leaves local commits in the parent's git directory.
+            const modulePath = await run(['rev-parse', '--git-path', `modules/${path}`]).catch(() => null);
+            if (!files || files.length || !modulePath || existsSync(resolve(dir, modulePath)))
+              out.push(`${name}: unable to check submodule`);
           }
         }
       }
