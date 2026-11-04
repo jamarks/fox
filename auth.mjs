@@ -52,8 +52,9 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
   }}
   const sessions = new Map(), sockets = new Map();
   // Challenges travel signed in their id instead of waiting in a server-side list, so no number of anonymous
-  // options requests can push out someone's sign-in. Attempted challenges are remembered until expiry so
-  // even failed verifications cannot be replayed.
+  // options requests can push out someone's sign-in. Bound attempted challenges without evicting unexpired
+  // entries: even failed verifications must not be replayable.
+  const maxUsedChallenges = 256;
   const secret = randomBytes(32), used = new Map();
   const mac = (text) => createHmac('sha256', secret).update(text).digest();
   const sealChallenge = (item) => { const text = Buffer.from(JSON.stringify(item)).toString('base64url'); return `${text}.${mac(text).toString('base64url')}`; };
@@ -162,13 +163,15 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
     if (!path.endsWith('/verify')) return json(res, 404, { error: 'not found' });
     let data;
     try { data = await body(req); } catch { return json(res, 400, { error: 'invalid response' }); }
-    for (const [key, until] of used) if (until < Date.now()) used.delete(key);
     const item = openChallenge(data.id);
     if (!item || used.has(item.challenge) || item.setup !== setup || !(item.expires >= Date.now()) || item.rpID !== (remote?.hostname ?? 'localhost')) {
       return json(res, 403, { error: 'challenge expired' });
     }
-    // Hold before awaiting verification so concurrent copies cannot both sign in.
+    if (used.size >= maxUsedChallenges) return json(res, 429, { error: 'too many verification attempts' });
+    // Hold before awaiting verification so concurrent copies cannot both sign in. Each entry clears at its
+    // own deadline; scanning or evicting outstanding attempts would make replay tracking unsafe under load.
     used.set(item.challenge, item.expires);
+    setTimeout(() => used.delete(item.challenge), Math.max(1, item.expires - Date.now() + 1)).unref();
     if (setup && remote && (item.enrollment !== digest(String(data.code)) || !await validEnrollment(stateDir, data.code, remote.origin))) {
       return json(res, 403, { error: 'challenge expired' });
     }
@@ -196,5 +199,5 @@ export async function createAuth({ stateDir, disabled = false, publicOrigin = nu
       return json(res, 403, { error: 'passkey verification failed' });
     }
   }
-  return { active, track, handle, accepts, validOrigin, get registered() { return Boolean(credential); } };
+  return { active, track, handle, accepts, validOrigin, get registered() { return Boolean(credential); }, get usedChallengeCount() { return used.size; } };
 }

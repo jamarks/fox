@@ -59,6 +59,45 @@ test('a flood of anonymous options requests neither pushes out nor blocks a sign
   }
 });
 
+test('anonymous verification state stays bounded without losing replay protection or slowing with load', async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'fox-auth-budget-'));
+  const post = async (auth, path, data = {}) => {
+    const req = { method: 'POST', url: path, headers: { host: 'localhost:3000', origin: 'http://localhost:3000' },
+      socket: { remoteAddress: '127.0.0.1' }, async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(data)); } };
+    let status, response;
+    const res = { writeHead(code) { status = code; }, end(text) { response = JSON.parse(text); } };
+    await auth.handle(req, res);
+    return { status, ...response };
+  };
+  try {
+    await writeFile(join(stateDir, 'passkey.json'), JSON.stringify({ id: 'test-credential', publicKey: 'AA', counter: 0 }));
+    const auth = await createAuth({ stateDir });
+    const ids = [];
+    for (let i = 0; i < 4000; i++) {
+      const options = await post(auth, '/api/auth/login/options');
+      assert.equal(options.status, 200);
+      ids.push(options.id);
+    }
+    const times = [];
+    for (let batch = 0; batch < 4; batch++) {
+      const start = performance.now();
+      for (let i = batch * 1000; i < (batch + 1) * 1000; i++) {
+        const result = await post(auth, '/api/auth/login/verify', { id: ids[i], response: { id: 'test-credential' } });
+        assert.equal(result.status, i < 256 ? 403 : 429);
+      }
+      times.push(performance.now() - start);
+      assert.equal(auth.usedChallengeCount, 256, 'the oldest unexpired challenge remains tracked');
+    }
+    assert.ok(times[3] < times[0] * 3 + 100, `verification cost should not grow with history: ${times.join(', ')} ms`);
+    const replay = await post(auth, '/api/auth/login/verify', { id: ids[0], response: {} });
+    assert.equal(replay.status, 403);
+    assert.equal(replay.error, 'challenge expired');
+    assert.equal(auth.usedChallengeCount, 256);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test('restored sessions close tracked terminal sockets at their original expiry', async () => {
   const stateDir = await mkdtemp(join(tmpdir(), 'fox-auth-restored-'));
   const token = 'restored-session-token';
