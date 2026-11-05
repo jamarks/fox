@@ -65,7 +65,9 @@ export function createShareBridge({ port, panelPort, mobilePort, handlePanelRequ
   const remote = enabled ? http.createServer(async (req, res) => {
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Content-Security-Policy', `default-src 'self'; connect-src 'self' wss://${host ?? 'localhost'}; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'`);
-    const path = new URL(req.url, 'http://localhost').pathname;
+    let path;
+    try { path = new URL(req.url, 'http://localhost').pathname; }
+    catch { return send(res, 400, { error: 'invalid request target' }); }
     if (!host || req.headers.host !== host) return send(res, 403, { error: 'tunnel URL not configured on the Mac' });
     const now = Date.now();
     while (remoteRequests.length && remoteRequests[0] < now - 60000) remoteRequests.shift();
