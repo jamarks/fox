@@ -154,10 +154,12 @@ test('static app roots stay inside visible home folders when names change during
   const site = join(home, 'site');
   const visible = join(home, 'visible');
   const hidden = join(home, '.private');
+  const outside = await mkdtemp(join(tmpdir(), 'fox-outside-'));
   await mkdir(site);
   await mkdir(hidden);
   await writeFile(join(site, 'token.json'), 'published');
   await writeFile(join(hidden, 'token.json'), 'private');
+  await writeFile(join(outside, 'token.json'), 'outside');
   const reg = createAppRegistry({ stateDir: join(home, 'state'), home });
   await reg.set('site', { dir: site });
   const router = createAppRouter({ registry: reg, domain: 'jwass.xyz' });
@@ -169,7 +171,14 @@ test('static app roots stay inside visible home folders when names change during
   }).on('error', reject));
   try {
     assert.deepEqual(await get(), { status: 200, body: 'published' });
-    await rename(site, visible);
+    await rename(site, join(hidden, 'site'));
+    await symlink(join(hidden, 'site'), site);
+    assert.deepEqual(await get(), { status: 404, body: 'Not found\n' });
+    await unlink(site);
+    await rename(join(hidden, 'site'), visible);
+    await symlink(outside, site);
+    assert.deepEqual(await get(), { status: 404, body: 'Not found\n' });
+    await unlink(site);
     await symlink(hidden, site);
     assert.deepEqual(await get(), { status: 404, body: 'Not found\n' });
     // Atomic link swaps exercise requests while the stored root name changes between valid and hidden targets.
