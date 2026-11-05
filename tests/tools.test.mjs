@@ -43,4 +43,43 @@ test('a tool turns off and on through its enabled flag, keeping its own setup', 
   assert.equal(isEnabled(browser, withEnabled(off, browser, true)), true);
   assert.equal(isEnabled(TOOLS.find((t) => t.id === 'docs'), config), true, 'no flag means on');
   assert.throws(() => withEnabled({ mcp: {} }, browser, false), /does not have/);
+  assert.equal(isEnabled(browser, { mcp: {} }), false);
+});
+
+test('every matching alias follows the switch, and the displayed state follows any active entry', async () => {
+  const { isEnabled, withEnabled } = await import('../tools.mjs');
+  const config = { mcp: {
+    webA: { command: ['npx', '@playwright/mcp@latest'], enabled: true },
+    webB: { command: ['/opt/@playwright/mcp/cli.js'] },
+    docs: { url: 'https://mcp.context7.com/mcp' },
+  } };
+  const partlyOff = { mcp: { ...config.mcp, webA: { ...config.mcp.webA, enabled: false } } };
+  assert.equal(isEnabled(browser, partlyOff), true, 'another active alias keeps the tool on');
+  const off = withEnabled(config, browser, false);
+  assert.equal(off.mcp.webA.enabled, false);
+  assert.equal(off.mcp.webB.enabled, false);
+  assert.equal(isEnabled(browser, off), false, 'the displayed state is off only when all matches are off');
+  assert.deepEqual(off.mcp.docs, config.mcp.docs);
+  assert.equal(config.mcp.webB.enabled, undefined, 'the original config is unchanged');
+  const on = withEnabled(off, browser, true);
+  assert.equal(on.mcp.webA.enabled, true);
+  assert.equal(on.mcp.webB.enabled, true);
+  assert.equal(isEnabled(browser, on), true);
+});
+
+test('the canonical server and matching aliases are switched together', async () => {
+  const { isEnabled, withEnabled } = await import('../tools.mjs');
+  const config = { mcp: {
+    playwright: { command: ['custom-browser'], enabled: false },
+    web: { command: ['npx', '@playwright/mcp@latest'] },
+  } };
+  assert.equal(isEnabled(browser, config), true);
+  const off = withEnabled(config, browser, false);
+  assert.equal(off.mcp.playwright.enabled, false);
+  assert.equal(off.mcp.web.enabled, false);
+  assert.equal(isEnabled(browser, off), false);
+  const on = withEnabled(off, browser, true);
+  assert.equal(on.mcp.playwright.enabled, true);
+  assert.equal(on.mcp.web.enabled, true);
+  assert.equal(isEnabled(browser, on), true);
 });
