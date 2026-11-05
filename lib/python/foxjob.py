@@ -163,6 +163,16 @@ def count_lines(numstat):
                if a.isdigit() and b.isdigit())
 
 
+def staged_binary_bytes(path, start):
+    """Count the staged size of binary additions and replacements, not their zero numstat lines."""
+    numstat = git("diff", "--cached", "--numstat", "-z", "--no-renames", "--diff-filter=ACMRT", start, cwd=path)
+    total = 0
+    for entry in numstat.split("\0"):
+        if entry.startswith("-\t-\t"):
+            total += int(git("cat-file", "-s", ":" + entry[4:], cwd=path))
+    return total
+
+
 def open_prs(repo, cwd, prefix="agent/"):
     return [pr for pr in gh_json(["pr", "list", "--repo", repo, "--state", "open", "--limit", "50",
                                   "--json", "number,headRefName,url,title"], cwd) if pr["headRefName"].startswith(prefix)]
@@ -190,14 +200,15 @@ class Proposal:
 
 
 def propose_change(repo, *, branch, title, task, test, base="main", setup=None, max_lines=400, max_open=3,
-                   prefix="agent/", timeout_min=25, body="", commit_message=None, dry=False, model=None, effort=None, why=""):
+                   prefix="agent/", timeout_min=25, body="", commit_message=None, dry=False, model=None, effort=None, why="",
+                   max_binary_bytes=256 * 1024):
     """fx does `task` in a clean copy of `repo`; the job checks size and tests itself and opens a PR to `base`.
 
     commit_message may use {title} and {summary} (fx's one-line summary of what it did).
     why opens the PR's text: the problem the change solves, so a reviewer knows what it is about before what it does.
     fx is asked where to try it (the PR says so) and to save screenshots of a UI change to the run's files.
 
-    Raises Failure when fx skips, changes nothing, goes over max_lines or the tests fail: nothing is pushed then.
+    Raises Failure when fx skips, changes nothing, exceeds max_lines or max_binary_bytes, or tests fail: nothing is pushed then.
     """
     path = checkout(repo)
     waiting = open_prs(repo, path, prefix)
@@ -228,6 +239,9 @@ def propose_change(repo, *, branch, title, task, test, base="main", setup=None, 
     log(f"change: {files} files, {lines} lines")
     if lines > max_lines:
         raise Failure(f"the change is too big for this job ({lines} lines in {files} files)")
+    binary_bytes = staged_binary_bytes(path, start)
+    if binary_bytes > max_binary_bytes:
+        raise Failure(f"the binary change is too big for this job ({binary_bytes} bytes, limit {max_binary_bytes})")
     (output_dir() / "change.diff").write_text(git("diff", "--cached", start, cwd=path))
     log(f"running the tests myself: {test}")
     sh(test, path)

@@ -22,6 +22,9 @@ if os.environ.get("FAKE_FX_ARGS"):
     open(os.environ["FAKE_FX_ARGS"], "w").write(json.dumps(sys.argv[1:]))
 if mode == "big":
     open("big.txt", "w").write("x\\n" * 500)
+elif mode == "binary":
+    for i in range(int(os.environ.get("FAKE_FX_BINARY_FILES", "1"))):
+        open("payload%d.bin" % i, "wb").write(b"\\0" * int(os.environ["FAKE_FX_BINARY_SIZE"]))
 elif mode == "done":
     open("hello.txt", "w").write("hello\\n")
 status = "skip" if mode == "skip" else "done"
@@ -76,7 +79,7 @@ class FoxJobTest(unittest.TestCase):
 
     def propose(self, **kw):
         return self.fj.propose_change("o/r", branch="agent/hello", title="Say hello", task="Add hello.txt",
-                                      test="test -f hello.txt", **kw)
+                                      test=kw.pop("test", "test -f hello.txt"), **kw)
 
     def test_a_checked_change_becomes_a_pull_request(self):
         p = self.propose()
@@ -141,6 +144,47 @@ class FoxJobTest(unittest.TestCase):
                 self.fj.propose_change("o/r", branch=f"agent/{mode}", title="t", task="t", test=test)
             self.assertIn(reason, e.exception.reason)
         self.assertEqual(sh("git", "branch", "--list", "agent/*", cwd=self.origin), "")
+
+    def test_large_staged_binary_changes_are_rejected_before_push(self):
+        self.fj.CHILD_ENV["FAKE_FX_MODE"] = "binary"
+        for files, size in ((1, 300_000), (2, 150_000)):
+            with self.subTest(files=files):
+                self.fj.CHILD_ENV.update({"FAKE_FX_BINARY_FILES": str(files), "FAKE_FX_BINARY_SIZE": str(size)})
+                with self.assertRaises(self.fj.Failure) as caught:
+                    self.propose(max_lines=0, test="true")
+                self.assertIn("binary change is too big", caught.exception.reason)
+                self.assertEqual(sh("git", "branch", "--list", "agent/*", cwd=self.origin), "")
+        self.assertFalse(Path(os.environ["FAKE_GH_STATE"]).exists(), "no PR was created")
+
+    def test_small_staged_binary_change_can_be_proposed(self):
+        self.fj.CHILD_ENV.update({"FAKE_FX_MODE": "binary", "FAKE_FX_BINARY_SIZE": "128"})
+        p = self.propose(max_lines=0, max_binary_bytes=128, test="test -f payload0.bin")
+        self.assertEqual((p.status, p.files, p.lines), ("opened", 1, 0))
+        self.assertEqual(sh("git", "cat-file", "-s", "agent/hello:payload0.bin", cwd=self.origin), "128")
+
+    def test_binary_size_counts_replacements_and_renames_but_not_deletions(self):
+        path = self.fj.checkout("o/r")
+        (path / "old.bin").write_bytes(b"\0" * 300)
+        (path / "removed.bin").write_bytes(b"\0" * 500)
+        sh("git", "add", "-A", cwd=path)
+        sh("git", "commit", "-qm", "binary fixtures", cwd=path)
+        start = sh("git", "rev-parse", "HEAD", cwd=path)
+        (path / "old.bin").rename(path / "new\nname.bin")
+        (path / "new\nname.bin").write_bytes(b"\0" * 120)
+        (path / "removed.bin").unlink()
+        sh("git", "add", "-A", cwd=path)
+        self.assertEqual(self.fj.staged_binary_bytes(path, start), 120,
+                         "only the new blob counts, including a rename with a newline in its path")
+
+    def test_binary_size_counts_the_whole_replacement_blob(self):
+        path = self.fj.checkout("o/r")
+        (path / "payload.bin").write_bytes(b"\0" * 100)
+        sh("git", "add", "-A", cwd=path)
+        sh("git", "commit", "-qm", "binary fixture", cwd=path)
+        start = sh("git", "rev-parse", "HEAD", cwd=path)
+        (path / "payload.bin").write_bytes(b"\0" * 90 + b"x" * 10)
+        sh("git", "add", "-A", cwd=path)
+        self.assertEqual(self.fj.staged_binary_bytes(path, start), 100)
 
     def test_too_many_waiting_pull_requests_stops_a_new_one(self):
         Path(os.environ["FAKE_GH_STATE"]).write_text(json.dumps({"open": [{"number": 1, "headRefName": "agent/x", "url": "u", "title": "x"}], "merged": []}))
