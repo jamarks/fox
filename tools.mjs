@@ -54,18 +54,23 @@ export function addArgs(tool) {
   return tool.url ? ['mcp', 'add', '--transport', 'http', tool.name, tool.url] : ['mcp', 'add', tool.name, ...tool.command];
 }
 
-// fx's entry for a tool: a server with its name, or any server running the same package or URL (set up by hand,
-// or tuned on a server to skip npx). [name, entry] or null.
-export function findServer(tool, config) {
-  const servers = config?.mcp ?? {};
-  if (servers[tool.name]) return [tool.name, servers[tool.name]];
-  return Object.entries(servers).find(([, s]) => tool.match.test([].concat(s?.command ?? [], s?.args ?? [], s?.url ?? []).join(' '))) ?? null;
+// A tool can be configured more than once, under its canonical name or aliases (including tuned commands).
+export function findServers(tool, config) {
+  return Object.entries(config?.mcp ?? {}).filter(([name, s]) => name === tool.name ||
+    tool.match.test([].concat(s?.command ?? [], s?.args ?? [], s?.url ?? []).join(' ')));
 }
-export const isInstalled = (tool, config) => Boolean(findServer(tool, config));
-// Off keeps the entry with `enabled: false`, which fx skips, so turning it back on restores it exactly.
-export const isEnabled = (tool, config) => findServer(tool, config)?.[1]?.enabled !== false;
+// Keep the canonical entry first for callers that need one server (such as sign-in setup).
+export function findServer(tool, config) {
+  const matches = findServers(tool, config);
+  return matches.find(([name]) => name === tool.name) ?? matches[0] ?? null;
+}
+export const isInstalled = (tool, config) => findServers(tool, config).length > 0;
+// Off keeps entries with `enabled: false`, which fx skips, so turning them back on restores their setup.
+export const isEnabled = (tool, config) => findServers(tool, config).some(([, s]) => s?.enabled !== false);
 export function withEnabled(config, tool, enabled) {
-  const found = findServer(tool, config);
-  if (!found) throw new Error('fx does not have this tool');
-  return { ...config, mcp: { ...config.mcp, [found[0]]: { ...found[1], enabled } } };
+  const matches = findServers(tool, config);
+  if (!matches.length) throw new Error('fx does not have this tool');
+  const mcp = { ...config.mcp };
+  for (const [name, entry] of matches) mcp[name] = { ...entry, enabled };
+  return { ...config, mcp };
 }
