@@ -148,6 +148,58 @@ test('a folder app serves its files, index.html for a folder, and never hidden f
   } finally { router.close(); }
 });
 
+test('static app roots stay inside visible home folders when names change during requests', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'fox-home-'));
+  const { mkdir, writeFile, rename, symlink, unlink } = await import('node:fs/promises');
+  const site = join(home, 'site');
+  const visible = join(home, 'visible');
+  const hidden = join(home, '.private');
+  const outside = await mkdtemp(join(tmpdir(), 'fox-outside-'));
+  await mkdir(site);
+  await mkdir(hidden);
+  await writeFile(join(site, 'token.json'), 'published');
+  await writeFile(join(hidden, 'token.json'), 'private');
+  await writeFile(join(outside, 'token.json'), 'outside');
+  const reg = createAppRegistry({ stateDir: join(home, 'state'), home });
+  await reg.set('site', { dir: site });
+  const router = createAppRouter({ registry: reg, domain: 'jwass.xyz' });
+  await new Promise((r) => router.listen(0, '127.0.0.1', r));
+  const get = () => new Promise((resolve, reject) => http.get({
+    host: '127.0.0.1', port: router.address().port, path: '/token.json', headers: { host: 'site.jwass.xyz' },
+  }, (res) => {
+    let body = ''; res.on('data', (c) => (body += c)); res.on('end', () => resolve({ status: res.statusCode, body }));
+  }).on('error', reject));
+  try {
+    assert.deepEqual(await get(), { status: 200, body: 'published' });
+    await rename(site, join(hidden, 'site'));
+    await symlink(join(hidden, 'site'), site);
+    assert.deepEqual(await get(), { status: 404, body: 'Not found\n' });
+    await unlink(site);
+    await rename(join(hidden, 'site'), visible);
+    await symlink(outside, site);
+    assert.deepEqual(await get(), { status: 404, body: 'Not found\n' });
+    await unlink(site);
+    await symlink(hidden, site);
+    assert.deepEqual(await get(), { status: 404, body: 'Not found\n' });
+    // Atomic link swaps exercise requests while the stored root name changes between valid and hidden targets.
+    const requests = Array.from({ length: 150 }, async () => {
+      const response = await get();
+      assert.ok(response.status === 404 || (response.status === 200 && response.body === 'published'), JSON.stringify(response));
+    });
+    const swaps = (async () => {
+      for (let i = 0; i < 150; i++) {
+        const next = join(home, `next-${i}`);
+        await symlink(i % 2 ? hidden : visible, next);
+        await rename(next, site);
+      }
+    })();
+    await Promise.all([...requests, swaps]);
+    await unlink(site);
+    await rename(visible, site);
+    assert.deepEqual(await get(), { status: 200, body: 'published' });
+  } finally { router.close(); }
+});
+
 test('a named pipe in a published folder does not hold a request open', async () => {
   const home = await mkdtemp(join(tmpdir(), 'fox-home-'));
   const { mkdir } = await import('node:fs/promises');
@@ -177,7 +229,7 @@ test('static responses keep the validated open file when its name changes', asyn
   await mkdir(site);
   await writeFile(join(site, 'page.txt'), 'published');
   await writeFile(join(home, 'private.txt'), 'private');
-  const f = await staticFile(site, '/page.txt');
+  const f = await staticFile(site, '/page.txt', home);
   assert.ok(f);
   try {
     await rename(join(site, 'page.txt'), join(site, 'old.txt'));
