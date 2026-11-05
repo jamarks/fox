@@ -124,7 +124,12 @@ test('remote port requires QR, Mac approval and cookie for all HTTP/WS; revoke c
     let limited;
     for (let i = 0; i < 125; i++) limited = await remote('/');
     assert.equal(limited.status, 429);
+    assert.equal((await remote('/api/overview', { cookie: 'fox_device=forged' })).status, 429);
     assert.equal((await remote('/api/overview', { cookie: pairedCookie })).status, 200);
+    let pairedLimit;
+    for (let i = 0; i < 120 && pairedLimit !== 429; i++) pairedLimit = (await remote('/api/overview', { cookie: pairedCookie })).status;
+    assert.equal(pairedLimit, 429);
+    assert.equal((await remote('/api/overview', { cookie: pairedCookie })).status, 429);
   } finally {
     processChild.kill();
     await new Promise((resolve) => processChild.once('exit', resolve));
