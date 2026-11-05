@@ -2,6 +2,10 @@
 
 What changed in fox, newest first: one line per merged pull request. Written by a job from the pull requests; edit the PR title to change a line.
 
+## 2026-11-03
+
+- Expose new fx settings as opt-in controls ([#79](https://github.com/jamarks/fox/pull/79))
+
 ## 2026-11-02
 
 - Expose new fx settings as opt-in controls ([#76](https://github.com/jamarks/fox/pull/76))
