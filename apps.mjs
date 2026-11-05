@@ -32,6 +32,7 @@ export function createAppRegistry({ stateDir, denyPorts = [], home = homedir() }
   const fail = (message) => Object.assign(new Error(message), { status: 400 });
   return {
     file,
+    home,
     async list() { return Object.entries(await read()).map(([name, a]) => ({ name, ...a })).sort((x, y) => x.name.localeCompare(y.name)); },
     async get(name) { return (await read())[name] ?? null; },
     // spec: a port number, or { port } | { dir } | { cmd, cwd, port }.
@@ -77,17 +78,17 @@ export function createAppRegistry({ stateDir, denyPorts = [], home = homedir() }
 
 // A folder an app may serve or run in: an existing directory inside your home, with no hidden folder on the
 // way (~/.ssh, ~/.config with fox's own state), never the home itself.
+const allowedAppDir = (path, base) => path.startsWith(base + sep) && !path.slice(base.length + 1).split(sep).some((p) => p.startsWith('.'));
 async function checkDir(value, home) {
   const fail = (message) => Object.assign(new Error(message), { status: 400 });
   const root = await realpath(home);
   const dir = resolve(String(value ?? '').replace(/^~(?=\/|$)/, home));
-  const allowed = (path, base) => path.startsWith(base + sep) && !path.slice(base.length + 1).split(sep).some((p) => p.startsWith('.'));
-  if (!allowed(dir, resolve(home))) throw fail('The folder must be inside your home, and not a hidden one.');
+  if (!allowedAppDir(dir, resolve(home))) throw fail('The folder must be inside your home, and not a hidden one.');
   const st = await stat(dir).catch(() => null);
   if (!st?.isDirectory()) throw fail(`${value} is not a folder.`);
   // Compare resolved paths so a linked directory cannot bypass the home/hidden check or be retargeted later.
   const actual = await realpath(dir);
-  if (!allowed(actual, root)) throw fail('The folder must be inside your home, and not a hidden one.');
+  if (!allowedAppDir(actual, root)) throw fail('The folder must be inside your home, and not a hidden one.');
   return actual;
 }
 export const appKind = (a) => (a.dir ? 'dir' : a.cmd ? 'cmd' : 'port');
@@ -101,22 +102,25 @@ export const STATIC_TYPES = {
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf', '.mp4': 'video/mp4', '.webm': 'video/webm',
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.pdf': 'application/pdf', '.wasm': 'application/wasm', '.webmanifest': 'application/manifest+json',
 };
-export async function staticFile(dir, urlPath) {
+export async function staticFile(dir, urlPath, home = homedir()) {
   let rel;
   try { rel = decodeURIComponent(String(urlPath).split('?')[0]); } catch { return null; }
   const parts = rel.split('/').filter(Boolean);
   if (parts.some((p) => p.startsWith('.') || p.includes('\\') || p.includes('\0'))) return null;
-  let handle;
+  let rootHandle, handle;
   try {
-    const root = await realpath(dir);
+    // Validate the opened root on every request: its stored name may have been replaced since publication.
+    rootHandle = await open(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NONBLOCK);
+    const actual = (fd) => realpath(`/proc/self/fd/${fd}`);
+    const root = await actual(rootHandle.fd);
+    if (!allowedAppDir(root, await realpath(home))) return null;
     const inside = (path) => {
       const sub = relative(root, path);
       return sub !== '..' && !sub.startsWith('..' + sep) && !sub.split(sep).some((p) => p.startsWith('.'));
     };
     // Inspect the opened inode, not a path that may be replaced before the response is streamed.
-    const actual = (fd) => realpath(`/proc/self/fd/${fd}`);
     // A named pipe in the published folder must not hold a request open waiting for a writer.
-    handle = await open(resolve(dir, ...parts), constants.O_RDONLY | constants.O_NONBLOCK);
+    handle = await open(`/proc/self/fd/${rootHandle.fd}/${parts.join('/')}`, constants.O_RDONLY | constants.O_NONBLOCK);
     let path = await actual(handle.fd);
     if (!inside(path)) return null;
     let st = await handle.stat();
@@ -136,7 +140,7 @@ export async function staticFile(dir, urlPath) {
     handle = null;
     return result;
   } catch { return null; }
-  finally { await handle?.close(); }
+  finally { await handle?.close(); await rootHandle?.close(); }
 }
 
 // The URL of an app from a template like https://{name}.example.com.
@@ -160,7 +164,7 @@ export function createAppRouter({ registry, domain, denyPorts = [], log = consol
   }
   async function serveStaticApp(req, res, t) {
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('This app is a folder of files: it only answers GET.\n'); }
-    const f = await staticFile(t.dir, new URL(req.url, 'http://x').pathname);
+    const f = await staticFile(t.dir, new URL(req.url, 'http://x').pathname, registry.home);
     if (!f) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('Not found\n'); }
     if (req.method === 'HEAD') {
       await f.handle.close();
