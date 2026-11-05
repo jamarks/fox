@@ -17,7 +17,15 @@ async function body(req) {
 export function createShareBridge({ port, panelPort, mobilePort, handlePanelRequest, upgrade, serveStatic, publicDir, sameOrigin }) {
   const pairing = createPairing();
   let host = null;
-  const remoteRequests = [];
+  // Keep anonymous pairing traffic from consuming the quota reserved for paired devices.
+  const anonymousRequests = [], pairedRequests = [];
+  function rateLimited(requests) {
+    const now = Date.now();
+    while (requests.length && requests[0] < now - 60000) requests.shift();
+    if (requests.length >= 120) return true;
+    requests.push(now);
+    return false;
+  }
   const remoteSockets = new Map();
   const enabled = port !== undefined;
   const disconnect = () => {
@@ -69,10 +77,8 @@ export function createShareBridge({ port, panelPort, mobilePort, handlePanelRequ
     try { path = new URL(req.url, 'http://localhost').pathname; }
     catch { return send(res, 400, { error: 'invalid request target' }); }
     if (!host || req.headers.host !== host) return send(res, 403, { error: 'tunnel URL not configured on the Mac' });
-    const now = Date.now();
-    while (remoteRequests.length && remoteRequests[0] < now - 60000) remoteRequests.shift();
-    if (remoteRequests.length > 120) return send(res, 429, { error: 'too many requests' });
-    remoteRequests.push(now);
+    const deviceId = pairing.authorized(cookie(req));
+    if (rateLimited(deviceId ? pairedRequests : anonymousRequests)) return send(res, 429, { error: 'too many requests' });
     if (path === '/api/pair/request' || path === '/api/pair/status') {
       if (req.method !== 'POST' || !sameOrigin(req)) return send(res, 403, { error: 'same-origin POST required' });
       try {
@@ -87,7 +93,7 @@ export function createShareBridge({ port, panelPort, mobilePort, handlePanelRequ
         return send(res, 200, { status: 'approved' }, { 'set-cookie': `fox_device=${result.token}; HttpOnly; Secure; SameSite=Strict; Path=/` });
       } catch { return send(res, 400, { error: 'invalid pairing request' }); }
     }
-    if (!pairing.authorized(cookie(req))) {
+    if (!deviceId) {
       if (req.method === 'GET' && (path === '/' || path === '/pair.js' || path === '/pair.css')) {
         return serveStatic(res, publicDir, path === '/' ? '/pair.html' : path);
       }

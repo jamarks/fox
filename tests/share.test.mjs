@@ -36,7 +36,7 @@ function wsConnect(port, { host, origin, cookie } = {}) {
   });
 }
 
-test('remote port requires QR, Mac approval and cookie for all HTTP/WS; revoke closes socket', async () => {
+test('remote port requires QR, Mac approval and cookie for all HTTP/WS; revoke closes socket; anonymous quota stays separate', async () => {
   const home = await mkdtemp(join(tmpdir(), 'fox-share-'));
   const dir = join(home, '.fx', 'sessions', 'test-session');
   await mkdir(dir, { recursive: true });
@@ -115,6 +115,21 @@ test('remote port requires QR, Mac approval and cookie for all HTTP/WS; revoke c
     assert.equal(JSON.parse((await local('/api/pair/state')).body).tunnelUrl, null);
     assert.equal((await local('/api/pair/tunnel/start', {})).status, 200);
     assert.equal((await remote('/api/overview', { cookie: nextCookie })).status, 401);
+    const rateOffer = JSON.parse((await local('/api/pair/tunnel/start', {})).body);
+    const rateToken = new URL(rateOffer.link).hash.slice(6);
+    const rateRequest = JSON.parse((await remote('/api/pair/request', { method: 'POST', data: { token: rateToken } })).body);
+    assert.equal((await local('/api/pair/decision', { id: rateRequest.id, approve: true })).status, 200);
+    const pairedCookie = (await remote('/api/pair/status', { method: 'POST', data: { id: rateRequest.id, claim: rateRequest.claim } })).headers['set-cookie'][0].split(';')[0];
+    assert.equal((await remote('/api/overview', { cookie: pairedCookie })).status, 200);
+    let limited;
+    for (let i = 0; i < 125; i++) limited = await remote('/');
+    assert.equal(limited.status, 429);
+    assert.equal((await remote('/api/overview', { cookie: 'fox_device=forged' })).status, 429);
+    assert.equal((await remote('/api/overview', { cookie: pairedCookie })).status, 200);
+    let pairedLimit;
+    for (let i = 0; i < 120 && pairedLimit !== 429; i++) pairedLimit = (await remote('/api/overview', { cookie: pairedCookie })).status;
+    assert.equal(pairedLimit, 429);
+    assert.equal((await remote('/api/overview', { cookie: pairedCookie })).status, 429);
   } finally {
     processChild.kill();
     await new Promise((resolve) => processChild.once('exit', resolve));
