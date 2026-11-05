@@ -67,6 +67,25 @@ test('every matching alias follows the switch, and the displayed state follows a
   assert.equal(isEnabled(browser, on), true);
 });
 
+test('all matching remote aliases switch without changing unrelated servers or credentials', async () => {
+  const { withEnabled, isEnabled } = await import('../tools.mjs');
+  const linear = TOOLS.find((t) => t.id === 'linear');
+  const config = { mcp: {
+    work: { type: 'http', url: 'https://mcp.linear.app/mcp', bearer_token_env: 'LINEAR_API_KEY' },
+    issues: { type: 'http', url: 'https://mcp.linear.app/mcp', enabled: false },
+    docs: { type: 'http', url: 'https://mcp.context7.com/mcp' },
+  } };
+  const off = withEnabled(config, linear, false);
+  assert.equal(isEnabled(linear, off), false);
+  assert.deepEqual(off.mcp.work, { ...config.mcp.work, enabled: false });
+  assert.deepEqual(off.mcp.issues, config.mcp.issues);
+  assert.deepEqual(off.mcp.docs, config.mcp.docs);
+  const on = withEnabled(off, linear, true);
+  assert.equal(isEnabled(linear, on), true);
+  assert.equal(on.mcp.work.bearer_token_env, 'LINEAR_API_KEY');
+  assert.equal(on.mcp.issues.enabled, true);
+});
+
 test('the canonical server and matching aliases are switched together', async () => {
   const { isEnabled, withEnabled } = await import('../tools.mjs');
   const config = { mcp: {
