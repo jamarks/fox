@@ -195,7 +195,7 @@ export function createWorkspaces({
         if (!existsSync(join(dir, '.git'))) { if ((await readdir(dir).catch(() => [])).length) out.push(`${r.dir}: files outside git`); continue; }
         if (!(await originMatches(ws, r))) { out.push(`${r.dir}: checkout origin does not match`); continue; }
         const run = (args) => git(['-C', dir, ...SAFE_GIT, ...args], { timeout: 10000 });
-        const dirty = await run(['status', '--porcelain']).catch(() => 'unknown');
+        const dirty = await run(['status', '--porcelain', '--untracked-files=all']).catch(() => 'unknown');
         if (dirty) out.push(`${r.dir}: uncommitted changes`);
         // Ignored local files are absent from status but still must not be deleted.
         const ignored = await run(['ls-files', '-z', '--others', '--ignored', '--exclude-standard']).catch(() => null);
