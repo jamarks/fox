@@ -2,6 +2,12 @@
 
 What changed in fox, newest first: one line per merged pull request. Written by a job from the pull requests; edit the PR title to change a line.
 
+## 2026-11-05
+
+- Apply a byte limit to binary changes proposed by agents ([#85](https://github.com/jamarks/fox/pull/85))
+- Force untracked-file checks before deleting a workspace ([#82](https://github.com/jamarks/fox/pull/82))
+- Reject malformed request targets without terminating fox ([#80](https://github.com/jamarks/fox/pull/80))
+
 ## 2026-11-03
 
 - Expose new fx settings as opt-in controls ([#79](https://github.com/jamarks/fox/pull/79))
