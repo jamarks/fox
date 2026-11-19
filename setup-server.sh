@@ -48,8 +48,11 @@ printf '\n%sfox%s %s· server setup%s\n' "$bold" "$reset" "$dim" "$reset"
 command -v apt-get >/dev/null || fail "This script knows Ubuntu and Debian (apt). On another Linux, follow docs/server.md by hand."
 [ -d /run/systemd/system ] || fail "fox runs as systemd services, and this machine has no systemd."
 
-# The files this script installs (deploy/): from this checkout, or from the repo at FOX_REF.
-SRC="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+# Only a real script file can identify a checkout; stdin has no checkout of its own.
+SRC=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+  SRC="$(dirname "$(readlink -f -- "${BASH_SOURCE[0]}")")"
+fi
 if [ -z "$SRC" ] || [ ! -f "$SRC/deploy/fox-update" ]; then
   SRC="$(mktemp -d)"; trap 'rm -rf "$SRC"' EXIT
   command -v curl >/dev/null || { apt-get update -qq </dev/null; apt_install curl ca-certificates; }
